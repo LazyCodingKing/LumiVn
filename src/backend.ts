@@ -20,6 +20,40 @@ declare const spindle: SpindleAPI;
 const storage = new StorageManager(spindle);
 const resolver = new AssetResolver(spindle, storage);
 
+let lastActiveChatId: string | null = null;
+
+const spindleAnyObj = spindle as any;
+if (typeof spindleAnyObj.on === "function") {
+  spindleAnyObj.on("CHAT_SWITCHED", (payload: unknown) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { chatId?: unknown }) : {};
+    if (typeof candidate.chatId === "string" && candidate.chatId) {
+      lastActiveChatId = candidate.chatId;
+      spindle.log.info("[LumiVN] Active chat switched to: " + lastActiveChatId);
+    }
+  });
+}
+
+async function resolveEffectiveChatId(suppliedChatId?: string): Promise<string | null> {
+  if (suppliedChatId && suppliedChatId.trim()) {
+    lastActiveChatId = suppliedChatId.trim();
+    return lastActiveChatId;
+  }
+  if (lastActiveChatId) return lastActiveChatId;
+
+  try {
+    const list = await (spindle.chats as any).list?.({ limit: 1 });
+    const first = list?.data?.[0] || list?.[0];
+    const resolved = first?.id || first?.chat_id;
+    if (resolved) {
+      lastActiveChatId = resolved;
+      return resolved;
+    }
+  } catch {}
+
+  return null;
+}
+
+
 // ── 1. Register Command Palette Commands ──
 spindle.commands.register([
   {
@@ -179,15 +213,20 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
   switch (type) {
     case "vn_get_state":
     case "vn_init": {
-      const chatId = String(payload.chatId || "");
+      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       if (chatId) {
         await processChatTurn(chatId);
+      } else {
+        spindle.sendToFrontend({
+          type: "vn_error",
+          error: "No active chat could be found to launch Visual Novel.",
+        });
       }
       break;
     }
 
     case "vn_action": {
-      const chatId = String(payload.chatId || "");
+      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       const actionText = String(payload.action || "");
       spindle.log.info(`[LumiVN] Dispatching action for chat ${chatId}: "${actionText.slice(0, 60)}"`);
 

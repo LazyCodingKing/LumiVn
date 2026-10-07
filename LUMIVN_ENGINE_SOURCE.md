@@ -76,6 +76,40 @@ declare const spindle: SpindleAPI;
 const storage = new StorageManager(spindle);
 const resolver = new AssetResolver(spindle, storage);
 
+let lastActiveChatId: string | null = null;
+
+const spindleAnyObj = spindle as any;
+if (typeof spindleAnyObj.on === "function") {
+  spindleAnyObj.on("CHAT_SWITCHED", (payload: unknown) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { chatId?: unknown }) : {};
+    if (typeof candidate.chatId === "string" && candidate.chatId) {
+      lastActiveChatId = candidate.chatId;
+      spindle.log.info("[LumiVN] Active chat switched to: " + lastActiveChatId);
+    }
+  });
+}
+
+async function resolveEffectiveChatId(suppliedChatId?: string): Promise<string | null> {
+  if (suppliedChatId && suppliedChatId.trim()) {
+    lastActiveChatId = suppliedChatId.trim();
+    return lastActiveChatId;
+  }
+  if (lastActiveChatId) return lastActiveChatId;
+
+  try {
+    const list = await (spindle.chats as any).list?.({ limit: 1 });
+    const first = list?.data?.[0] || list?.[0];
+    const resolved = first?.id || first?.chat_id;
+    if (resolved) {
+      lastActiveChatId = resolved;
+      return resolved;
+    }
+  } catch {}
+
+  return null;
+}
+
+
 // ── 1. Register Command Palette Commands ──
 spindle.commands.register([
   {
@@ -235,15 +269,20 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
   switch (type) {
     case "vn_get_state":
     case "vn_init": {
-      const chatId = String(payload.chatId || "");
+      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       if (chatId) {
         await processChatTurn(chatId);
+      } else {
+        spindle.sendToFrontend({
+          type: "vn_error",
+          error: "No active chat could be found to launch Visual Novel.",
+        });
       }
       break;
     }
 
     case "vn_action": {
-      const chatId = String(payload.chatId || "");
+      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       const actionText = String(payload.action || "");
       spindle.log.info(`[LumiVN] Dispatching action for chat ${chatId}: "${actionText.slice(0, 60)}"`);
 
@@ -5040,6 +5079,27 @@ export class StageOverlay {
     applyVnTheme(this.root, themeId);
   }
 
+  private resolveChatId(): string | undefined {
+    if (this.currentChatId) return this.currentChatId;
+
+    // 1. Host context check
+    const ctxAny = this.ctx as any;
+    const active = ctxAny.getActiveChat?.() || ctxAny.activeChat || ctxAny.chat;
+    if (active?.id || active?.chatId) return active.id || active.chatId;
+
+    // 2. URL path/hash inspection (/chat/:id or #/chat/:id)
+    if (typeof window !== "undefined") {
+      const urlMatch = window.location.href.match(/[\/#]chat[s]?\/([a-zA-Z0-9_-]+)/);
+      if (urlMatch?.[1]) return urlMatch[1];
+
+      // 3. DOM dataset inspection
+      const chatEl = document.querySelector("[data-chat-id]");
+      if (chatEl) return chatEl.getAttribute("data-chat-id") || undefined;
+    }
+
+    return undefined;
+  }
+
   public activate(): void {
     if (this.active) return;
     this.active = true;
@@ -5064,11 +5124,12 @@ export class StageOverlay {
     }
 
     this.root.style.display = "block";
-    const activeChat = (this.ctx as any).getActiveChat?.();
-    const targetChatId = this.currentChatId || activeChat?.id || activeChat?.chatId;
-    if (targetChatId) {
-      this.ctx.sendToBackend({ type: "vn_get_state", chatId: targetChatId });
-    }
+    const targetChatId = this.resolveChatId();
+
+    this.ctx.sendToBackend({
+      type: "vn_get_state",
+      chatId: targetChatId || "",
+    });
   }
 
   public deactivate(): void {
@@ -5182,17 +5243,11 @@ export class StageOverlay {
   }
 
   private dispatchAction(actionText: string): void {
-    const activeChat = (this.ctx as any).getActiveChat?.();
-    const targetChatId = this.currentChatId || activeChat?.id || activeChat?.chatId;
-
-    if (!targetChatId) {
-      console.error("[LumiVN] Cannot dispatch action: No active chatId found");
-      return;
-    }
+    const targetChatId = this.resolveChatId();
 
     this.ctx.sendToBackend({
       type: "vn_action",
-      chatId: targetChatId,
+      chatId: targetChatId || "",
       action: actionText,
     });
   }

@@ -3582,6 +3582,35 @@ class AssetResolver {
 // src/backend.ts
 var storage = new StorageManager(spindle);
 var resolver = new AssetResolver(spindle, storage);
+var lastActiveChatId = null;
+var spindleAnyObj = spindle;
+if (typeof spindleAnyObj.on === "function") {
+  spindleAnyObj.on("CHAT_SWITCHED", (payload) => {
+    const candidate = payload && typeof payload === "object" ? payload : {};
+    if (typeof candidate.chatId === "string" && candidate.chatId) {
+      lastActiveChatId = candidate.chatId;
+      spindle.log.info("[LumiVN] Active chat switched to: " + lastActiveChatId);
+    }
+  });
+}
+async function resolveEffectiveChatId(suppliedChatId) {
+  if (suppliedChatId && suppliedChatId.trim()) {
+    lastActiveChatId = suppliedChatId.trim();
+    return lastActiveChatId;
+  }
+  if (lastActiveChatId)
+    return lastActiveChatId;
+  try {
+    const list = await spindle.chats.list?.({ limit: 1 });
+    const first = list?.data?.[0] || list?.[0];
+    const resolved = first?.id || first?.chat_id;
+    if (resolved) {
+      lastActiveChatId = resolved;
+      return resolved;
+    }
+  } catch {}
+  return null;
+}
 spindle.commands.register([
   {
     id: "lumivn_launch",
@@ -3705,14 +3734,19 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
   switch (type) {
     case "vn_get_state":
     case "vn_init": {
-      const chatId = String(payload.chatId || "");
+      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       if (chatId) {
         await processChatTurn(chatId);
+      } else {
+        spindle.sendToFrontend({
+          type: "vn_error",
+          error: "No active chat could be found to launch Visual Novel."
+        });
       }
       break;
     }
     case "vn_action": {
-      const chatId = String(payload.chatId || "");
+      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       const actionText = String(payload.action || "");
       spindle.log.info(`[LumiVN] Dispatching action for chat ${chatId}: "${actionText.slice(0, 60)}"`);
       if (!chatId || !actionText) {

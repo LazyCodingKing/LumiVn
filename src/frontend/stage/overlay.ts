@@ -109,6 +109,27 @@ export class StageOverlay {
     applyVnTheme(this.root, themeId);
   }
 
+  private resolveChatId(): string | undefined {
+    if (this.currentChatId) return this.currentChatId;
+
+    // 1. Host context check
+    const ctxAny = this.ctx as any;
+    const active = ctxAny.getActiveChat?.() || ctxAny.activeChat || ctxAny.chat;
+    if (active?.id || active?.chatId) return active.id || active.chatId;
+
+    // 2. URL path/hash inspection (/chat/:id or #/chat/:id)
+    if (typeof window !== "undefined") {
+      const urlMatch = window.location.href.match(/[\/#]chat[s]?\/([a-zA-Z0-9_-]+)/);
+      if (urlMatch?.[1]) return urlMatch[1];
+
+      // 3. DOM dataset inspection
+      const chatEl = document.querySelector("[data-chat-id]");
+      if (chatEl) return chatEl.getAttribute("data-chat-id") || undefined;
+    }
+
+    return undefined;
+  }
+
   public activate(): void {
     if (this.active) return;
     this.active = true;
@@ -133,11 +154,12 @@ export class StageOverlay {
     }
 
     this.root.style.display = "block";
-    const activeChat = (this.ctx as any).getActiveChat?.();
-    const targetChatId = this.currentChatId || activeChat?.id || activeChat?.chatId;
-    if (targetChatId) {
-      this.ctx.sendToBackend({ type: "vn_get_state", chatId: targetChatId });
-    }
+    const targetChatId = this.resolveChatId();
+
+    this.ctx.sendToBackend({
+      type: "vn_get_state",
+      chatId: targetChatId || "",
+    });
   }
 
   public deactivate(): void {
@@ -251,17 +273,11 @@ export class StageOverlay {
   }
 
   private dispatchAction(actionText: string): void {
-    const activeChat = (this.ctx as any).getActiveChat?.();
-    const targetChatId = this.currentChatId || activeChat?.id || activeChat?.chatId;
-
-    if (!targetChatId) {
-      console.error("[LumiVN] Cannot dispatch action: No active chatId found");
-      return;
-    }
+    const targetChatId = this.resolveChatId();
 
     this.ctx.sendToBackend({
       type: "vn_action",
-      chatId: targetChatId,
+      chatId: targetChatId || "",
       action: actionText,
     });
   }

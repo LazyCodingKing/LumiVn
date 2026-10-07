@@ -33437,6 +33437,23 @@ class StageOverlay {
   setTheme(themeId) {
     applyVnTheme(this.root, themeId);
   }
+  resolveChatId() {
+    if (this.currentChatId)
+      return this.currentChatId;
+    const ctxAny = this.ctx;
+    const active = ctxAny.getActiveChat?.() || ctxAny.activeChat || ctxAny.chat;
+    if (active?.id || active?.chatId)
+      return active.id || active.chatId;
+    if (typeof window !== "undefined") {
+      const urlMatch = window.location.href.match(/[\/#]chat[s]?\/([a-zA-Z0-9_-]+)/);
+      if (urlMatch?.[1])
+        return urlMatch[1];
+      const chatEl = document.querySelector("[data-chat-id]");
+      if (chatEl)
+        return chatEl.getAttribute("data-chat-id") || undefined;
+    }
+    return;
+  }
   activate() {
     if (this.active)
       return;
@@ -33456,11 +33473,11 @@ class StageOverlay {
       }
     }
     this.root.style.display = "block";
-    const activeChat = this.ctx.getActiveChat?.();
-    const targetChatId = this.currentChatId || activeChat?.id || activeChat?.chatId;
-    if (targetChatId) {
-      this.ctx.sendToBackend({ type: "vn_get_state", chatId: targetChatId });
-    }
+    const targetChatId = this.resolveChatId();
+    this.ctx.sendToBackend({
+      type: "vn_get_state",
+      chatId: targetChatId || ""
+    });
   }
   deactivate() {
     if (!this.active)
@@ -33551,15 +33568,10 @@ class StageOverlay {
     }
   }
   dispatchAction(actionText) {
-    const activeChat = this.ctx.getActiveChat?.();
-    const targetChatId = this.currentChatId || activeChat?.id || activeChat?.chatId;
-    if (!targetChatId) {
-      console.error("[LumiVN] Cannot dispatch action: No active chatId found");
-      return;
-    }
+    const targetChatId = this.resolveChatId();
     this.ctx.sendToBackend({
       type: "vn_action",
-      chatId: targetChatId,
+      chatId: targetChatId || "",
       action: actionText
     });
   }
