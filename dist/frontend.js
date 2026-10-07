@@ -33774,13 +33774,13 @@ class StageOverlay {
         transform: translateY(-1px);
       }
 
-      /* Reading Controls & Pacing */
+      /* Reading Controls & Pacing (Anchored to top-right of dialogue box, leaving bottom for composer) */
       .vn-reading-controls {
         position: absolute;
-        bottom: 16px;
+        top: -14px;
         right: 24px;
         display: flex;
-        gap: 8px;
+        gap: 6px;
         z-index: 12;
       }
 
