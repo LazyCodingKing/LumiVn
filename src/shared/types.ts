@@ -1,7 +1,11 @@
 export interface ClockState {
-  t?: string;
-  phase?: string;
+  date?: string;      // DD-MM-YY
+  t?: string;         // D# HH:MM
+  phase?: string;     // Dawn | Morning | Afternoon | Dusk | Night | Late Night
   step?: number;
+  location?: string;  // e.g. "Tendo Dojo"
+  region?: string;    // e.g. "Nerima, Tokyo"
+  country?: string;   // e.g. "Japan"
 }
 
 export interface SceneState {
@@ -78,6 +82,8 @@ export interface ActorDossier {
 export interface PlaceRoute {
   to: string;
   minutes: number | string;
+  requires?: Record<string, unknown>;
+  why_not?: string;
 }
 
 export interface PlaceNode {
@@ -89,6 +95,11 @@ export interface PlaceNode {
   norm?: string;
   rhythm?: string;
   resources?: string[];
+  indoors?: boolean;
+  population?: string;
+  hazards?: string[];
+  barriers?: string[];
+  affordances?: string[];
   routes?: Array<PlaceRoute | Record<string, string | number>>;
   [key: string]: unknown;
 }
@@ -132,7 +143,7 @@ export interface LedgerData {
   clock?: ClockState;
   scene?: SceneState;
   places?: Record<string, PlaceNode>;
-  roster?: Array<{ id: string; name?: string; lod?: number; status?: string; loc?: string }>;
+  roster?: Array<{ id: string; name?: string; lod?: number; status?: string; loc?: string; posture?: string; activity?: string; [key: string]: unknown }>;
   actors?: Record<string, ActorDossier>;
   bplots?: BPlot[];
   opportunities?: Opportunity[];

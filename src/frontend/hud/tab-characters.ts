@@ -11,16 +11,37 @@ export class CharactersTab {
 
   public render(ledger: LedgerData, manifest?: AssetManifest): void {
     this.root.innerHTML = "";
-    const actors = ledger.actors || {};
-    const actorIds = Object.keys(actors).filter((id) => id.toLowerCase() !== "user");
+    const actors: Record<string, ActorDossier> = { ...(ledger.actors || {}) };
+
+    // Supplement from roster if actors are not yet recorded as full dossiers
+    if (ledger.roster && Array.isArray(ledger.roster)) {
+      for (const r of ledger.roster) {
+        if (r.id && !actors[r.id]) {
+          actors[r.id] = {
+            id: r.id,
+            name: r.name || r.id,
+            life_model: { occupation: r.status || "Resident" },
+            agency: { want_now: r.status || "None" },
+          };
+        }
+      }
+    }
+
+    const allKeys = Object.keys(actors);
+    // Put user first, then secondary characters
+    const actorIds = allKeys.sort((a, b) => {
+      if (a.toLowerCase() === "user") return -1;
+      if (b.toLowerCase() === "user") return 1;
+      return a.localeCompare(b);
+    });
 
     const header = document.createElement("div");
     header.className = "vn-tab-header";
-    header.innerHTML = `<h3>👥 Cast & Character Records</h3><p class="vn-muted">Select a character to inspect appearance, personality profile, and relationships.</p>`;
+    header.innerHTML = `<h3>👥 Cast & Character Records</h3><p class="vn-muted">Select a character to inspect attire, equipment, tells, and relationships.</p>`;
     this.root.appendChild(header);
 
     if (actorIds.length === 0) {
-      this.root.innerHTML += `<div class="vn-muted" style="text-align:center; padding: 24px;">No secondary characters recorded yet.</div>`;
+      this.root.innerHTML += `<div class="vn-muted" style="text-align:center; padding: 24px;">No characters recorded yet.</div>`;
       return;
     }
 

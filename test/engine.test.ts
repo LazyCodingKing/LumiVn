@@ -331,4 +331,65 @@ describe("LumiVN Multi-Actor Spotlight Matching", () => {
   });
 });
 
+import { diagBus } from "../src/frontend/utils/diag-bus.js";
+
+describe("LumiVN Robust YAML Recovery & Diagnostic Export", () => {
+  test("recovers actor dossiers even when flow mappings contain unescaped quotes", () => {
+    const rawYaml = `
+clock:
+  date: "14-09-18"
+  t: "D1 16:32"
+  phase: "Afternoon"
+  location: "Living Room"
+  region: "Westchester"
+  country: "USA"
+
+actors:
+  user:
+    name: "User"
+    outfit:
+      top: "cream knit sweater"
+      bottom: "high-waisted jeans"
+    inventory:
+      in_hand: { L: "duffel bag", R: null }
+  jessica:
+    name: "Jessica"
+    outfit:
+      top: "loose silk blouse"
+    tells: { lying: "Says "Weeee!" or "Boop!" nervously", fidget: "plays with necklace" }
+  tessa:
+    name: "Tessa"
+    outfit:
+      top: "cropped tank"
+    tells: { smug: "Smirks and twirls hair" }
+`;
+    const parsed = parseLedgerYaml(rawYaml);
+    expect(parsed).toBeDefined();
+    expect(parsed.clock?.date).toBe("14-09-18");
+    expect(parsed.actors).toBeDefined();
+    expect(Object.keys(parsed.actors || {})).toContain("user");
+    expect(Object.keys(parsed.actors || {})).toContain("jessica");
+    expect(Object.keys(parsed.actors || {})).toContain("tessa");
+    expect(parsed.actors?.["jessica"]?.outfit?.top).toBe("loose silk blouse");
+  });
+
+  test("diagBus formats clean YAML and exports complete telemetry bundle", () => {
+    diagBus.setLedger({
+      clock: { t: "D1 16:32", phase: "Afternoon", date: "14-09-18", region: "Nerima" },
+      scene: { place: "tendo_residence:foyer", participants: ["user", "jessica"] },
+    });
+    const yaml = diagBus.formatLedgerYaml();
+    expect(yaml).toContain("```yaml");
+    expect(yaml).toContain('t: "D1 16:32"');
+    expect(yaml).toContain('date: "14-09-18"');
+    expect(yaml).toContain('place: "tendo_residence:foyer"');
+
+    const bundleStr = diagBus.exportAllBundle();
+    const bundle = JSON.parse(bundleStr);
+    expect(bundle.clock.t).toBe("D1 16:32");
+    expect(bundle.scene.participants).toContain("user");
+  });
+});
+
+
 

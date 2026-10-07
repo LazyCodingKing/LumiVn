@@ -6,6 +6,7 @@ import {
   registerDiagnosticsDrawer,
   type DiagnosticData,
 } from "./frontend/studio/diagnostics-drawer.js";
+import { diagBus } from "./frontend/utils/diag-bus.js";
 
 const CLEANUP_KEY = "__lumivnCleanup";
 
@@ -221,19 +222,25 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (payload?.type === "vn_force_open") {
       if (!overlay.isActive()) toggleStage();
       diagDrawer?.pushLog("Stage launched via Command Palette.", "info");
+      diagBus.pushLog("Stage launched via Command Palette.", "info");
     } else if (payload?.type === "vn_diagnostic_update" && payload.data) {
       diagDrawer?.updateDiagnostic(payload.data as DiagnosticData);
+      diagBus.setTelemetry(payload.data as DiagnosticData);
     } else if (payload?.type === "vn_state" && payload.state) {
       const st = payload.state as VnPresentationState;
       overlay.updatePresentation(st);
       diagDrawer?.setLatestLedger(st.ledger);
+      diagBus.setLedger(st.ledger);
     } else if (payload?.type === "vn_log") {
       diagDrawer?.pushLog(String(payload.message), (payload.level as any) || "info");
+      diagBus.pushLog(String(payload.message), (payload.level as any) || "info");
     } else if (payload?.type === "vn_manifest" && payload.manifest) {
       diagDrawer?.setLatestManifest?.(payload.manifest);
-      overlay.setManifest(payload.manifest);
+      overlay.setManifest(payload.manifest as any);
+      diagBus.setManifest(payload.manifest as any);
     } else if (payload?.type === "vn_error") {
       diagDrawer?.pushLog(String(payload.error), "error");
+      diagBus.pushLog(String(payload.error), "error");
     }
   });
 

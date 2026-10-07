@@ -8,9 +8,10 @@ import { MapTab } from "./tab-map.js";
 import { PhoneTab } from "./tab-phone.js";
 import { JournalTab } from "./tab-journal.js";
 import { SceneTab } from "./tab-scene.js";
+import { DiagnosticsTab } from "./tab-diagnostics.js";
 import type { SpriteTransform } from "../stage/sprite-transform.js";
 
-export type HudTabId = "characters" | "wardrobe" | "stats" | "inventory" | "map" | "phone" | "journal" | "scene";
+export type HudTabId = "characters" | "wardrobe" | "stats" | "inventory" | "map" | "phone" | "journal" | "scene" | "diagnostics";
 
 export interface MenuBarOptions {
   ctx: SpindleFrontendContext;
@@ -32,6 +33,7 @@ export class MenuBar {
   private phoneTab: PhoneTab;
   private journalTab: JournalTab;
   private sceneTab: SceneTab;
+  private diagnosticsTab: DiagnosticsTab;
 
   private activeTabId: HudTabId | null = null;
   private currentLedger: LedgerData = {};
@@ -73,6 +75,7 @@ export class MenuBar {
     this.phoneTab = new PhoneTab(options.ctx, options.onAction);
     this.journalTab = new JournalTab();
     this.sceneTab = new SceneTab(options.ctx, options.onTransformChange);
+    this.diagnosticsTab = new DiagnosticsTab();
 
     // Render bar buttons
     const barItems: Array<{ id: HudTabId; icon: string; label: string }> = [
@@ -84,6 +87,7 @@ export class MenuBar {
       { id: "phone", icon: "📱", label: "Phone" },
       { id: "journal", icon: "📜", label: "Journal" },
       { id: "scene", icon: "🎬", label: "Scene" },
+      { id: "diagnostics", icon: "📋", label: "Copy / Diag" },
     ];
 
     for (const item of barItems) {
@@ -179,6 +183,10 @@ export class MenuBar {
       case "scene":
         this.sceneTab.render(this.currentLedger, this.currentManifest);
         this.panelBody.appendChild(this.sceneTab.root);
+        break;
+      case "diagnostics":
+        this.diagnosticsTab.render(this.currentLedger, this.currentManifest);
+        this.panelBody.appendChild(this.diagnosticsTab.root);
         break;
     }
   }

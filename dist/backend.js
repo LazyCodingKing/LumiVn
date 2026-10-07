@@ -3270,28 +3270,66 @@ function parseLedgerYaml(rawLedgerText) {
       codeBlocks.push(blockMatch[1].trim());
     }
   }
+  function parseYamlChunkWithRecovery(chunk, target) {
+    if (!chunk.trim())
+      return;
+    try {
+      const parsed = yaml.load(chunk);
+      if (parsed && typeof parsed === "object") {
+        Object.assign(target, parsed);
+        return;
+      }
+    } catch {}
+    try {
+      const sanitized = chunk.split(`
+`).map((line) => {
+        const flowMatch = line.match(/^(\s*[a-zA-Z0-9_-]+:\s*\{)(.*)(\}\s*)$/);
+        if (flowMatch) {
+          const prefix = flowMatch[1];
+          const body = flowMatch[2];
+          const suffix = flowMatch[3];
+          const cleanedBody = body.replace(/([a-zA-Z0-9_-]+:\s*)"([\s\S]*?)"(?=\s*(?:,|\}))/g, (_m, k, val) => {
+            return k + '"' + val.replace(/"/g, "\\\"") + '"';
+          });
+          return prefix + cleanedBody + suffix;
+        }
+        return line;
+      }).join(`
+`);
+      const parsed = yaml.load(sanitized);
+      if (parsed && typeof parsed === "object") {
+        Object.assign(target, parsed);
+        return;
+      }
+    } catch {}
+    const subBlocks = chunk.split(/^(?=[a-zA-Z0-9_-]+:)/m);
+    for (const sub of subBlocks) {
+      if (!sub.trim())
+        continue;
+      try {
+        const parsedSub = yaml.load(sub);
+        if (parsedSub && typeof parsedSub === "object") {
+          Object.assign(target, parsedSub);
+          continue;
+        }
+      } catch {}
+      const cleanedSub = sub.replace(/^\s*(?:tells|wounds|trauma):\s*\{.*$/gm, "");
+      try {
+        const parsedSub = yaml.load(cleanedSub);
+        if (parsedSub && typeof parsedSub === "object") {
+          Object.assign(target, parsedSub);
+        }
+      } catch {}
+    }
+  }
   if (codeBlocks.length > 0) {
     for (const block of codeBlocks) {
-      try {
-        const parsed = yaml.load(block);
-        if (parsed && typeof parsed === "object") {
-          Object.assign(combined, parsed);
-        }
-      } catch (err) {
-        console.warn("[LumiVN] Failed to parse YAML block in Ledger:", err);
-      }
+      parseYamlChunkWithRecovery(block, combined);
     }
   } else {
     const stripped = rawLedgerText.split(/\r?\n/).filter((line) => !line.trim().startsWith("#")).join(`
 `);
-    try {
-      const parsed = yaml.load(stripped);
-      if (parsed && typeof parsed === "object") {
-        Object.assign(combined, parsed);
-      }
-    } catch (err) {
-      console.warn("[LumiVN] Failed to parse stripped YAML text in Ledger:", err);
-    }
+    parseYamlChunkWithRecovery(stripped, combined);
   }
   const actors = {};
   const standardRootKeys = new Set([

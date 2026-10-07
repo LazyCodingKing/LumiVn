@@ -51,7 +51,10 @@ export function registerDiagnosticsDrawer(
       <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid #334155; border-radius: 10px; padding: 12px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <h4 style="margin: 0; font-size: 11px; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px;">Turn Telemetry</h4>
-          <div style="display: flex; gap: 6px;">
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button id="vn-copy-all-drawer-btn" style="padding: 2px 8px; font-size: 10px; background: #6366f1; border: none; border-radius: 4px; color: #fff; font-weight: 700; cursor: pointer;">
+              📋 Copy All
+            </button>
             <button id="vn-copy-state-btn" style="padding: 2px 8px; font-size: 10px; background: #1e293b; border: 1px solid #475569; border-radius: 4px; color: #cbd5e1; cursor: pointer;">
               📋 Copy State JSON
             </button>
@@ -102,6 +105,7 @@ export function registerDiagnosticsDrawer(
   root.querySelector("#vn-launch-btn")?.addEventListener("click", onLaunchStage);
 
   const logStream = root.querySelector("#vn-log-stream") as HTMLElement;
+  const copyAllDrawerBtn = root.querySelector("#vn-copy-all-drawer-btn") as HTMLButtonElement;
   const copyLogsBtn = root.querySelector("#vn-copy-logs-btn") as HTMLButtonElement;
   const copyStateBtn = root.querySelector("#vn-copy-state-btn") as HTMLButtonElement;
   const copyManifestBtn = root.querySelector("#vn-copy-manifest-btn") as HTMLButtonElement;
@@ -109,6 +113,22 @@ export function registerDiagnosticsDrawer(
   root.querySelector("#vn-clear-log-btn")?.addEventListener("click", () => {
     if (logStream) logStream.innerHTML = "";
     rawLogHistory = [];
+  });
+
+  copyAllDrawerBtn?.addEventListener("click", async () => {
+    try {
+      const bundle = {
+        timestamp: new Date().toISOString(),
+        ledger: latestLedgerData,
+        manifest: latestManifestData,
+        logs: rawLogHistory,
+      };
+      await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
+      copyAllDrawerBtn.textContent = "✓ Copied!";
+      setTimeout(() => (copyAllDrawerBtn.textContent = "📋 Copy All"), 1500);
+    } catch (e) {
+      pushLog(`Failed to copy all: ${String(e)}`, "error");
+    }
   });
 
   const pushLog = (msg: string, level: "info" | "warn" | "error" | "action" = "info") => {

@@ -27382,14 +27382,33 @@ class CharactersTab {
   }
   render(ledger, manifest) {
     this.root.innerHTML = "";
-    const actors = ledger.actors || {};
-    const actorIds = Object.keys(actors).filter((id) => id.toLowerCase() !== "user");
+    const actors = { ...ledger.actors || {} };
+    if (ledger.roster && Array.isArray(ledger.roster)) {
+      for (const r of ledger.roster) {
+        if (r.id && !actors[r.id]) {
+          actors[r.id] = {
+            id: r.id,
+            name: r.name || r.id,
+            life_model: { occupation: r.status || "Resident" },
+            agency: { want_now: r.status || "None" }
+          };
+        }
+      }
+    }
+    const allKeys = Object.keys(actors);
+    const actorIds = allKeys.sort((a, b) => {
+      if (a.toLowerCase() === "user")
+        return -1;
+      if (b.toLowerCase() === "user")
+        return 1;
+      return a.localeCompare(b);
+    });
     const header = document.createElement("div");
     header.className = "vn-tab-header";
-    header.innerHTML = `<h3>\uD83D\uDC65 Cast & Character Records</h3><p class="vn-muted">Select a character to inspect appearance, personality profile, and relationships.</p>`;
+    header.innerHTML = `<h3>\uD83D\uDC65 Cast & Character Records</h3><p class="vn-muted">Select a character to inspect attire, equipment, tells, and relationships.</p>`;
     this.root.appendChild(header);
     if (actorIds.length === 0) {
-      this.root.innerHTML += `<div class="vn-muted" style="text-align:center; padding: 24px;">No secondary characters recorded yet.</div>`;
+      this.root.innerHTML += `<div class="vn-muted" style="text-align:center; padding: 24px;">No characters recorded yet.</div>`;
       return;
     }
     if (!this.selectedActorId || !actors[this.selectedActorId]) {
@@ -27880,6 +27899,13 @@ class MapTab {
   root;
   onAction;
   viewMode = "indoor";
+  zoom = 1;
+  panX = 0;
+  panY = 0;
+  isPanning = false;
+  startPointerX = 0;
+  startPointerY = 0;
+  selectedNodeId = null;
   constructor(onAction) {
     this.onAction = onAction;
     this.root = document.createElement("div");
@@ -27888,129 +27914,478 @@ class MapTab {
   render(ledger) {
     this.root.innerHTML = "";
     const currentPlace = (ledger.scene?.place || "default").toLowerCase();
-    const isIndoor = currentPlace.includes(":") || currentPlace.includes("residence") || currentPlace.includes("dojo") || currentPlace.includes("room");
-    this.viewMode = isIndoor ? "indoor" : "outdoor";
+    const isIndoor = currentPlace.includes(":") || currentPlace.includes("residence") || currentPlace.includes("dojo") || currentPlace.includes("room") || currentPlace.includes("foyer");
+    if (!this.selectedNodeId) {
+      this.viewMode = isIndoor ? "indoor" : "outdoor";
+      this.selectedNodeId = currentPlace;
+    }
     const header = document.createElement("div");
     header.className = "vn-tab-header";
     header.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
         <div>
-          <h3>\uD83D\uDDFA️ World Cartography & Living Roster</h3>
-          <p class="vn-muted">Time: <strong>${ledger.clock?.t || "Unknown"}</strong> (${ledger.clock?.phase || "Day"}) | Location: <span style="color:#38bdf8;">${currentPlace}</span></p>
+          <h3 style="margin: 0; font-size: 15px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+            <span>\uD83D\uDDFA️</span> <span>Interactive Cartography & Blueprint</span>
+          </h3>
+          <p class="vn-muted" style="margin: 2px 0 0 0; font-size: 11px;">
+            <span>⏱️ <strong>${ledger.clock?.t || "D1 12:00"}</strong> (${ledger.clock?.phase || "Day"})</span>
+            ${ledger.clock?.date ? `<span> • \uD83D\uDCC5 ${ledger.clock.date}</span>` : ""}
+            <span> • \uD83D\uDCCD <span style="color:#38bdf8; font-weight: 600;">${currentPlace}</span></span>
+          </p>
         </div>
-        <div style="display: flex; gap: 6px;">
-          <button id="vn-map-indoor-btn" class="vn-btn vn-btn-sm ${this.viewMode === "indoor" ? "vn-btn-primary" : "vn-btn-secondary"}">\uD83C\uDFE0 Building Floorplan</button>
-          <button id="vn-map-outdoor-btn" class="vn-btn vn-btn-sm ${this.viewMode === "outdoor" ? "vn-btn-primary" : "vn-btn-secondary"}">\uD83C\uDF10 City / Region</button>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 2px; display: flex;">
+            <button id="vn-map-indoor-btn" class="vn-btn vn-btn-sm" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.viewMode === "indoor" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+              \uD83C\uDFE0 Blueprint
+            </button>
+            <button id="vn-map-outdoor-btn" class="vn-btn vn-btn-sm" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.viewMode === "outdoor" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+              \uD83C\uDF10 District
+            </button>
+          </div>
+          <div style="display: flex; gap: 3px;">
+            <button id="vn-map-zoom-in" title="Zoom In" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 4px; width: 28px; height: 28px; font-weight: bold; cursor: pointer;">+</button>
+            <button id="vn-map-zoom-out" title="Zoom Out" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 4px; width: 28px; height: 28px; font-weight: bold; cursor: pointer;">−</button>
+            <button id="vn-map-zoom-reset" title="Reset View" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 4px; padding: 0 8px; height: 28px; font-size: 11px; cursor: pointer;">⟲</button>
+          </div>
         </div>
       </div>
     `;
     this.root.appendChild(header);
     header.querySelector("#vn-map-indoor-btn")?.addEventListener("click", () => {
       this.viewMode = "indoor";
-      this.renderMapBody(ledger, currentPlace);
+      this.resetView();
+      this.render(ledger);
     });
     header.querySelector("#vn-map-outdoor-btn")?.addEventListener("click", () => {
       this.viewMode = "outdoor";
-      this.renderMapBody(ledger, currentPlace);
+      this.resetView();
+      this.render(ledger);
     });
-    const mapContainer = document.createElement("div");
-    mapContainer.id = "vn-map-canvas-container";
-    this.root.appendChild(mapContainer);
-    this.renderMapBody(ledger, currentPlace);
+    header.querySelector("#vn-map-zoom-in")?.addEventListener("click", () => this.adjustZoom(1.25));
+    header.querySelector("#vn-map-zoom-out")?.addEventListener("click", () => this.adjustZoom(0.8));
+    header.querySelector("#vn-map-zoom-reset")?.addEventListener("click", () => {
+      this.resetView();
+      this.updateTransform();
+    });
+    const mainLayout = document.createElement("div");
+    mainLayout.style.cssText = "display: flex; gap: 12px; height: 420px; min-height: 400px; position: relative;";
+    const viewportWrap = document.createElement("div");
+    viewportWrap.id = "vn-map-viewport";
+    viewportWrap.style.cssText = "flex: 1; background: #070d19; border: 1px solid #1e293b; border-radius: 10px; overflow: hidden; position: relative; cursor: grab; user-select: none;";
+    const sidebar = document.createElement("div");
+    sidebar.id = "vn-map-sidebar";
+    sidebar.style.cssText = "width: 280px; background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;";
+    mainLayout.appendChild(viewportWrap);
+    mainLayout.appendChild(sidebar);
+    this.root.appendChild(mainLayout);
+    this.renderGraph(viewportWrap, ledger, currentPlace);
+    this.renderSidebar(sidebar, ledger, currentPlace);
+    this.setupPanZoom(viewportWrap);
   }
-  renderMapBody(ledger, currentPlace) {
-    const container = this.root.querySelector("#vn-map-canvas-container");
-    if (!container)
-      return;
-    container.innerHTML = "";
-    if (this.viewMode === "indoor") {
-      this.renderIndoorFloorplan(container, ledger, currentPlace);
-    } else {
-      this.renderOutdoorLivingWorld(container, ledger, currentPlace);
+  resetView() {
+    this.zoom = 1;
+    this.panX = 0;
+    this.panY = 0;
+  }
+  adjustZoom(factor) {
+    this.zoom = Math.max(0.4, Math.min(3, this.zoom * factor));
+    this.updateTransform();
+  }
+  updateTransform() {
+    const group = this.root.querySelector("#vn-map-svg-group");
+    if (group) {
+      group.setAttribute("transform", `translate(${this.panX}, ${this.panY}) scale(${this.zoom})`);
     }
   }
-  renderIndoorFloorplan(container, ledger, currentPlace) {
-    const floorplanCard = document.createElement("div");
-    floorplanCard.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px; margin-bottom: 16px;";
+  setupPanZoom(viewport) {
+    viewport.addEventListener("pointerdown", (e) => {
+      if (e.target.closest(".vn-map-node-interactive"))
+        return;
+      this.isPanning = true;
+      this.startPointerX = e.clientX - this.panX;
+      this.startPointerY = e.clientY - this.panY;
+      viewport.style.cursor = "grabbing";
+      viewport.setPointerCapture(e.pointerId);
+    });
+    viewport.addEventListener("pointermove", (e) => {
+      if (!this.isPanning)
+        return;
+      this.panX = e.clientX - this.startPointerX;
+      this.panY = e.clientY - this.startPointerY;
+      this.updateTransform();
+    });
+    const endPan = (e) => {
+      if (!this.isPanning)
+        return;
+      this.isPanning = false;
+      viewport.style.cursor = "grab";
+      try {
+        viewport.releasePointerCapture(e.pointerId);
+      } catch {}
+    };
+    viewport.addEventListener("pointerup", endPan);
+    viewport.addEventListener("pointercancel", endPan);
+    viewport.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.88;
+      this.adjustZoom(zoomFactor);
+    }, { passive: false });
+  }
+  renderGraph(viewport, ledger, currentPlace) {
+    viewport.innerHTML = "";
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "100%");
+    svg.style.display = "block";
+    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    defs.innerHTML = `
+      <pattern id="grid-pattern" width="40" height="40" patternUnits="userSpaceOnUse">
+        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.8" stroke-opacity="0.4"/>
+        <circle cx="0" cy="0" r="1.5" fill="#334155" opacity="0.6"/>
+      </pattern>
+      <linearGradient id="corridor-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.6"/>
+        <stop offset="100%" stop-color="#818cf8" stop-opacity="0.6"/>
+      </linearGradient>
+    `;
+    svg.appendChild(defs);
+    const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    bgRect.setAttribute("width", "100%");
+    bgRect.setAttribute("height", "100%");
+    bgRect.setAttribute("fill", "url(#grid-pattern)");
+    svg.appendChild(bgRect);
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.id = "vn-map-svg-group";
+    g.setAttribute("transform", `translate(${this.panX}, ${this.panY}) scale(${this.zoom})`);
+    svg.appendChild(g);
+    if (this.viewMode === "indoor") {
+      this.renderIndoorSvg(g, ledger, currentPlace);
+    } else {
+      this.renderOutdoorSvg(g, ledger, currentPlace);
+    }
+    viewport.appendChild(svg);
+  }
+  renderIndoorSvg(group, ledger, currentPlace) {
     const scopePrefix = currentPlace.includes(":") ? currentPlace.split(":")[0] : "building";
     const currentRoom = currentPlace.includes(":") ? currentPlace.split(":")[1] : currentPlace;
     const knownPlaces = Object.keys(ledger.places || {});
-    const indoorRooms = knownPlaces.filter((p) => p.startsWith(`${scopePrefix}:`) || !p.includes(":"));
-    const roomsToShow = indoorRooms.length > 0 ? indoorRooms : ["entrance", "living_room", "kitchen", "dojo", "bedroom", "courtyard"];
-    floorplanCard.innerHTML = `
-      <div style="font-weight: 700; color: #818cf8; margin-bottom: 12px; font-size: 14px;">\uD83C\uDFE0 Indoor Blueprint — ${scopePrefix.toUpperCase()}</div>
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px;">
-        ${roomsToShow.map((roomKey) => {
-      const rawName = roomKey.includes(":") ? roomKey.split(":")[1] : roomKey;
-      const isHere = rawName === currentRoom || roomKey === currentPlace;
-      const presentNpcs = (ledger.roster || []).filter((r) => (r.loc || "").toLowerCase().includes(rawName));
-      const npcTags = presentNpcs.map((n) => `<span style="background: rgba(99,102,241,0.3); color: #c7d2fe; padding: 2px 6px; border-radius: 4px; font-size: 10px;">\uD83D\uDC64 ${n.name || n.id}</span>`).join(" ");
-      return `
-            <div style="background: ${isHere ? "rgba(56,189,248,0.15)" : "#1e293b"}; border: 2px solid ${isHere ? "#38bdf8" : "#334155"}; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between;">
-              <div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                  <strong style="color: ${isHere ? "#38bdf8" : "#f8fafc"}; font-size: 13px; text-transform: capitalize;">${rawName.replace(/_/g, " ")}</strong>
-                  ${isHere ? '<span style="font-size: 10px; background: #38bdf8; color: #000; padding: 1px 5px; border-radius: 4px; font-weight: 800;">YOU</span>' : ""}
-                </div>
-                <div style="min-height: 20px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px;">${npcTags || '<span style="font-size: 11px; color: #64748b;">(Empty)</span>'}</div>
-              </div>
-              ${!isHere ? `<button class="vn-btn vn-btn-sm vn-btn-primary vn-move-btn" data-dest="${roomKey}" style="margin-top: 10px; width: 100%;">Enter Room</button>` : ""}
-            </div>
-          `;
-    }).join("")}
-      </div>
-    `;
-    floorplanCard.querySelectorAll(".vn-move-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const dest = btn.getAttribute("data-dest");
-        if (dest)
-          this.onAction(`*Heads to the ${dest.replace(/.*:/, "").replace(/_/g, " ")}*`);
+    const indoorKeys = knownPlaces.filter((p) => p.startsWith(`${scopePrefix}:`) || !p.includes(":"));
+    const rawKeys = indoorKeys.length > 0 ? indoorKeys : ["entrance", "living_room", "kitchen", "hallway", "bedroom", "courtyard", "bathroom"];
+    const layouts = [];
+    const cols = 3;
+    const roomW = 160;
+    const roomH = 95;
+    const gapX = 50;
+    const gapY = 40;
+    const startX = 60;
+    const startY = 40;
+    rawKeys.forEach((key, idx) => {
+      const clean = key.includes(":") ? key.split(":")[1] : key;
+      const c = idx % cols;
+      const r = Math.floor(idx / cols);
+      layouts.push({
+        id: key,
+        cleanName: clean,
+        x: startX + c * (roomW + gapX),
+        y: startY + r * (roomH + gapY),
+        w: roomW,
+        h: roomH
       });
     });
-    container.appendChild(floorplanCard);
+    for (let i = 0;i < layouts.length; i++) {
+      for (let j = i + 1;j < layouts.length; j++) {
+        const r1 = layouts[i];
+        const r2 = layouts[j];
+        const dx = Math.abs(r1.x - r2.x);
+        const dy = Math.abs(r1.y - r2.y);
+        if (dx <= roomW + gapX + 10 && dy === 0 || dy <= roomH + gapY + 10 && dx === 0) {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          path.setAttribute("x1", String(r1.x + r1.w / 2));
+          path.setAttribute("y1", String(r1.y + r1.h / 2));
+          path.setAttribute("x2", String(r2.x + r2.w / 2));
+          path.setAttribute("y2", String(r2.y + r2.h / 2));
+          path.setAttribute("stroke", "#334155");
+          path.setAttribute("stroke-width", "8");
+          path.setAttribute("stroke-linecap", "round");
+          group.appendChild(path);
+        }
+      }
+    }
+    layouts.forEach((room) => {
+      const isHere = room.cleanName.toLowerCase() === currentRoom.toLowerCase() || room.id === currentPlace;
+      const isSelected = room.id === this.selectedNodeId;
+      const placeConfig = ledger.places?.[room.id] || {};
+      const currentRoutes = ledger.places?.[currentPlace]?.routes || [];
+      const routeToThis = currentRoutes.find((r) => typeof r === "object" && r.to === room.id);
+      const isLocked = Boolean(routeToThis?.why_not || routeToThis?.requires && Object.keys(routeToThis.requires).length > 0);
+      const roomG = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      roomG.className.baseVal = "vn-map-node-interactive";
+      roomG.style.cursor = "pointer";
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", String(room.x));
+      rect.setAttribute("y", String(room.y));
+      rect.setAttribute("width", String(room.w));
+      rect.setAttribute("height", String(room.h));
+      rect.setAttribute("rx", "8");
+      rect.setAttribute("fill", isHere ? "rgba(56, 189, 248, 0.16)" : isSelected ? "rgba(99, 102, 241, 0.22)" : "#0f172a");
+      rect.setAttribute("stroke", isHere ? "#38bdf8" : isSelected ? "#818cf8" : isLocked ? "#f43f5e" : "#334155");
+      rect.setAttribute("stroke-width", isHere || isSelected ? "2.5" : "1.5");
+      rect.setAttribute("stroke-dasharray", isLocked ? "4 3" : "none");
+      roomG.appendChild(rect);
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", String(room.x + 12));
+      text.setAttribute("y", String(room.y + 24));
+      text.setAttribute("fill", isHere ? "#38bdf8" : "#f1f5f9");
+      text.setAttribute("font-size", "12");
+      text.setAttribute("font-weight", "700");
+      text.textContent = room.cleanName.replace(/_/g, " ").toUpperCase();
+      roomG.appendChild(text);
+      const sub = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      sub.setAttribute("x", String(room.x + 12));
+      sub.setAttribute("y", String(room.y + 38));
+      sub.setAttribute("fill", "#64748b");
+      sub.setAttribute("font-size", "9");
+      sub.textContent = placeConfig.norm || (isLocked ? `\uD83D\uDD12 ${routeToThis?.why_not || "Restricted"}` : "Interior Zone");
+      roomG.appendChild(sub);
+      const npcsInRoom = (ledger.roster || []).filter((r) => (r.loc || "").toLowerCase().includes(room.cleanName.toLowerCase()));
+      let tokenOffset = 0;
+      if (isHere) {
+        const playerBadge = this.createPresenceToken(room.x + 12 + tokenOffset, room.y + room.h - 22, "YOU", "#0284c7", "#fff");
+        roomG.appendChild(playerBadge);
+        tokenOffset += 42;
+      }
+      npcsInRoom.forEach((npc) => {
+        if (tokenOffset < room.w - 40) {
+          const npcBadge = this.createPresenceToken(room.x + 12 + tokenOffset, room.y + room.h - 22, (npc.name || npc.id).slice(0, 5), "#4f46e5", "#c7d2fe");
+          roomG.appendChild(npcBadge);
+          tokenOffset += 44;
+        }
+      });
+      roomG.addEventListener("click", () => {
+        this.selectedNodeId = room.id;
+        this.render(ledger);
+      });
+      group.appendChild(roomG);
+    });
   }
-  renderOutdoorLivingWorld(container, ledger, currentPlace) {
-    const worldCard = document.createElement("div");
-    worldCard.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px;";
-    const routes = ledger.places?.[currentPlace]?.routes || [];
-    const travelers = ledger.travel || [];
-    worldCard.innerHTML = `
-      <div style="font-weight: 700; color: #38bdf8; margin-bottom: 8px; font-size: 14px;">\uD83C\uDF10 Living World Map & District Connections</div>
-      <p style="font-size: 12px; color: #94a3b8; margin-bottom: 14px;">Actors advance routines continuously. Travel consumes clock minutes.</p>
+  renderOutdoorSvg(group, ledger, currentPlace) {
+    const places = ledger.places || {};
+    const placeKeys = Object.keys(places);
+    const outdoorKeys = placeKeys.length > 0 ? placeKeys : ["nerima_district", "tendo_dojo", "furinkan_high", "cat_cafe", "shopping_district", "park"];
+    const nodes = [];
+    const centerX = 320;
+    const centerY = 200;
+    const radius = 140;
+    outdoorKeys.forEach((key, idx) => {
+      if (idx === 0) {
+        nodes.push({ id: key, x: centerX, y: centerY });
+      } else {
+        const angle = (idx - 1) / (outdoorKeys.length - 1) * 2 * Math.PI;
+        nodes.push({
+          id: key,
+          x: centerX + Math.cos(angle) * radius,
+          y: centerY + Math.sin(angle) * radius
+        });
+      }
+    });
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+    nodes.forEach((source) => {
+      const routes = places[source.id]?.routes || [];
+      routes.forEach((route) => {
+        const destId = typeof route === "object" && route.to ? route.to : String(route);
+        const target = nodeMap.get(destId);
+        if (target) {
+          const isGated = typeof route === "object" && Boolean(route.why_not || route.requires);
+          const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          line.setAttribute("x1", String(source.x));
+          line.setAttribute("y1", String(source.y));
+          line.setAttribute("x2", String(target.x));
+          line.setAttribute("y2", String(target.y));
+          line.setAttribute("stroke", isGated ? "#f43f5e" : "#3b82f6");
+          line.setAttribute("stroke-width", "2");
+          line.setAttribute("stroke-dasharray", isGated ? "5 3" : "none");
+          line.setAttribute("opacity", "0.6");
+          group.appendChild(line);
+          if (typeof route === "object" && route.minutes) {
+            const mx = (source.x + target.x) / 2;
+            const my = (source.y + target.y) / 2;
+            const pill = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            pill.setAttribute("x", String(mx - 18));
+            pill.setAttribute("y", String(my - 9));
+            pill.setAttribute("width", "36");
+            pill.setAttribute("height", "18");
+            pill.setAttribute("rx", "4");
+            pill.setAttribute("fill", "#0f172a");
+            pill.setAttribute("stroke", "#334155");
+            group.appendChild(pill);
+            const minTxt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            minTxt.setAttribute("x", String(mx));
+            minTxt.setAttribute("y", String(my + 4));
+            minTxt.setAttribute("fill", "#94a3b8");
+            minTxt.setAttribute("font-size", "9");
+            minTxt.setAttribute("text-anchor", "middle");
+            minTxt.textContent = `${route.minutes}m`;
+            group.appendChild(minTxt);
+          }
+        }
+      });
+    });
+    nodes.forEach((node) => {
+      const isHere = node.id.toLowerCase() === currentPlace.toLowerCase();
+      const isSelected = node.id === this.selectedNodeId;
+      const npcs = (ledger.roster || []).filter((r) => (r.loc || "").toLowerCase().includes(node.id.toLowerCase()));
+      const nodeG = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      nodeG.className.baseVal = "vn-map-node-interactive";
+      nodeG.style.cursor = "pointer";
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("cx", String(node.x));
+      circle.setAttribute("cy", String(node.y));
+      circle.setAttribute("r", "34");
+      circle.setAttribute("fill", isHere ? "rgba(56, 189, 248, 0.2)" : isSelected ? "rgba(99, 102, 241, 0.25)" : "#0f172a");
+      circle.setAttribute("stroke", isHere ? "#38bdf8" : isSelected ? "#818cf8" : "#334155");
+      circle.setAttribute("stroke-width", isHere || isSelected ? "3" : "1.5");
+      nodeG.appendChild(circle);
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", String(node.x));
+      label.setAttribute("y", String(node.y + 4));
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("fill", isHere ? "#38bdf8" : "#f8fafc");
+      label.setAttribute("font-size", "10");
+      label.setAttribute("font-weight", "700");
+      label.textContent = node.id.replace(/_/g, " ").slice(0, 12);
+      nodeG.appendChild(label);
+      if (isHere) {
+        const youBadge = this.createPresenceToken(node.x - 18, node.y - 28, "YOU", "#0284c7", "#fff");
+        nodeG.appendChild(youBadge);
+      }
+      if (npcs.length > 0) {
+        const countBadge = this.createPresenceToken(node.x - 16, node.y + 14, `\uD83D\uDC65 ${npcs.length}`, "#4338ca", "#c7d2fe");
+        nodeG.appendChild(countBadge);
+      }
+      nodeG.addEventListener("click", () => {
+        this.selectedNodeId = node.id;
+        this.render(ledger);
+      });
+      group.appendChild(nodeG);
+    });
+  }
+  createPresenceToken(x, y, textStr, bg, fg) {
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const width = Math.max(32, textStr.length * 7 + 10);
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", String(x));
+    rect.setAttribute("y", String(y));
+    rect.setAttribute("width", String(width));
+    rect.setAttribute("height", "15");
+    rect.setAttribute("rx", "4");
+    rect.setAttribute("fill", bg);
+    rect.setAttribute("stroke", "rgba(255,255,255,0.2)");
+    rect.setAttribute("stroke-width", "0.5");
+    g.appendChild(rect);
+    const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    txt.setAttribute("x", String(x + width / 2));
+    txt.setAttribute("y", String(y + 11));
+    txt.setAttribute("fill", fg);
+    txt.setAttribute("font-size", "9");
+    txt.setAttribute("font-weight", "800");
+    txt.setAttribute("text-anchor", "middle");
+    txt.textContent = textStr;
+    g.appendChild(txt);
+    return g;
+  }
+  renderSidebar(sidebar, ledger, currentPlace) {
+    sidebar.innerHTML = "";
+    const selected = this.selectedNodeId || currentPlace;
+    const cleanName = selected.includes(":") ? selected.split(":")[1] : selected;
+    const placeConfig = ledger.places?.[selected] || {};
+    const isHere = selected.toLowerCase() === currentPlace.toLowerCase() || cleanName.toLowerCase() === currentPlace.toLowerCase();
+    const currentRoutes = ledger.places?.[currentPlace]?.routes || [];
+    const route = currentRoutes.find((r) => typeof r === "object" && (r.to === selected || r.to === cleanName));
+    const isGated = Boolean(route?.why_not || route?.requires && Object.keys(route.requires).length > 0);
+    const whyNot = route?.why_not;
+    const npcsHere = (ledger.roster || []).filter((r) => (r.loc || "").toLowerCase().includes(cleanName.toLowerCase()));
+    sidebar.innerHTML = `
+      <div style="border-bottom: 1px solid #334155; padding-bottom: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h4 style="margin: 0; font-size: 13px; color: #38bdf8; text-transform: uppercase;">
+            ${cleanName.replace(/_/g, " ")}
+          </h4>
+          ${isHere ? '<span style="font-size: 10px; background: #0284c7; color: #fff; padding: 2px 6px; border-radius: 4px; font-weight: 700;">CURRENT</span>' : ""}
+        </div>
+        <p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8;">${placeConfig.norm || (placeConfig.indoors ? "Indoor Facility" : "Public District")}</p>
+      </div>
 
-      ${travelers.length > 0 ? `
-        <div style="background: rgba(245,158,11,0.1); border: 1px solid #f59e0b; border-radius: 8px; padding: 10px; margin-bottom: 14px; font-size: 12px; color: #fcd34d;">
-          <strong>\uD83D\uDEB6 Active Travelers in Transit:</strong>
-          <ul style="margin: 4px 0 0 16px; padding: 0;">
-            ${travelers.map((t) => `<li><strong>${t.actor}</strong>: ${t.from || "Start"} ➔ ${t.to} (ETA: ${t.eta || "En route"})</li>`).join("")}
-          </ul>
+      ${isGated ? `
+        <div style="background: rgba(244, 63, 94, 0.15); border: 1px solid #f43f5e; border-radius: 6px; padding: 8px; font-size: 11px; color: #fda4af;">
+          <strong>\uD83D\uDD12 Access Restricted:</strong>
+          <div style="margin-top: 3px;">${whyNot || "Requirements not met."}</div>
         </div>
       ` : ""}
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;">
-        ${routes.map((r) => {
-      const dest = typeof r === "object" && r.to ? r.to : String(r);
-      const mins = typeof r === "object" && r.minutes ? r.minutes : 10;
-      return `
-            <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; justify-content: space-between;">
-              <div>
-                <strong style="color: #f8fafc; font-size: 13px;">\uD83D\uDCCD ${dest}</strong>
-                <div style="font-size: 11px; color: #94a3b8; margin: 4px 0;">⏱️ Transit: ${mins} mins</div>
-              </div>
-              <button class="vn-btn vn-btn-sm vn-btn-primary vn-travel-btn" data-dest="${dest}" style="margin-top: 8px;">Travel</button>
-            </div>
-          `;
-    }).join("")}
+      <div style="display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: #cbd5e1;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #94a3b8;">Privacy / Traffic:</span>
+          <span>${placeConfig.privacy ?? "—"} / ${placeConfig.traffic ?? "—"}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #94a3b8;">Visibility:</span>
+          <span>${placeConfig.visibility ?? "—"}</span>
+        </div>
+        ${placeConfig.population ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Population:</span>
+            <span>${placeConfig.population}</span>
+          </div>
+        ` : ""}
+      </div>
+
+      ${Array.isArray(placeConfig.affordances) && placeConfig.affordances.length > 0 ? `
+        <div>
+          <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px;">Affordances</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+            ${placeConfig.affordances.map((a) => `<span style="background: #1e293b; border: 1px solid #475569; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${a}</span>`).join("")}
+          </div>
+        </div>
+      ` : ""}
+
+      ${Array.isArray(placeConfig.hazards) && placeConfig.hazards.length > 0 ? `
+        <div>
+          <div style="font-size: 10px; color: #f59e0b; text-transform: uppercase; margin-bottom: 4px;">⚠️ Hazards</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+            ${placeConfig.hazards.map((h) => `<span style="background: rgba(245, 158, 11, 0.15); border: 1px solid #f59e0b; padding: 2px 6px; border-radius: 4px; font-size: 10px; color: #fcd34d;">${h}</span>`).join("")}
+          </div>
+        </div>
+      ` : ""}
+
+      <div>
+        <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px;">Present Cast (${npcsHere.length})</div>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          ${npcsHere.length > 0 ? npcsHere.map((n) => `
+                <div style="background: #1e293b; padding: 4px 8px; border-radius: 4px; font-size: 11px; display: flex; justify-content: space-between;">
+                  <span style="color: #c7d2fe; font-weight: 600;">${n.name || n.id}</span>
+                  <span style="color: #94a3b8; font-size: 10px;">${n.posture || n.activity || "Idle"}</span>
+                </div>
+              `).join("") : '<span style="color: #64748b; font-size: 11px;">No detected actors</span>'}
+        </div>
+      </div>
+
+      <div style="margin-top: auto; padding-top: 10px;">
+        ${!isHere ? `
+          <button id="vn-sidebar-navigate-btn" class="vn-btn" style="width: 100%; padding: 8px; font-size: 12px; font-weight: 700; ${isGated ? "background: #475569; cursor: not-allowed; opacity: 0.7;" : "background: #6366f1; cursor: pointer;"}" ${isGated ? "disabled" : ""}>
+            ${isGated ? "\uD83D\uDD12 Travel Gated" : `Travel to ${cleanName.replace(/_/g, " ")}`}
+          </button>
+        ` : `
+          <button class="vn-btn" style="width: 100%; padding: 8px; font-size: 12px; background: #0284c7; cursor: default;" disabled>
+            ✓ Already Present Here
+          </button>
+        `}
       </div>
     `;
-    worldCard.querySelectorAll(".vn-travel-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const dest = btn.getAttribute("data-dest");
-        if (dest)
-          this.onAction(`*Travels to ${dest}*`);
-      });
+    sidebar.querySelector("#vn-sidebar-navigate-btn")?.addEventListener("click", () => {
+      if (isGated)
+        return;
+      this.onAction(`*Travels to the ${cleanName.replace(/_/g, " ")}*`);
     });
-    container.appendChild(worldCard);
   }
 }
 
@@ -32125,28 +32500,66 @@ function parseLedgerYaml(rawLedgerText) {
       codeBlocks.push(blockMatch[1].trim());
     }
   }
+  function parseYamlChunkWithRecovery(chunk, target) {
+    if (!chunk.trim())
+      return;
+    try {
+      const parsed = yaml.load(chunk);
+      if (parsed && typeof parsed === "object") {
+        Object.assign(target, parsed);
+        return;
+      }
+    } catch {}
+    try {
+      const sanitized = chunk.split(`
+`).map((line) => {
+        const flowMatch = line.match(/^(\s*[a-zA-Z0-9_-]+:\s*\{)(.*)(\}\s*)$/);
+        if (flowMatch) {
+          const prefix = flowMatch[1];
+          const body = flowMatch[2];
+          const suffix = flowMatch[3];
+          const cleanedBody = body.replace(/([a-zA-Z0-9_-]+:\s*)"([\s\S]*?)"(?=\s*(?:,|\}))/g, (_m, k, val) => {
+            return k + '"' + val.replace(/"/g, "\\\"") + '"';
+          });
+          return prefix + cleanedBody + suffix;
+        }
+        return line;
+      }).join(`
+`);
+      const parsed = yaml.load(sanitized);
+      if (parsed && typeof parsed === "object") {
+        Object.assign(target, parsed);
+        return;
+      }
+    } catch {}
+    const subBlocks = chunk.split(/^(?=[a-zA-Z0-9_-]+:)/m);
+    for (const sub of subBlocks) {
+      if (!sub.trim())
+        continue;
+      try {
+        const parsedSub = yaml.load(sub);
+        if (parsedSub && typeof parsedSub === "object") {
+          Object.assign(target, parsedSub);
+          continue;
+        }
+      } catch {}
+      const cleanedSub = sub.replace(/^\s*(?:tells|wounds|trauma):\s*\{.*$/gm, "");
+      try {
+        const parsedSub = yaml.load(cleanedSub);
+        if (parsedSub && typeof parsedSub === "object") {
+          Object.assign(target, parsedSub);
+        }
+      } catch {}
+    }
+  }
   if (codeBlocks.length > 0) {
     for (const block of codeBlocks) {
-      try {
-        const parsed = yaml.load(block);
-        if (parsed && typeof parsed === "object") {
-          Object.assign(combined, parsed);
-        }
-      } catch (err) {
-        console.warn("[LumiVN] Failed to parse YAML block in Ledger:", err);
-      }
+      parseYamlChunkWithRecovery(block, combined);
     }
   } else {
     const stripped = rawLedgerText.split(/\r?\n/).filter((line) => !line.trim().startsWith("#")).join(`
 `);
-    try {
-      const parsed = yaml.load(stripped);
-      if (parsed && typeof parsed === "object") {
-        Object.assign(combined, parsed);
-      }
-    } catch (err) {
-      console.warn("[LumiVN] Failed to parse stripped YAML text in Ledger:", err);
-    }
+    parseYamlChunkWithRecovery(stripped, combined);
   }
   const actors = {};
   const standardRootKeys = new Set([
@@ -32908,6 +33321,386 @@ class SceneTab {
   }
 }
 
+// src/frontend/utils/diag-bus.ts
+class DiagnosticBus {
+  logs = [];
+  telemetry = null;
+  latestLedger = {};
+  latestManifest = null;
+  listeners = new Set;
+  maxLogs = 500;
+  constructor() {
+    this.pushLog("LumiVN Diagnostic Bus initialized.", "info");
+  }
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  notify() {
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch {}
+    }
+  }
+  pushLog(message, level = "info") {
+    const time = new Date().toLocaleTimeString();
+    this.logs.push({ timestamp: time, level, message });
+    if (this.logs.length > this.maxLogs) {
+      this.logs.shift();
+    }
+    this.notify();
+  }
+  clearLogs() {
+    this.logs = [];
+    this.notify();
+  }
+  getLogs() {
+    return this.logs;
+  }
+  setTelemetry(data) {
+    this.telemetry = data;
+    this.pushLog(`Turn telemetry: place='${data.placeId}', bg='${(data.bgUrl || "").slice(0, 32)}...', cast=[${(data.participants || []).join(", ")}]`, "info");
+    this.notify();
+  }
+  getTelemetry() {
+    return this.telemetry;
+  }
+  setLedger(ledger) {
+    this.latestLedger = ledger;
+    this.notify();
+  }
+  getLedger() {
+    return this.latestLedger;
+  }
+  setManifest(manifest) {
+    this.latestManifest = manifest;
+    this.notify();
+  }
+  getManifest() {
+    return this.latestManifest;
+  }
+  formatLedgerYaml(ledger) {
+    const data = ledger || this.latestLedger;
+    try {
+      const lines = ["```yaml"];
+      lines.push("# My World 1.79 World Ledger");
+      if (data.clock) {
+        lines.push("clock:");
+        if (data.clock.t)
+          lines.push(`  t: "${data.clock.t}"`);
+        if (data.clock.phase)
+          lines.push(`  phase: "${data.clock.phase}"`);
+        if (data.clock.date)
+          lines.push(`  date: "${data.clock.date}"`);
+        if (data.clock.location)
+          lines.push(`  location: "${data.clock.location}"`);
+        if (data.clock.region)
+          lines.push(`  region: "${data.clock.region}"`);
+        if (data.clock.country)
+          lines.push(`  country: "${data.clock.country}"`);
+      }
+      if (data.scene) {
+        lines.push("scene:");
+        if (data.scene.place)
+          lines.push(`  place: "${data.scene.place}"`);
+        if (data.scene.participants && data.scene.participants.length > 0) {
+          lines.push(`  participants: [${data.scene.participants.map((p) => `"${p}"`).join(", ")}]`);
+        }
+      }
+      if (data.roster && data.roster.length > 0) {
+        lines.push("roster:");
+        for (const r of data.roster) {
+          lines.push(`  - id: "${r.id}"`);
+          if (r.name)
+            lines.push(`    name: "${r.name}"`);
+          if (r.loc)
+            lines.push(`    loc: "${r.loc}"`);
+          if (r.status)
+            lines.push(`    status: "${r.status}"`);
+        }
+      }
+      if (data.actors && Object.keys(data.actors).length > 0) {
+        lines.push("actors:");
+        for (const [id, doc] of Object.entries(data.actors)) {
+          lines.push(`  ${id}:`);
+          if (doc.name)
+            lines.push(`    name: "${doc.name}"`);
+          if (doc.outfit) {
+            lines.push("    outfit:");
+            if (doc.outfit.top)
+              lines.push(`      top: "${doc.outfit.top}"`);
+            if (doc.outfit.bottom)
+              lines.push(`      bottom: "${doc.outfit.bottom}"`);
+            if (doc.outfit.underwear_top)
+              lines.push(`      underwear_top: "${doc.outfit.underwear_top}"`);
+            if (doc.outfit.underwear_bottom)
+              lines.push(`      underwear_bottom: "${doc.outfit.underwear_bottom}"`);
+            if (doc.outfit.shoes)
+              lines.push(`      shoes: "${doc.outfit.shoes}"`);
+          }
+        }
+      }
+      lines.push("```");
+      return lines.join(`
+`);
+    } catch {
+      return JSON.stringify(data, null, 2);
+    }
+  }
+  exportAllBundle() {
+    const bundle = {
+      timestamp: new Date().toISOString(),
+      telemetry: this.telemetry,
+      clock: this.latestLedger.clock,
+      scene: this.latestLedger.scene,
+      ledger: this.latestLedger,
+      manifest: this.latestManifest,
+      logs: this.logs
+    };
+    return JSON.stringify(bundle, null, 2);
+  }
+}
+var diagBus = new DiagnosticBus;
+
+// src/frontend/hud/tab-diagnostics.ts
+class DiagnosticsTab {
+  root;
+  currentLedger = {};
+  currentManifest;
+  activeFilter = "all";
+  unsubscribeBus;
+  constructor() {
+    this.root = document.createElement("div");
+    this.root.className = "vn-hud-tab vn-tab-diagnostics";
+  }
+  render(ledger, manifest) {
+    this.currentLedger = ledger;
+    this.currentManifest = manifest;
+    diagBus.setLedger(ledger);
+    if (manifest)
+      diagBus.setManifest(manifest);
+    this.root.innerHTML = "";
+    this.root.style.cssText = "display: flex; flex-direction: column; gap: 14px; height: 100%; color: #f1f5f9; font-family: system-ui, -apple-system, sans-serif;";
+    const telemetry = diagBus.getTelemetry();
+    const hasLedger = Boolean(ledger && (ledger.clock || ledger.scene || ledger.actors));
+    const deltaStatus = hasLedger ? "accepted" : "idle";
+    const header = document.createElement("div");
+    header.style.cssText = "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid #334155; padding-bottom: 10px;";
+    header.innerHTML = `
+      <div>
+        <h3 style="margin: 0; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 6px;">
+          <span>\uD83D\uDEE0️</span> <span>Engine Diagnostics & Clipboard Export</span>
+        </h3>
+        <p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8;">
+          Inspect delta synchronization, export living world ledgers, and view engine logs.
+        </p>
+      </div>
+      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+        <button id="vn-copy-all-btn" class="vn-btn vn-btn-sm" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; color: #fff; font-weight: 700; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 11px; box-shadow: 0 2px 8px rgba(99,102,241,0.4);">
+          \uD83D\uDCCB Copy All
+        </button>
+        <button id="vn-copy-yaml-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #38bdf8; font-weight: 600; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          \uD83D\uDCC4 Copy Ledger (YAML)
+        </button>
+        <button id="vn-copy-json-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          \uD83D\uDCE6 Copy State (JSON)
+        </button>
+        <button id="vn-copy-diag-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          \uD83D\uDCDC Copy Logs
+        </button>
+      </div>
+    `;
+    this.root.appendChild(header);
+    const showToast = (btn, label) => {
+      const orig = btn.textContent;
+      btn.textContent = "✓ Copied!";
+      btn.style.borderColor = "#10b981";
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.style.borderColor = "";
+      }, 1500);
+    };
+    header.querySelector("#vn-copy-all-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      await navigator.clipboard.writeText(diagBus.exportAllBundle()).catch(() => {
+        return;
+      });
+      showToast(btn, "Copy All");
+    });
+    header.querySelector("#vn-copy-yaml-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const yamlStr = diagBus.formatLedgerYaml(this.currentLedger);
+      await navigator.clipboard.writeText(yamlStr).catch(() => {
+        return;
+      });
+      showToast(btn, "Copy Ledger (YAML)");
+    });
+    header.querySelector("#vn-copy-json-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      await navigator.clipboard.writeText(JSON.stringify(this.currentLedger, null, 2)).catch(() => {
+        return;
+      });
+      showToast(btn, "Copy State (JSON)");
+    });
+    header.querySelector("#vn-copy-diag-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const logLines = diagBus.getLogs().map((l) => `[${l.timestamp}] [${l.level.toUpperCase()}] ${l.message}`).join(`
+`);
+      await navigator.clipboard.writeText(logLines).catch(() => {
+        return;
+      });
+      showToast(btn, "Copy Logs");
+    });
+    const midRow = document.createElement("div");
+    midRow.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;";
+    const participants = ledger.scene?.participants || [];
+    const actorEntries = Object.entries(ledger.actors || {});
+    const rosterEntries = ledger.roster || [];
+    midRow.innerHTML = `
+      <!-- Delta & Telemetry Status Card -->
+      <div style="background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+          <strong style="color: #38bdf8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Delta Telemetry Status</strong>
+          <span style="font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; ${deltaStatus === "accepted" ? "background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid #10b981;" : "background: rgba(245,158,11,0.2); color: #fbbf24; border: 1px solid #f59e0b;"}">
+            ${deltaStatus === "accepted" ? "● Delta Accepted" : "○ Waiting Delta"}
+          </span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px;">
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Clock Anchor:</span>
+            <span style="font-weight: 600; color: #f8fafc;">${ledger.clock?.t || "Unknown"} (${ledger.clock?.phase || "Day"})${ledger.clock?.date ? ` • ${ledger.clock.date}` : ""}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Place Scoping:</span>
+            <span style="font-weight: 600; color: #38bdf8;">${ledger.scene?.place || "default"}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Region / Country:</span>
+            <span style="color: #cbd5e1;">${[ledger.clock?.location, ledger.clock?.region, ledger.clock?.country].filter(Boolean).join(", ") || "Nerima, Tokyo"}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Background Rendered:</span>
+            <span style="color: #94a3b8; font-family: monospace; font-size: 10px;">${(telemetry?.bgUrl || "Default").slice(0, 30)}...</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Living Roster & Epistemics Presence Card -->
+      <div style="background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+          <strong style="color: #a78bfa; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Epistemic Presence Breakdown</strong>
+          <span style="font-size: 10px; color: #94a3b8;">${actorEntries.length} dossiers loaded</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 11px;">
+          <div>
+            <span style="color: #38bdf8; font-weight: 600;">Spotlight (${participants.length}):</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
+              ${participants.length > 0 ? participants.map((p) => `<span style="background: rgba(56,189,248,0.2); color: #7dd3fc; border: 1px solid #0284c7; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">\uD83D\uDC64 ${p}</span>`).join("") : '<span style="color: #64748b; font-size: 10px;">No spotlight participants</span>'}
+            </div>
+          </div>
+          <div>
+            <span style="color: #94a3b8;">Living Roster (${rosterEntries.length}):</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
+              ${rosterEntries.slice(0, 6).map((r) => `<span style="background: #1e293b; border: 1px solid #334155; padding: 1px 6px; border-radius: 4px; font-size: 10px; color: #cbd5e1;">${r.name || r.id} (${r.loc || "?"})</span>`).join("")}
+              ${rosterEntries.length > 6 ? `<span style="color: #64748b; font-size: 10px;">+${rosterEntries.length - 6} more</span>` : ""}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    this.root.appendChild(midRow);
+    const bottomSplit = document.createElement("div");
+    bottomSplit.style.cssText = "flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 220px; overflow: hidden;";
+    const consoleBox = document.createElement("div");
+    consoleBox.style.cssText = "background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;";
+    consoleBox.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Engine Diagnostic Log</span>
+        <div style="display: flex; gap: 4px; align-items: center;">
+          <button id="vn-filter-all" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "all" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">All</button>
+          <button id="vn-filter-info" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "info" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Info</button>
+          <button id="vn-filter-warn" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "warn" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Warn</button>
+          <button id="vn-filter-error" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "error" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Err</button>
+          <button id="vn-clear-logs" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: #1e293b; color: #94a3b8; cursor: pointer; margin-left: 4px;">Clear</button>
+        </div>
+      </div>
+      <div id="vn-diag-stream" style="flex: 1; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; color: #cbd5e1; display: flex; flex-direction: column; gap: 3px; user-select: text; max-height: 200px;">
+      </div>
+    `;
+    const ledgerBox = document.createElement("div");
+    ledgerBox.style.cssText = "background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;";
+    ledgerBox.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase;">Active World Ledger Viewer</span>
+        <button id="vn-copy-editor-btn" style="padding: 2px 8px; font-size: 10px; background: #1e293b; border: 1px solid #475569; border-radius: 4px; color: #38bdf8; font-weight: 600; cursor: pointer;">
+          \uD83D\uDCCB Copy Block
+        </button>
+      </div>
+      <textarea id="vn-ledger-editor" readonly style="flex: 1; background: #090d16; border: 1px solid #334155; border-radius: 6px; color: #a5b4fc; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; padding: 8px; resize: none; outline: none; user-select: text; white-space: pre; max-height: 200px;">${diagBus.formatLedgerYaml(this.currentLedger)}</textarea>
+    `;
+    bottomSplit.appendChild(consoleBox);
+    bottomSplit.appendChild(ledgerBox);
+    this.root.appendChild(bottomSplit);
+    const stream = consoleBox.querySelector("#vn-diag-stream");
+    const renderLogs = () => {
+      if (!stream)
+        return;
+      stream.innerHTML = "";
+      const logs = diagBus.getLogs();
+      const filtered = this.activeFilter === "all" ? logs : logs.filter((l) => l.level === this.activeFilter);
+      if (filtered.length === 0) {
+        stream.innerHTML = '<div style="color: #64748b; font-style: italic;">No logs for this filter.</div>';
+        return;
+      }
+      for (const entry of filtered) {
+        const item = document.createElement("div");
+        item.style.wordBreak = "break-word";
+        item.style.color = entry.level === "error" ? "#f43f5e" : entry.level === "warn" ? "#f59e0b" : entry.level === "action" ? "#38bdf8" : "#cbd5e1";
+        item.textContent = `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}`;
+        stream.appendChild(item);
+      }
+      stream.scrollTop = stream.scrollHeight;
+    };
+    renderLogs();
+    consoleBox.querySelector("#vn-filter-all")?.addEventListener("click", () => {
+      this.activeFilter = "all";
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    consoleBox.querySelector("#vn-filter-info")?.addEventListener("click", () => {
+      this.activeFilter = "info";
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    consoleBox.querySelector("#vn-filter-warn")?.addEventListener("click", () => {
+      this.activeFilter = "warn";
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    consoleBox.querySelector("#vn-filter-error")?.addEventListener("click", () => {
+      this.activeFilter = "error";
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    consoleBox.querySelector("#vn-clear-logs")?.addEventListener("click", () => {
+      diagBus.clearLogs();
+      renderLogs();
+    });
+    ledgerBox.querySelector("#vn-copy-editor-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const textarea = ledgerBox.querySelector("#vn-ledger-editor");
+      if (textarea) {
+        await navigator.clipboard.writeText(textarea.value).catch(() => {
+          return;
+        });
+        showToast(btn, "Copy Block");
+      }
+    });
+    if (this.unsubscribeBus)
+      this.unsubscribeBus();
+    this.unsubscribeBus = diagBus.subscribe(() => {
+      renderLogs();
+    });
+  }
+}
+
 // src/frontend/hud/menu-bar.ts
 class MenuBar {
   root;
@@ -32922,6 +33715,7 @@ class MenuBar {
   phoneTab;
   journalTab;
   sceneTab;
+  diagnosticsTab;
   activeTabId = null;
   currentLedger = {};
   currentManifest;
@@ -32954,6 +33748,7 @@ class MenuBar {
     this.phoneTab = new PhoneTab(options.ctx, options.onAction);
     this.journalTab = new JournalTab;
     this.sceneTab = new SceneTab(options.ctx, options.onTransformChange);
+    this.diagnosticsTab = new DiagnosticsTab;
     const barItems = [
       { id: "characters", icon: "\uD83D\uDC65", label: "Cast" },
       { id: "wardrobe", icon: "\uD83D\uDC57", label: "Wardrobe" },
@@ -32962,7 +33757,8 @@ class MenuBar {
       { id: "map", icon: "\uD83D\uDDFA️", label: "Map" },
       { id: "phone", icon: "\uD83D\uDCF1", label: "Phone" },
       { id: "journal", icon: "\uD83D\uDCDC", label: "Journal" },
-      { id: "scene", icon: "\uD83C\uDFAC", label: "Scene" }
+      { id: "scene", icon: "\uD83C\uDFAC", label: "Scene" },
+      { id: "diagnostics", icon: "\uD83D\uDCCB", label: "Copy / Diag" }
     ];
     for (const item of barItems) {
       const btn = document.createElement("button");
@@ -33047,6 +33843,10 @@ class MenuBar {
       case "scene":
         this.sceneTab.render(this.currentLedger, this.currentManifest);
         this.panelBody.appendChild(this.sceneTab.root);
+        break;
+      case "diagnostics":
+        this.diagnosticsTab.render(this.currentLedger, this.currentManifest);
+        this.panelBody.appendChild(this.diagnosticsTab.root);
         break;
     }
   }
@@ -34453,7 +35253,10 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
       <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid #334155; border-radius: 10px; padding: 12px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <h4 style="margin: 0; font-size: 11px; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px;">Turn Telemetry</h4>
-          <div style="display: flex; gap: 6px;">
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button id="vn-copy-all-drawer-btn" style="padding: 2px 8px; font-size: 10px; background: #6366f1; border: none; border-radius: 4px; color: #fff; font-weight: 700; cursor: pointer;">
+              \uD83D\uDCCB Copy All
+            </button>
             <button id="vn-copy-state-btn" style="padding: 2px 8px; font-size: 10px; background: #1e293b; border: 1px solid #475569; border-radius: 4px; color: #cbd5e1; cursor: pointer;">
               \uD83D\uDCCB Copy State JSON
             </button>
@@ -34502,6 +35305,7 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
   `;
   root.querySelector("#vn-launch-btn")?.addEventListener("click", onLaunchStage);
   const logStream = root.querySelector("#vn-log-stream");
+  const copyAllDrawerBtn = root.querySelector("#vn-copy-all-drawer-btn");
   const copyLogsBtn = root.querySelector("#vn-copy-logs-btn");
   const copyStateBtn = root.querySelector("#vn-copy-state-btn");
   const copyManifestBtn = root.querySelector("#vn-copy-manifest-btn");
@@ -34509,6 +35313,21 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
     if (logStream)
       logStream.innerHTML = "";
     rawLogHistory = [];
+  });
+  copyAllDrawerBtn?.addEventListener("click", async () => {
+    try {
+      const bundle = {
+        timestamp: new Date().toISOString(),
+        ledger: latestLedgerData,
+        manifest: latestManifestData,
+        logs: rawLogHistory
+      };
+      await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
+      copyAllDrawerBtn.textContent = "✓ Copied!";
+      setTimeout(() => copyAllDrawerBtn.textContent = "\uD83D\uDCCB Copy All", 1500);
+    } catch (e) {
+      pushLog(`Failed to copy all: ${String(e)}`, "error");
+    }
   });
   const pushLog = (msg, level = "info") => {
     const time = new Date().toLocaleTimeString();
@@ -34765,19 +35584,25 @@ function setup(ctx) {
       if (!overlay.isActive())
         toggleStage();
       diagDrawer?.pushLog("Stage launched via Command Palette.", "info");
+      diagBus.pushLog("Stage launched via Command Palette.", "info");
     } else if (payload?.type === "vn_diagnostic_update" && payload.data) {
       diagDrawer?.updateDiagnostic(payload.data);
+      diagBus.setTelemetry(payload.data);
     } else if (payload?.type === "vn_state" && payload.state) {
       const st = payload.state;
       overlay.updatePresentation(st);
       diagDrawer?.setLatestLedger(st.ledger);
+      diagBus.setLedger(st.ledger);
     } else if (payload?.type === "vn_log") {
       diagDrawer?.pushLog(String(payload.message), payload.level || "info");
+      diagBus.pushLog(String(payload.message), payload.level || "info");
     } else if (payload?.type === "vn_manifest" && payload.manifest) {
       diagDrawer?.setLatestManifest?.(payload.manifest);
       overlay.setManifest(payload.manifest);
+      diagBus.setManifest(payload.manifest);
     } else if (payload?.type === "vn_error") {
       diagDrawer?.pushLog(String(payload.error), "error");
+      diagBus.pushLog(String(payload.error), "error");
     }
   });
   ctx.ready();
