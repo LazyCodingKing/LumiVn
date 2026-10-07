@@ -33675,10 +33675,10 @@ class StageOverlay {
         opacity: 1;
       }
       .vn-char-inactive {
-        transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(calc(var(--char-scale, 1) * 0.97));
+        transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(calc(var(--char-scale, 1) * 0.98));
         z-index: 2;
-        filter: drop-shadow(0 8px 16px rgba(0,0,0,0.7)) brightness(0.7) saturate(0.85);
-        opacity: 0.78;
+        filter: drop-shadow(0 8px 16px rgba(0,0,0,0.7)) brightness(0.88) saturate(0.92);
+        opacity: 1;
       }
       .vn-char-left { order: 1; }
       .vn-char-center { order: 2; }
