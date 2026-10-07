@@ -275,7 +275,7 @@ export class MapTab {
       const isLocked = Boolean(routeToThis?.why_not || (routeToThis?.requires && Object.keys(routeToThis.requires).length > 0));
 
       const roomG = document.createElementNS("http://www.w3.org/2000/svg", "g");
-      roomG.className.baseVal = "vn-map-node-interactive";
+      roomG.setAttribute("class", "vn-map-node-interactive");
       roomG.style.cursor = "pointer";
 
       // Rect
@@ -428,7 +428,7 @@ export class MapTab {
       const npcs = (ledger.roster || []).filter((r) => (r.loc || "").toLowerCase().includes(node.id.toLowerCase()));
 
       const nodeG = document.createElementNS("http://www.w3.org/2000/svg", "g");
-      nodeG.className.baseVal = "vn-map-node-interactive";
+      nodeG.setAttribute("class", "vn-map-node-interactive");
       nodeG.style.cursor = "pointer";
 
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");

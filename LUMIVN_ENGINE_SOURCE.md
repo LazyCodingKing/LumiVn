@@ -893,7 +893,7 @@ export function extractLedgerRaw(rawContent: string): string | null {
  * Parses the raw Ledger details content into a structured LedgerData object.
  */
 export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
-  const combined: Record<string, unknown> = {};
+  let combined: Record<string, unknown> = {};
 
   // Check for markdown code blocks (```yaml ... ```)
   const codeBlocks: string[] = [];
@@ -905,31 +905,77 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
     }
   }
 
+  function parseYamlChunkWithRecovery(chunk: string, target: Record<string, unknown>): void {
+    if (!chunk.trim()) return;
+    try {
+      const parsed = yaml.load(chunk);
+      if (parsed && typeof parsed === "object") {
+        Object.assign(target, parsed);
+        return;
+      }
+    } catch {}
+
+    // 1. Sanitization attempt for unescaped quotes inside flow mappings
+    try {
+      const sanitized = chunk.split("\n").map((line) => {
+        const flowMatch = line.match(/^(\s*[a-zA-Z0-9_-]+:\s*\{)(.*)(\}\s*)$/);
+        if (flowMatch) {
+          const prefix = flowMatch[1];
+          const body = flowMatch[2];
+          const suffix = flowMatch[3];
+          const cleanedBody = body.replace(/([a-zA-Z0-9_-]+:\s*)"([\s\S]*?)"(?=\s*(?:,|\}))/g, (_m, k, val) => {
+            return k + "\"" + val.replace(/"/g, "\\\"") + "\"";
+          });
+          return prefix + cleanedBody + suffix;
+        }
+        return line;
+      }).join("\n");
+      const parsed = yaml.load(sanitized);
+      if (parsed && typeof parsed === "object") {
+        Object.assign(target, parsed);
+        return;
+      }
+    } catch {}
+
+    // 2. Sub-block chunk recovery: parse each root section or actor independently
+    const subBlocks = chunk.split(/^(?=[a-zA-Z0-9_-]+:)/m);
+    for (const sub of subBlocks) {
+      if (!sub.trim()) continue;
+      try {
+        const parsedSub = yaml.load(sub);
+        if (parsedSub && typeof parsedSub === "object") {
+          Object.assign(target, parsedSub);
+          continue;
+        }
+      } catch {}
+
+      // Strip problematic nested line (like tells:) and retry sub-block
+      const cleanedSub = sub.replace(/^\s*(?:tells|wounds|trauma):\s*\{.*$/gm, "");
+      try {
+        const parsedSub = yaml.load(cleanedSub);
+        if (parsedSub && typeof parsedSub === "object") {
+          Object.assign(target, parsedSub);
+        }
+      } catch {}
+    }
+  }
+
   if (codeBlocks.length > 0) {
     for (const block of codeBlocks) {
-      try {
-        const parsed = yaml.load(block);
-        if (parsed && typeof parsed === "object") {
-          Object.assign(combined, parsed);
-        }
-      } catch (err) {
-        console.warn("[LumiVN] Failed to parse YAML block in Ledger:", err);
-      }
+      parseYamlChunkWithRecovery(block, combined);
     }
   } else {
-    // If no explicit code fence, clean out headers (## ...) and attempt whole block parse
+    // If no explicit code fence, clean out headers (## ...) and attempt recovery parse
     const stripped = rawLedgerText
       .split(/\r?\n/)
       .filter((line) => !line.trim().startsWith("#"))
       .join("\n");
-    try {
-      const parsed = yaml.load(stripped);
-      if (parsed && typeof parsed === "object") {
-        Object.assign(combined, parsed);
-      }
-    } catch (err) {
-      console.warn("[LumiVN] Failed to parse stripped YAML text in Ledger:", err);
-    }
+    parseYamlChunkWithRecovery(stripped, combined);
+  }
+
+  // Flatten nested "ledger" key if present
+  if (combined.ledger && typeof combined.ledger === "object" && !Array.isArray(combined.ledger)) {
+    combined = { ...(combined.ledger as Record<string, unknown>), ...combined };
   }
 
   // Normalize actor dossiers:
@@ -948,6 +994,7 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
     "bplots",
     "opportunities",
     "init",
+    "ledger",
   ]);
 
   for (const [key, val] of Object.entries(combined)) {
@@ -1037,7 +1084,6 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
 
   return merged;
 }
-
 ```
 
 ## File: `src/backend/storage.ts`
@@ -1427,9 +1473,10 @@ import { MapTab } from "./tab-map.js";
 import { PhoneTab } from "./tab-phone.js";
 import { JournalTab } from "./tab-journal.js";
 import { SceneTab } from "./tab-scene.js";
+import { DiagnosticsTab } from "./tab-diagnostics.js";
 import type { SpriteTransform } from "../stage/sprite-transform.js";
 
-export type HudTabId = "characters" | "wardrobe" | "stats" | "inventory" | "map" | "phone" | "journal" | "scene";
+export type HudTabId = "characters" | "wardrobe" | "stats" | "inventory" | "map" | "phone" | "journal" | "scene" | "diagnostics";
 
 export interface MenuBarOptions {
   ctx: SpindleFrontendContext;
@@ -1451,6 +1498,7 @@ export class MenuBar {
   private phoneTab: PhoneTab;
   private journalTab: JournalTab;
   private sceneTab: SceneTab;
+  private diagnosticsTab: DiagnosticsTab;
 
   private activeTabId: HudTabId | null = null;
   private currentLedger: LedgerData = {};
@@ -1492,6 +1540,7 @@ export class MenuBar {
     this.phoneTab = new PhoneTab(options.ctx, options.onAction);
     this.journalTab = new JournalTab();
     this.sceneTab = new SceneTab(options.ctx, options.onTransformChange);
+    this.diagnosticsTab = new DiagnosticsTab();
 
     // Render bar buttons
     const barItems: Array<{ id: HudTabId; icon: string; label: string }> = [
@@ -1503,6 +1552,7 @@ export class MenuBar {
       { id: "phone", icon: "📱", label: "Phone" },
       { id: "journal", icon: "📜", label: "Journal" },
       { id: "scene", icon: "🎬", label: "Scene" },
+      { id: "diagnostics", icon: "📋", label: "Copy / Diag" },
     ];
 
     for (const item of barItems) {
@@ -1536,7 +1586,13 @@ export class MenuBar {
   }
 
   public setLedger(ledger: LedgerData, hasBPlotNotification = false): void {
-    this.currentLedger = ledger;
+    const raw = ledger as any;
+    if (raw && raw.ledger && typeof raw.ledger === "object" && !Array.isArray(raw.ledger)) {
+      this.currentLedger = { ...raw.ledger, ...raw };
+    } else {
+      this.currentLedger = ledger || {};
+    }
+
     if (this.phoneBadge) {
       this.phoneBadge.style.display = hasBPlotNotification ? "inline-block" : "none";
     }
@@ -1599,16 +1655,126 @@ export class MenuBar {
         this.sceneTab.render(this.currentLedger, this.currentManifest);
         this.panelBody.appendChild(this.sceneTab.root);
         break;
+      case "diagnostics":
+        this.diagnosticsTab.render(this.currentLedger, this.currentManifest);
+        this.panelBody.appendChild(this.diagnosticsTab.root);
+        break;
     }
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-characters.ts`
 
 ```typescript
 import type { LedgerData, ActorDossier, AssetManifest } from "../../shared/types.js";
+
+// Helper normalizers for tuples vs objects emitted by LLM My World 1.79 ledger
+function normalizeGoal(g: any): {
+  id: string;
+  intent: string;
+  priority: number | string;
+  commitment: number | string;
+  deadline: string;
+  cause: string;
+  progress: number | string;
+  status: string;
+} {
+  if (Array.isArray(g)) {
+    return {
+      id: String(g[0] ?? "goal"),
+      intent: String(g[1] ?? ""),
+      priority: g[2] ?? 0,
+      commitment: g[3] ?? 0,
+      deadline: String(g[4] ?? ""),
+      cause: String(g[5] ?? ""),
+      progress: g[6] ?? 0,
+      status: String(g[7] ?? "active"),
+    };
+  }
+  return {
+    id: String(g?.id ?? "goal"),
+    intent: String(g?.intent ?? g?.goal ?? g?.title ?? ""),
+    priority: g?.priority ?? 0,
+    commitment: g?.commitment ?? 0,
+    deadline: String(g?.deadline ?? ""),
+    cause: String(g?.cause ?? ""),
+    progress: g?.progress ?? 0,
+    status: String(g?.status ?? "active"),
+  };
+}
+
+function normalizeSecret(s: any): {
+  truth: string;
+  knows: string[];
+  suspects: string[];
+  exposure: number;
+  cover: string;
+} {
+  if (Array.isArray(s)) {
+    return {
+      truth: String(s[0] ?? ""),
+      knows: Array.isArray(s[1]) ? s[1].map(String) : s[1] ? [String(s[1])] : [],
+      suspects: Array.isArray(s[2]) ? s[2].map(String) : s[2] ? [String(s[2])] : [],
+      exposure: Number(s[3] ?? 0),
+      cover: String(s[4] ?? ""),
+    };
+  }
+  return {
+    truth: String(s?.truth ?? s?.secret ?? ""),
+    knows: Array.isArray(s?.knows) ? s.knows.map(String) : [],
+    suspects: Array.isArray(s?.suspects) ? s.suspects.map(String) : [],
+    exposure: Number(s?.exposure ?? 0),
+    cover: String(s?.cover ?? ""),
+  };
+}
+
+function normalizeBelief(b: any): {
+  proposition: string;
+  confidence: number;
+  source: string;
+  basis: string;
+  timestamp: string;
+} {
+  if (Array.isArray(b)) {
+    return {
+      proposition: String(b[0] ?? ""),
+      confidence: Number(b[1] ?? 100),
+      source: String(b[2] ?? "direct"),
+      basis: String(b[3] ?? ""),
+      timestamp: String(b[4] ?? ""),
+    };
+  }
+  return {
+    proposition: String(b?.proposition ?? b?.p ?? b?.belief ?? ""),
+    confidence: Number(b?.confidence ?? b?.conf ?? 100),
+    source: String(b?.source ?? "direct"),
+    basis: String(b?.basis ?? ""),
+    timestamp: String(b?.timestamp ?? b?.t ?? ""),
+  };
+}
+
+function normalizeRoutine(r: any): {
+  time: string;
+  action: string;
+  place: string;
+  phase: string;
+} {
+  if (Array.isArray(r)) {
+    return {
+      time: String(r[0] ?? ""),
+      action: String(r[1] ?? ""),
+      place: String(r[2] ?? ""),
+      phase: String(r[3] ?? ""),
+    };
+  }
+  return {
+    time: String(r?.time ?? r?.t ?? ""),
+    action: String(r?.action ?? r?.activity ?? ""),
+    place: String(r?.place ?? r?.loc ?? ""),
+    phase: String(r?.phase ?? ""),
+  };
+}
 
 export class CharactersTab {
   public root: HTMLElement;
@@ -1621,33 +1787,67 @@ export class CharactersTab {
 
   public render(ledger: LedgerData, manifest?: AssetManifest): void {
     this.root.innerHTML = "";
-    const actors = ledger.actors || {};
-    const actorIds = Object.keys(actors).filter((id) => id.toLowerCase() !== "user");
+    const actors: Record<string, ActorDossier> = { ...(ledger.actors || {}) };
 
-    const header = document.createElement("div");
-    header.className = "vn-tab-header";
-    header.innerHTML = `<h3>👥 Cast & Character Records</h3><p class="vn-muted">Select a character to inspect appearance, personality profile, and relationships.</p>`;
-    this.root.appendChild(header);
+    // Supplement from roster if actors are not yet recorded as full dossiers
+    if (ledger.roster && Array.isArray(ledger.roster)) {
+      for (const r of ledger.roster) {
+        if (r.id && !actors[r.id]) {
+          actors[r.id] = {
+            id: r.id,
+            name: r.name || r.id,
+            life_model: { occupation: r.status || "Resident" },
+            agency: { want_now: r.status || "None" },
+          };
+        }
+      }
+    }
 
-    if (actorIds.length === 0) {
-      this.root.innerHTML += `<div class="vn-muted" style="text-align:center; padding: 24px;">No secondary characters recorded yet.</div>`;
+    const allKeys = Object.keys(actors);
+    if (allKeys.length === 0) {
+      this.root.innerHTML = `<div class="vn-muted" style="text-align:center; padding: 32px;">No characters recorded in the ledger yet.</div>`;
       return;
     }
+
+    // Sort: user first, then alphabetical
+    const actorIds = allKeys.sort((a, b) => {
+      if (a.toLowerCase() === "user") return -1;
+      if (b.toLowerCase() === "user") return 1;
+      return a.localeCompare(b);
+    });
 
     if (!this.selectedActorId || !actors[this.selectedActorId]) {
       this.selectedActorId = actorIds[0]!;
     }
 
-    // Avatar Icon Ribbon
+    const header = document.createElement("div");
+    header.className = "vn-tab-header";
+    header.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <h3 style="margin:0; font-size:15px; color:#f8fafc; display:flex; align-items:center; gap:6px;">
+            <span>👥</span> <span>Cast & Living World Dossiers</span>
+          </h3>
+          <p class="vn-muted" style="margin:2px 0 0 0; font-size:11px;">
+            Inspect character personas, attire, hidden caches, tells, active goals, and guarded secrets.
+          </p>
+        </div>
+        <span style="font-size:11px; background:#1e293b; border:1px solid #334155; padding:3px 8px; border-radius:6px; color:#94a3b8;">
+          ${actorIds.length} actors tracked
+        </span>
+      </div>
+    `;
+    this.root.appendChild(header);
+
+    // Avatar Ribbon
     const ribbon = document.createElement("div");
-    ribbon.style.cssText = "display: flex; gap: 14px; overflow-x: auto; padding: 6px 4px 16px 4px; border-bottom: 1px solid #334155; margin-bottom: 18px;";
+    ribbon.style.cssText = "display: flex; gap: 12px; overflow-x: auto; padding: 6px 4px 14px 4px; border-bottom: 1px solid #334155; margin-bottom: 16px;";
 
     for (const id of actorIds) {
       const actor = actors[id]!;
       const isSelected = id === this.selectedActorId;
       const cleanId = id.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
 
-      // Resolve avatar URL from manifest or fallback
       let avatarUrl = "";
       if (manifest?.characters?.[cleanId]) {
         const charData = manifest.characters[cleanId]!;
@@ -1658,11 +1858,15 @@ export class CharactersTab {
 
       const item = document.createElement("div");
       item.style.cssText = `display: flex; flex-direction: column; align-items: center; cursor: pointer; min-width: 68px; transition: transform 0.15s ease;`;
+      const displayName = id.toLowerCase() === "user" ? "Player (You)" : actor.name || id;
+
       item.innerHTML = `
-        <div style="width: 56px; height: 56px; border-radius: 50%; overflow: hidden; border: 2px solid ${isSelected ? "#818cf8" : "#475569"}; box-shadow: ${isSelected ? "0 0 10px rgba(99,102,241,0.6)" : "none"}; background: #1e293b; display: flex; align-items: center; justify-content: center;">
-          ${avatarUrl ? `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="${actor.name || id}" />` : `<span style="font-size: 20px;">👤</span>`}
+        <div style="width: 52px; height: 52px; border-radius: 50%; overflow: hidden; border: 2px solid ${isSelected ? "#818cf8" : "#475569"}; box-shadow: ${isSelected ? "0 0 10px rgba(99,102,241,0.6)" : "none"}; background: #1e293b; display: flex; align-items: center; justify-content: center; position: relative;">
+          ${avatarUrl ? `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="${displayName}" />` : `<span style="font-size: 22px;">👤</span>`}
         </div>
-        <span style="font-size: 11px; margin-top: 5px; color: ${isSelected ? "#f8fafc" : "#94a3b8"}; font-weight: ${isSelected ? "700" : "500"}; max-width: 64px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${actor.name || id}</span>
+        <span style="font-size: 11px; margin-top: 5px; color: ${isSelected ? "#f8fafc" : "#94a3b8"}; font-weight: ${isSelected ? "700" : "500"}; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          ${displayName}
+        </span>
       `;
       item.addEventListener("click", () => {
         this.selectedActorId = id;
@@ -1672,115 +1876,411 @@ export class CharactersTab {
     }
     this.root.appendChild(ribbon);
 
-    // Selected Actor Dossier View
-    const actor = actors[this.selectedActorId]!;
-    this.renderActorDetails(actor, ledger);
+    // Render Detailed Dossier of Selected Actor
+    const currentActor = actors[this.selectedActorId]!;
+    this.renderActorDetails(currentActor, ledger);
   }
 
   private renderActorDetails(actor: ActorDossier, ledger: LedgerData): void {
-    const detailsContainer = document.createElement("div");
-    detailsContainer.style.cssText = "display: flex; flex-direction: column; gap: 16px;";
+    const container = document.createElement("div");
+    container.style.cssText = "display: flex; flex-direction: column; gap: 14px;";
 
-    const prof = (actor.profile as Record<string, any>) || {};
-    const life = (actor.life_model as Record<string, any>) || {};
+    const isUser = (actor.id || "").toLowerCase() === "user";
+    const displayName = isUser ? "Player (You)" : actor.name || actor.id || "Unknown";
+
     const app = (actor.appearance as Record<string, any>) || {};
+    const money = (actor.money as Record<string, any>) || {};
+    const combat = (actor.combat as Record<string, any>) || {};
+    const life = (actor.life_model as Record<string, any>) || {};
+    const outfit = (actor.outfit as Record<string, any>) || {};
+    const inv = (actor.inventory as Record<string, any>) || {};
+    const wounds = (actor.wounds as Record<string, any>) || {};
+    const trauma = Array.isArray(actor.trauma) ? actor.trauma : [];
+    const prof = (actor.profile as Record<string, any>) || {};
+    const state = (actor.state as Record<string, any>) || {};
+    const agency = (actor.agency as Record<string, any>) || {};
+    const know = (actor.knowledge as Record<string, any>) || {};
+    const rels = (actor.relations as Record<string, any>) || {};
 
-    // 1. Identity & Appearance Card
-    const idCard = document.createElement("div");
-    idCard.className = "vn-section";
-    idCard.innerHTML = `
-      <h4>${actor.name || actor.id} — Overview</h4>
-      <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; font-size: 13px; line-height: 1.5; color: #cbd5e1;">
-        <div><strong>Occupation:</strong> ${life.occupation || "Unknown"} | <strong>Age/Traits:</strong> ${app.age || "Unknown"}, ${app.traits || "None"}</div>
-        <div style="margin-top: 4px;"><strong>Style & Appeal:</strong> ${app.style || "Casual"} (${app.appeal ?? "?"}/100)</div>
-        <div style="margin-top: 4px;"><strong>Current Want:</strong> <span style="color: #38bdf8;">${(actor.agency as any)?.want_now || "None declared"}</span></div>
-      </div>
-    `;
-    detailsContainer.appendChild(idCard);
+    const conditionStr = app.condition || state.condition || "Normal";
+    const wantStr = agency.want_now || "None declared";
 
-    // 2. Personality & Dispositions
-    const disp = prof.dispositions || {};
-    const dispKeys = Object.keys(disp);
-    if (dispKeys.length > 0) {
-      const dispSection = document.createElement("div");
-      dispSection.className = "vn-section";
-      dispSection.innerHTML = `<h4>Dispositions & Psychological Traits</h4>`;
-      const grid = document.createElement("div");
-      grid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px;";
-      for (const k of dispKeys) {
-        const item = document.createElement("div");
-        item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font-size: 11px;";
-        item.innerHTML = `<span style="color: #94a3b8; text-transform: capitalize;">${k}:</span> <strong style="color: #f8fafc;">${disp[k]}</strong>`;
-        grid.appendChild(item);
-      }
-      dispSection.appendChild(grid);
-      detailsContainer.appendChild(dispSection);
-    }
-
-    // 3. Boundaries & Red Lines
-    const boundaries = prof.boundaries || [];
-    const redLines = prof.red_lines || [];
-    if (boundaries.length > 0 || redLines.length > 0) {
-      const boundSection = document.createElement("div");
-      boundSection.className = "vn-section";
-      boundSection.innerHTML = `
-        <h4>Limits & Boundaries</h4>
-        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px; color: #cbd5e1;">
-          ${boundaries.length > 0 ? `<div><strong>Boundaries:</strong> ${boundaries.join(", ")}</div>` : ""}
-          ${redLines.length > 0 ? `<div style="margin-top: 4px; color: #fca5a5;"><strong>Red Lines:</strong> ${redLines.join(", ")}</div>` : ""}
+    // 1. Identity & Physical Persona Banner
+    const banner = document.createElement("div");
+    banner.className = "vn-section";
+    banner.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.5; color: #cbd5e1;";
+    banner.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:8px; border-bottom:1px solid #334155; padding-bottom:6px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h4 style="margin:0; font-size:15px; color:#f8fafc;">${displayName}</h4>
+          <span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe;">
+            ${life.occupation || "Resident"}
+          </span>
+          <span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(234,179,8,0.2); border:1px solid #eab308; color:#fef08a;">
+            ${conditionStr}
+          </span>
         </div>
-      `;
-      detailsContainer.appendChild(boundSection);
+        <div style="font-size:11px; color:#94a3b8;">
+          Appeal: <strong style="color:#f43f5e;">${app.appeal ?? 50}/100</strong>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:6px; margin-bottom:8px;">
+        <div><span style="color:#94a3b8;">Age:</span> <strong>${app.age || "Unknown"}</strong></div>
+        <div><span style="color:#94a3b8;">Style:</span> <strong>${app.style || "Casual"}</strong></div>
+        <div><span style="color:#94a3b8;">Residence:</span> <strong>${life.residence || "Current Scene"}</strong></div>
+        <div><span style="color:#94a3b8;">Orientation:</span> <strong>${life.orientation || "Unspecified"}</strong></div>
+      </div>
+
+      ${app.traits ? `<div style="margin-bottom:6px; background:#0f172a; padding:6px 8px; border-radius:4px; border-left:3px solid #818cf8;"><strong>Traits:</strong> ${app.traits}</div>` : ""}
+
+      <div style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); border-radius:4px; padding:6px 8px; color:#e0f2fe; margin-top:4px;">
+        <span style="color:#38bdf8; font-weight:700;">🎯 Immediate Want:</span> ${wantStr}
+      </div>
+
+      ${actor.constraints ? `
+        <div style="margin-top:6px; background:rgba(244,63,94,0.1); border:1px solid rgba(244,63,94,0.3); border-radius:4px; padding:6px 8px; color:#fecdd3;">
+          <span style="color:#f43f5e; font-weight:700;">⚠️ Constraint / Taboo:</span> ${actor.constraints}
+        </div>
+      ` : ""}
+    `;
+    container.appendChild(banner);
+
+    // 2. Attire & Wardrobe Layer Breakdown
+    const outfitSection = document.createElement("div");
+    outfitSection.className = "vn-section";
+    outfitSection.innerHTML = `<h4>👗 Attire & Wardrobe</h4>`;
+    const outfitGrid = document.createElement("div");
+    outfitGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px;";
+
+    const outfitKeys: Array<{ label: string; key: string; icon: string }> = [
+      { label: "Top", key: "top", icon: "👕" },
+      { label: "Bottom", key: "bottom", icon: "👖" },
+      { label: "Underwear Top", key: "underwear_top", icon: "👙" },
+      { label: "Underwear Bottom", key: "underwear_bottom", icon: "🩲" },
+      { label: "Footwear", key: "shoes", icon: "👟" },
+      { label: "Hair & Makeup", key: "hair", icon: "💄" },
+      { label: "Scent", key: "scent", icon: "✨" },
+      { label: "Dishevelment", key: "state", icon: "🧵" },
+    ];
+
+    let hasOutfitItems = false;
+    for (const item of outfitKeys) {
+      let val = outfit[item.key] || (item.key === "shoes" ? outfit["footwear"] : undefined);
+      if (val) {
+        hasOutfitItems = true;
+        const box = document.createElement("div");
+        box.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font-size: 11px;";
+        box.innerHTML = `
+          <div style="color: #94a3b8; margin-bottom: 2px;">${item.icon} ${item.label}</div>
+          <div style="color: #f8fafc; font-weight: 600;">${val}</div>
+        `;
+        outfitGrid.appendChild(box);
+      }
     }
 
-    // 4. Relations toward Other NPCs & Player
-    const rels = actor.relations || {};
-    const targetIds = Object.keys(rels);
-    const relsSection = document.createElement("div");
-    relsSection.className = "vn-section";
-    relsSection.innerHTML = `<h4>Relationship Matrix (${targetIds.length})</h4>`;
+    if (outfit.accessories) {
+      hasOutfitItems = true;
+      const accList = Array.isArray(outfit.accessories) ? outfit.accessories.join(", ") : outfit.accessories;
+      const accBox = document.createElement("div");
+      accBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font-size: 11px; grid-column: 1 / -1;";
+      accBox.innerHTML = `
+        <div style="color: #94a3b8; margin-bottom: 2px;">💍 Accessories & Jewelry</div>
+        <div style="color: #f8fafc; font-weight: 600;">${accList}</div>
+      `;
+      outfitGrid.appendChild(accBox);
+    }
 
-    if (targetIds.length === 0) {
-      relsSection.innerHTML += `<div class="vn-muted">No relational links recorded.</div>`;
-    } else {
+    if (!hasOutfitItems) {
+      outfitGrid.innerHTML = `<div class="vn-muted" style="padding:8px;">Standard default attire</div>`;
+    }
+    outfitSection.appendChild(outfitGrid);
+    container.appendChild(outfitSection);
+
+    // 3. Possessions, Inventory & Wealth
+    const invSection = document.createElement("div");
+    invSection.className = "vn-section";
+    invSection.innerHTML = `<h4>🎒 Equipment, Carried Gear & Finances</h4>`;
+
+    const currencySymbol = money.currency || "$";
+    const inHandCash = money.in_hand ?? 0;
+    const inBankCash = money.in_bank ?? 0;
+    const inHandL = inv.in_hand?.L || "Empty";
+    const inHandR = inv.in_hand?.R || "Empty";
+    const carriedList = Array.isArray(inv.carried) ? inv.carried : [];
+    const roomList = Array.isArray(inv.room) ? inv.room : [];
+
+    const invBox = document.createElement("div");
+    invBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px;";
+    invBox.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid #334155; padding-bottom:8px;">
+        <div style="display:flex; gap:16px;">
+          <div><span style="color:#94a3b8;">In Hand:</span> <strong style="color:#22c55e;">${currencySymbol}${inHandCash}</strong></div>
+          <div><span style="color:#94a3b8;">In Bank:</span> <strong style="color:#38bdf8;">${currencySymbol}${inBankCash}</strong></div>
+        </div>
+        <div style="font-size:11px; color:#cbd5e1;">
+          Hands: <span style="color:#f8fafc;">[L: ${inHandL}] [R: ${inHandR}]</span>
+        </div>
+      </div>
+
+      <div>
+        <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">Carried On Person:</div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          ${carriedList.length > 0 ? carriedList.map((item: any) => `<span style="background:#0f172a; border:1px solid #475569; padding:2px 8px; border-radius:4px; font-size:11px; color:#f8fafc;">📦 ${item}</span>`).join("") : `<span class="vn-muted">Nothing carried</span>`}
+        </div>
+      </div>
+
+      ${roomList.length > 0 ? `
+        <div style="margin-top:4px;">
+          <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">Stored in Room (${inv.room_location || "Quarters"}):</div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px;">
+            ${roomList.map((item: any) => `<span style="background:#0f172a; border:1px solid #334155; padding:2px 8px; border-radius:4px; font-size:11px; color:#94a3b8;">🗄️ ${item}</span>`).join("")}
+          </div>
+        </div>
+      ` : ""}
+    `;
+    invSection.appendChild(invBox);
+    container.appendChild(invSection);
+
+    // 4. Combat Vitals & RPG Stats (if populated)
+    if (combat && (combat.hp || combat.pwr || combat.eff_pwr || combat.tier)) {
+      const combatSection = document.createElement("div");
+      combatSection.className = "vn-section";
+      combatSection.innerHTML = `<h4>⚔️ Combat Vitals & Aptitudes</h4>`;
+
+      const cBox = document.createElement("div");
+      cBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px;";
+      cBox.innerHTML = `
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px; border-bottom:1px solid #334155; padding-bottom:6px;">
+          <div>Tier: <strong style="color:#eab308;">${combat.tier ?? 1}</strong> | Lv: <strong style="color:#f8fafc;">${combat.lv ?? 1}</strong> (${combat.exp ?? "0/100"})</div>
+          <div style="display:flex; gap:12px;">
+            <div>HP: <strong style="color:#ef4444;">${combat.hp ?? "100/100"}</strong></div>
+            <div>MP: <strong style="color:#3b82f6;">${combat.mp ?? "50/50"}</strong></div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(90px, 1fr)); gap:6px; margin-bottom:8px;">
+          <div style="background:#0f172a; padding:4px 8px; border-radius:4px;">PWR: <strong>${combat.pwr ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px 8px; border-radius:4px;">AGI: <strong>${combat.agi ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px 8px; border-radius:4px;">INT: <strong>${combat.int ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px 8px; border-radius:4px;">Eff PWR: <strong>${combat.eff_pwr ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px 8px; border-radius:4px;">Eff AGI: <strong>${combat.eff_agi ?? "-"}</strong></div>
+        </div>
+
+        ${combat.talent ? `
+          <div style="font-size:11px;">
+            <span style="color:#94a3b8;">Talents & Disciplines:</span>
+            <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+              ${(Array.isArray(combat.talent) ? combat.talent : [combat.talent]).map((t: any) => `<span style="background:rgba(129,140,248,0.15); border:1px solid #818cf8; color:#c7d2fe; padding:2px 6px; border-radius:4px;">✦ ${t}</span>`).join("")}
+            </div>
+          </div>
+        ` : ""}
+      `;
+      combatSection.appendChild(cBox);
+      container.appendChild(combatSection);
+    }
+
+    // 5. Psychological Condition, Wounds, Traumas & Tells
+    const physWounds = Array.isArray(wounds.physical) ? wounds.physical : [];
+    const psychWounds = Array.isArray(wounds.psychological) ? wounds.psychological : [];
+    const tells = prof.tells ? (Array.isArray(prof.tells) ? prof.tells : [prof.tells]) : [];
+
+    const psychoSection = document.createElement("div");
+    psychoSection.className = "vn-section";
+    psychoSection.innerHTML = `<h4>🧠 Condition, Tells & Wounds</h4>`;
+
+    const psychoBox = document.createElement("div");
+    psychoBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px;";
+    psychoBox.innerHTML = `
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px;">
+        <div>
+          <div style="color:#fca5a5; font-weight:700; font-size:11px; margin-bottom:3px;">Physical Wounds:</div>
+          <div>${physWounds.length > 0 ? physWounds.map((w: any) => `<span style="display:inline-block; background:rgba(239,68,68,0.2); border:1px solid #ef4444; color:#fca5a5; padding:2px 6px; border-radius:4px; margin-right:4px; margin-bottom:4px;">🩹 ${w}</span>`).join("") : `<span class="vn-muted">None</span>`}</div>
+        </div>
+        <div>
+          <div style="color:#fcd34d; font-weight:700; font-size:11px; margin-bottom:3px;">Psychological Wounds & Trauma:</div>
+          <div>${(psychWounds.length > 0 || trauma.length > 0) ? [...psychWounds, ...trauma].map((pw: any) => `<span style="display:inline-block; background:rgba(245,158,11,0.2); border:1px solid #f59e0b; color:#fde68a; padding:2px 6px; border-radius:4px; margin-right:4px; margin-bottom:4px;">⚠️ ${pw}</span>`).join("") : `<span class="vn-muted">None</span>`}</div>
+        </div>
+      </div>
+
+      ${tells.length > 0 ? `
+        <div style="margin-top:4px; border-top:1px solid #334155; padding-top:6px;">
+          <div style="color:#38bdf8; font-weight:700; font-size:11px; margin-bottom:3px;">👁️ Behavioral Tells & Micro-Expressions:</div>
+          <div style="color:#e0f2fe; font-size:11px;">${tells.join("; ")}</div>
+        </div>
+      ` : ""}
+
+      ${(prof.defense || prof.blind_spot) ? `
+        <div style="margin-top:2px; display:flex; flex-wrap:wrap; gap:12px; font-size:11px; color:#94a3b8;">
+          ${prof.defense ? `<div>Defense: <strong style="color:#cbd5e1;">${prof.defense}</strong></div>` : ""}
+          ${prof.blind_spot ? `<div>Blind Spot: <strong style="color:#cbd5e1;">${prof.blind_spot}</strong></div>` : ""}
+        </div>
+      ` : ""}
+    `;
+    psychoSection.appendChild(psychoBox);
+    container.appendChild(psychoSection);
+
+    // 6. Life Model, Upbringing & Daily Routines
+    const routines = Array.isArray(life.routines) ? life.routines.map(normalizeRoutine) : [];
+    const lifeSection = document.createElement("div");
+    lifeSection.className = "vn-section";
+    lifeSection.innerHTML = `<h4>📖 Persona, Upbringing & Routines</h4>`;
+
+    const lifeBox = document.createElement("div");
+    lifeBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display:flex; flex-direction:column; gap:8px;";
+    lifeBox.innerHTML = `
+      ${life.romantic_history ? `<div><span style="color:#94a3b8;">Romantic History:</span> <strong style="color:#f8fafc;">${life.romantic_history}</strong></div>` : ""}
+      ${life.upbringing ? `<div><span style="color:#94a3b8;">Upbringing:</span> <span style="color:#cbd5e1;">${life.upbringing}</span></div>` : ""}
+      ${life.worldview ? `<div><span style="color:#94a3b8;">Worldview:</span> <span style="color:#cbd5e1;">"${life.worldview}"</span></div>` : ""}
+      ${life.family ? `<div><span style="color:#94a3b8;">Family:</span> <span style="color:#cbd5e1;">${Array.isArray(life.family) ? life.family.join(", ") : life.family}</span></div>` : ""}
+
+      ${routines.length > 0 ? `
+        <div style="margin-top:6px; border-top:1px solid #334155; padding-top:6px;">
+          <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">Daily Routines & Schedules:</div>
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            ${routines.map(r => `
+              <div style="display:flex; justify-content:space-between; background:#0f172a; padding:4px 8px; border-radius:4px; font-size:11px;">
+                <span style="color:#38bdf8; font-weight:700;">${r.time} (${r.phase})</span>
+                <span style="color:#f8fafc;">${r.action}</span>
+                <span style="color:#94a3b8;">@ ${r.place}</span>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      ` : ""}
+    `;
+    lifeSection.appendChild(lifeBox);
+    container.appendChild(lifeSection);
+
+    // 7. Agency: Active Goals & Directives
+    const rawGoals = Array.isArray(agency.goals) ? agency.goals : [];
+    if (rawGoals.length > 0) {
+      const goals = rawGoals.map(normalizeGoal);
+      const goalSection = document.createElement("div");
+      goalSection.className = "vn-section";
+      goalSection.innerHTML = `<h4>🎯 Active Goals & Directives (${goals.length})</h4>`;
+
+      const goalList = document.createElement("div");
+      goalList.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+
+      for (const g of goals) {
+        const item = document.createElement("div");
+        item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px;";
+        item.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <strong style="color:#38bdf8; font-size:12px;">${g.intent}</strong>
+            <span style="padding:1px 6px; border-radius:4px; background:rgba(34,197,94,0.2); border:1px solid #22c55e; color:#86efac;">
+              ${g.status} (${g.progress}%)
+            </span>
+          </div>
+          <div style="display:flex; gap:12px; color:#94a3b8; flex-wrap:wrap;">
+            <span>Priority: <strong style="color:#f8fafc;">${g.priority}</strong></span>
+            <span>Commitment: <strong style="color:#f8fafc;">${g.commitment}</strong></span>
+            ${g.deadline ? `<span>Deadline: <strong style="color:#fca5a5;">${g.deadline}</strong></span>` : ""}
+          </div>
+          ${g.cause ? `<div style="margin-top:4px; color:#cbd5e1; font-style:italic;">Cause: ${g.cause}</div>` : ""}
+        `;
+        goalList.appendChild(item);
+      }
+      goalSection.appendChild(goalList);
+      container.appendChild(goalSection);
+    }
+
+    // 8. Knowledge, Guarded Secrets & Core Beliefs
+    const rawSecrets = Array.isArray(know.secrets) ? know.secrets : [];
+    const rawBeliefs = Array.isArray(know.beliefs) ? know.beliefs : [];
+    if (rawSecrets.length > 0 || rawBeliefs.length > 0) {
+      const knowSection = document.createElement("div");
+      knowSection.className = "vn-section";
+      knowSection.innerHTML = `<h4>🔒 Guarded Secrets & Epistemic Beliefs</h4>`;
+
+      const knowBox = document.createElement("div");
+      knowBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display:flex; flex-direction:column; gap:8px;";
+
+      if (rawSecrets.length > 0) {
+        const secrets = rawSecrets.map(normalizeSecret);
+        knowBox.innerHTML += `
+          <div>
+            <div style="color:#f43f5e; font-weight:700; font-size:11px; margin-bottom:4px;">Guarded Secrets:</div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${secrets.map(s => `
+                <div style="background:#0f172a; border-left:3px solid #f43f5e; padding:6px 8px; border-radius:4px; font-size:11px;">
+                  <div style="color:#fecdd3; font-weight:600;">"${s.truth}"</div>
+                  <div style="display:flex; gap:12px; margin-top:3px; color:#94a3b8; font-size:10px;">
+                    <span>Exposure Risk: <strong style="color:#fb7185;">${s.exposure}%</strong></span>
+                    <span>Knows: <strong style="color:#f8fafc;">${s.knows.join(", ") || "Self only"}</strong></span>
+                    ${s.cover ? `<span>Cover: <em>${s.cover}</em></span>` : ""}
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      if (rawBeliefs.length > 0) {
+        const beliefs = rawBeliefs.map(normalizeBelief);
+        knowBox.innerHTML += `
+          <div style="margin-top:4px;">
+            <div style="color:#38bdf8; font-weight:700; font-size:11px; margin-bottom:4px;">Epistemic Beliefs:</div>
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              ${beliefs.map(b => `
+                <div style="background:#0f172a; padding:4px 8px; border-radius:4px; font-size:11px; display:flex; justify-content:space-between;">
+                  <span style="color:#e0f2fe;">"${b.proposition}"</span>
+                  <span style="color:#94a3b8; font-size:10px;">conf: ${b.confidence}% (${b.source})</span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      knowSection.appendChild(knowBox);
+      container.appendChild(knowSection);
+    }
+
+    // 9. Relational Ties Matrix
+    const targetIds = Object.keys(rels);
+    if (targetIds.length > 0) {
+      const relsSection = document.createElement("div");
+      relsSection.className = "vn-section";
+      relsSection.innerHTML = `<h4>🤝 Interpersonal Relations (${targetIds.length})</h4>`;
+
       const relsList = document.createElement("div");
-      relsList.style.cssText = "display: flex; flex-direction: column; gap: 10px;";
+      relsList.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
 
       for (const targetId of targetIds) {
         const r = rels[targetId] as Record<string, any>;
-        const targetName = targetId === "user" ? "Player (You)" : ledger.actors?.[targetId]?.name || targetId;
-        const bThreshold = r.betrayal_threshold !== undefined && r.betrayal_threshold !== null ? r.betrayal_threshold : "N/A";
+        const targetName = targetId.toLowerCase() === "user" ? "Player (You)" : ledger.actors?.[targetId]?.name || targetId;
+        const bThreshold = r.betrayal_threshold ?? "N/A";
 
         const card = document.createElement("div");
-        card.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px;";
+        card.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 8px 10px; font-size: 11px;";
         card.innerHTML = `
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <strong style="color: #818cf8; font-size: 13px;">Towards ${targetName}</strong>
-            <span style="font-size: 11px; background: rgba(239,68,68,0.2); border: 1px solid #ef4444; color: #fca5a5; padding: 2px 6px; border-radius: 4px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <strong style="color:#818cf8; font-size:12px;">Towards ${targetName}</strong>
+            <span style="font-size:10px; background:rgba(239,68,68,0.2); border:1px solid #ef4444; color:#fca5a5; padding:1px 6px; border-radius:4px;">
               Betrayal Thresh: ${bThreshold}
             </span>
           </div>
-          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 6px; color: #cbd5e1; margin-bottom: 6px;">
+          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(80px, 1fr)); gap:4px; color:#cbd5e1;">
             <div>Affinity: <strong>${r.affinity ?? 0}</strong></div>
             <div>Trust: <strong>${r.trust ?? 0}</strong></div>
             <div>Respect: <strong>${r.respect ?? 0}</strong></div>
             <div>Attraction: <strong>${r.attraction ?? 0}</strong></div>
             <div>Loyalty: <strong>${r.loyalty ?? 0}</strong></div>
-            <div>Sacrifice: <strong>${r.sacrifice_willingness ?? 0}</strong></div>
           </div>
-          ${(r.leverage && r.leverage.length > 0) ? `<div style="font-size: 11px; color: #f59e0b;">Leverage: ${r.leverage.join(", ")}</div>` : ""}
-          ${(r.obligations && r.obligations.length > 0) ? `<div style="font-size: 11px; color: #38bdf8;">Obligations: ${r.obligations.join(", ")}</div>` : ""}
+          ${(r.leverage && r.leverage.length > 0) ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${r.leverage.join(", ")}</div>` : ""}
         `;
         relsList.appendChild(card);
       }
       relsSection.appendChild(relsList);
+      container.appendChild(relsSection);
     }
-    detailsContainer.appendChild(relsSection);
 
-    this.root.appendChild(detailsContainer);
+    this.root.appendChild(container);
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-inventory.ts`
@@ -2033,12 +2533,21 @@ export class JournalTab {
 ## File: `src/frontend/hud/tab-map.ts`
 
 ```typescript
-import type { LedgerData } from "../../shared/types.js";
+import type { LedgerData, PlaceRoute, PlaceNode } from "../../shared/types.js";
 
 export class MapTab {
   public root: HTMLElement;
   private onAction: (actionText: string) => void;
   private viewMode: "indoor" | "outdoor" = "indoor";
+
+  // Pan & Zoom state
+  private zoom = 1.0;
+  private panX = 0;
+  private panY = 0;
+  private isPanning = false;
+  private startPointerX = 0;
+  private startPointerY = 0;
+  private selectedNodeId: string | null = null;
 
   constructor(onAction: (actionText: string) => void) {
     this.onAction = onAction;
@@ -2049,20 +2558,42 @@ export class MapTab {
   public render(ledger: LedgerData): void {
     this.root.innerHTML = "";
     const currentPlace = (ledger.scene?.place || "default").toLowerCase();
-    const isIndoor = currentPlace.includes(":") || currentPlace.includes("residence") || currentPlace.includes("dojo") || currentPlace.includes("room");
-    this.viewMode = isIndoor ? "indoor" : "outdoor";
+    const isIndoor = currentPlace.includes(":") || currentPlace.includes("residence") || currentPlace.includes("dojo") || currentPlace.includes("room") || currentPlace.includes("foyer");
+    
+    // Default to matching mode if not manually changed
+    if (!this.selectedNodeId) {
+      this.viewMode = isIndoor ? "indoor" : "outdoor";
+      this.selectedNodeId = currentPlace;
+    }
 
     const header = document.createElement("div");
     header.className = "vn-tab-header";
     header.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
         <div>
-          <h3>🗺️ World Cartography & Living Roster</h3>
-          <p class="vn-muted">Time: <strong>${ledger.clock?.t || "Unknown"}</strong> (${ledger.clock?.phase || "Day"}) | Location: <span style="color:#38bdf8;">${currentPlace}</span></p>
+          <h3 style="margin: 0; font-size: 15px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+            <span>🗺️</span> <span>Interactive Cartography & Blueprint</span>
+          </h3>
+          <p class="vn-muted" style="margin: 2px 0 0 0; font-size: 11px;">
+            <span>⏱️ <strong>${ledger.clock?.t || "D1 12:00"}</strong> (${ledger.clock?.phase || "Day"})</span>
+            ${ledger.clock?.date ? `<span> • 📅 ${ledger.clock.date}</span>` : ""}
+            <span> • 📍 <span style="color:#38bdf8; font-weight: 600;">${currentPlace}</span></span>
+          </p>
         </div>
-        <div style="display: flex; gap: 6px;">
-          <button id="vn-map-indoor-btn" class="vn-btn vn-btn-sm ${this.viewMode === "indoor" ? "vn-btn-primary" : "vn-btn-secondary"}">🏠 Building Floorplan</button>
-          <button id="vn-map-outdoor-btn" class="vn-btn vn-btn-sm ${this.viewMode === "outdoor" ? "vn-btn-primary" : "vn-btn-secondary"}">🌐 City / Region</button>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 2px; display: flex;">
+            <button id="vn-map-indoor-btn" class="vn-btn vn-btn-sm" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.viewMode === "indoor" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+              🏠 Blueprint
+            </button>
+            <button id="vn-map-outdoor-btn" class="vn-btn vn-btn-sm" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.viewMode === "outdoor" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+              🌐 District
+            </button>
+          </div>
+          <div style="display: flex; gap: 3px;">
+            <button id="vn-map-zoom-in" title="Zoom In" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 4px; width: 28px; height: 28px; font-weight: bold; cursor: pointer;">+</button>
+            <button id="vn-map-zoom-out" title="Zoom Out" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 4px; width: 28px; height: 28px; font-weight: bold; cursor: pointer;">−</button>
+            <button id="vn-map-zoom-reset" title="Reset View" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 4px; padding: 0 8px; height: 28px; font-size: 11px; cursor: pointer;">⟲</button>
+          </div>
         </div>
       </div>
     `;
@@ -2070,129 +2601,539 @@ export class MapTab {
 
     header.querySelector("#vn-map-indoor-btn")?.addEventListener("click", () => {
       this.viewMode = "indoor";
-      this.renderMapBody(ledger, currentPlace);
+      this.resetView();
+      this.render(ledger);
     });
     header.querySelector("#vn-map-outdoor-btn")?.addEventListener("click", () => {
       this.viewMode = "outdoor";
-      this.renderMapBody(ledger, currentPlace);
+      this.resetView();
+      this.render(ledger);
+    });
+    header.querySelector("#vn-map-zoom-in")?.addEventListener("click", () => this.adjustZoom(1.25));
+    header.querySelector("#vn-map-zoom-out")?.addEventListener("click", () => this.adjustZoom(0.8));
+    header.querySelector("#vn-map-zoom-reset")?.addEventListener("click", () => {
+      this.resetView();
+      this.updateTransform();
     });
 
-    const mapContainer = document.createElement("div");
-    mapContainer.id = "vn-map-canvas-container";
-    this.root.appendChild(mapContainer);
+    // Main map container layout: Canvas viewport + Details sidebar
+    const mainLayout = document.createElement("div");
+    mainLayout.style.cssText = "display: flex; gap: 12px; height: 420px; min-height: 400px; position: relative;";
 
-    this.renderMapBody(ledger, currentPlace);
+    const viewportWrap = document.createElement("div");
+    viewportWrap.id = "vn-map-viewport";
+    viewportWrap.style.cssText = "flex: 1; background: #070d19; border: 1px solid #1e293b; border-radius: 10px; overflow: hidden; position: relative; cursor: grab; user-select: none;";
+
+    const sidebar = document.createElement("div");
+    sidebar.id = "vn-map-sidebar";
+    sidebar.style.cssText = "width: 280px; background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;";
+
+    mainLayout.appendChild(viewportWrap);
+    mainLayout.appendChild(sidebar);
+    this.root.appendChild(mainLayout);
+
+    this.renderGraph(viewportWrap, ledger, currentPlace);
+    this.renderSidebar(sidebar, ledger, currentPlace);
+    this.setupPanZoom(viewportWrap);
   }
 
-  private renderMapBody(ledger: LedgerData, currentPlace: string): void {
-    const container = this.root.querySelector("#vn-map-canvas-container") as HTMLElement;
-    if (!container) return;
-    container.innerHTML = "";
+  private resetView(): void {
+    this.zoom = 1.0;
+    this.panX = 0;
+    this.panY = 0;
+  }
 
-    if (this.viewMode === "indoor") {
-      this.renderIndoorFloorplan(container, ledger, currentPlace);
-    } else {
-      this.renderOutdoorLivingWorld(container, ledger, currentPlace);
+  private adjustZoom(factor: number): void {
+    this.zoom = Math.max(0.4, Math.min(3.0, this.zoom * factor));
+    this.updateTransform();
+  }
+
+  private updateTransform(): void {
+    const group = this.root.querySelector("#vn-map-svg-group") as SVGGraphicsElement | null;
+    if (group) {
+      group.setAttribute("transform", `translate(${this.panX}, ${this.panY}) scale(${this.zoom})`);
     }
   }
 
-  private renderIndoorFloorplan(container: HTMLElement, ledger: LedgerData, currentPlace: string): void {
-    const floorplanCard = document.createElement("div");
-    floorplanCard.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px; margin-bottom: 16px;";
-    
-    // Extract base building scope (e.g. "tendo_residence")
+  private setupPanZoom(viewport: HTMLElement): void {
+    viewport.addEventListener("pointerdown", (e) => {
+      if ((e.target as HTMLElement).closest(".vn-map-node-interactive")) return;
+      this.isPanning = true;
+      this.startPointerX = e.clientX - this.panX;
+      this.startPointerY = e.clientY - this.panY;
+      viewport.style.cursor = "grabbing";
+      viewport.setPointerCapture(e.pointerId);
+    });
+
+    viewport.addEventListener("pointermove", (e) => {
+      if (!this.isPanning) return;
+      this.panX = e.clientX - this.startPointerX;
+      this.panY = e.clientY - this.startPointerY;
+      this.updateTransform();
+    });
+
+    const endPan = (e: PointerEvent) => {
+      if (!this.isPanning) return;
+      this.isPanning = false;
+      viewport.style.cursor = "grab";
+      try { viewport.releasePointerCapture(e.pointerId); } catch {}
+    };
+
+    viewport.addEventListener("pointerup", endPan);
+    viewport.addEventListener("pointercancel", endPan);
+
+    viewport.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.88;
+      this.adjustZoom(zoomFactor);
+    }, { passive: false });
+  }
+
+  private renderGraph(viewport: HTMLElement, ledger: LedgerData, currentPlace: string): void {
+    viewport.innerHTML = "";
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "100%");
+    svg.style.display = "block";
+
+    // Blueprint grid pattern definition
+    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    defs.innerHTML = `
+      <pattern id="grid-pattern" width="40" height="40" patternUnits="userSpaceOnUse">
+        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.8" stroke-opacity="0.4"/>
+        <circle cx="0" cy="0" r="1.5" fill="#334155" opacity="0.6"/>
+      </pattern>
+      <linearGradient id="corridor-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.6"/>
+        <stop offset="100%" stop-color="#818cf8" stop-opacity="0.6"/>
+      </linearGradient>
+    `;
+    svg.appendChild(defs);
+
+    // Background rect with grid
+    const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    bgRect.setAttribute("width", "100%");
+    bgRect.setAttribute("height", "100%");
+    bgRect.setAttribute("fill", "url(#grid-pattern)");
+    svg.appendChild(bgRect);
+
+    // Dynamic zoomable group
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.id = "vn-map-svg-group";
+    g.setAttribute("transform", `translate(${this.panX}, ${this.panY}) scale(${this.zoom})`);
+    svg.appendChild(g);
+
+    if (this.viewMode === "indoor") {
+      this.renderIndoorSvg(g, ledger, currentPlace);
+    } else {
+      this.renderOutdoorSvg(g, ledger, currentPlace);
+    }
+
+    viewport.appendChild(svg);
+  }
+
+  private renderIndoorSvg(group: SVGGElement, ledger: LedgerData, currentPlace: string): void {
     const scopePrefix = currentPlace.includes(":") ? currentPlace.split(":")[0]! : "building";
     const currentRoom = currentPlace.includes(":") ? currentPlace.split(":")[1]! : currentPlace;
 
-    // Filter places belonging to this indoor scope or standard household rooms
+    // Collect rooms
     const knownPlaces = Object.keys(ledger.places || {});
-    const indoorRooms = knownPlaces.filter((p) => p.startsWith(`${scopePrefix}:`) || !p.includes(":"));
-    const roomsToShow = indoorRooms.length > 0 ? indoorRooms : ["entrance", "living_room", "kitchen", "dojo", "bedroom", "courtyard"];
+    const indoorKeys = knownPlaces.filter((p) => p.startsWith(`${scopePrefix}:`) || !p.includes(":"));
+    const rawKeys = indoorKeys.length > 0
+      ? indoorKeys
+      : ["entrance", "living_room", "kitchen", "hallway", "bedroom", "courtyard", "bathroom"];
 
-    floorplanCard.innerHTML = `
-      <div style="font-weight: 700; color: #818cf8; margin-bottom: 12px; font-size: 14px;">🏠 Indoor Blueprint — ${scopePrefix.toUpperCase()}</div>
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px;">
-        ${roomsToShow.map((roomKey) => {
-          const rawName = roomKey.includes(":") ? roomKey.split(":")[1]! : roomKey;
-          const isHere = rawName === currentRoom || roomKey === currentPlace;
-          const presentNpcs = (ledger.roster || []).filter((r) => (r.loc || "").toLowerCase().includes(rawName));
-          const npcTags = presentNpcs.map((n) => `<span style="background: rgba(99,102,241,0.3); color: #c7d2fe; padding: 2px 6px; border-radius: 4px; font-size: 10px;">👤 ${n.name || n.id}</span>`).join(" ");
+    // Layout nodes in a blueprint coordinate scheme
+    interface RoomLayout {
+      id: string;
+      cleanName: string;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+    }
 
-          return `
-            <div style="background: ${isHere ? "rgba(56,189,248,0.15)" : "#1e293b"}; border: 2px solid ${isHere ? "#38bdf8" : "#334155"}; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between;">
-              <div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                  <strong style="color: ${isHere ? "#38bdf8" : "#f8fafc"}; font-size: 13px; text-transform: capitalize;">${rawName.replace(/_/g, " ")}</strong>
-                  ${isHere ? '<span style="font-size: 10px; background: #38bdf8; color: #000; padding: 1px 5px; border-radius: 4px; font-weight: 800;">YOU</span>' : ''}
-                </div>
-                <div style="min-height: 20px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px;">${npcTags || '<span style="font-size: 11px; color: #64748b;">(Empty)</span>'}</div>
-              </div>
-              ${!isHere ? `<button class="vn-btn vn-btn-sm vn-btn-primary vn-move-btn" data-dest="${roomKey}" style="margin-top: 10px; width: 100%;">Enter Room</button>` : ''}
-            </div>
-          `;
-        }).join("")}
-      </div>
-    `;
+    const layouts: RoomLayout[] = [];
+    const cols = 3;
+    const roomW = 160;
+    const roomH = 95;
+    const gapX = 50;
+    const gapY = 40;
+    const startX = 60;
+    const startY = 40;
 
-    floorplanCard.querySelectorAll(".vn-move-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const dest = btn.getAttribute("data-dest");
-        if (dest) this.onAction(`*Heads to the ${dest.replace(/.*:/, "").replace(/_/g, " ")}*`);
+    rawKeys.forEach((key, idx) => {
+      const clean = key.includes(":") ? key.split(":")[1]! : key;
+      const c = idx % cols;
+      const r = Math.floor(idx / cols);
+      layouts.push({
+        id: key,
+        cleanName: clean,
+        x: startX + c * (roomW + gapX),
+        y: startY + r * (roomH + gapY),
+        w: roomW,
+        h: roomH,
       });
     });
 
-    container.appendChild(floorplanCard);
+    // Draw connecting corridor paths between adjacent rooms
+    for (let i = 0; i < layouts.length; i++) {
+      for (let j = i + 1; j < layouts.length; j++) {
+        const r1 = layouts[i]!;
+        const r2 = layouts[j]!;
+        const dx = Math.abs(r1.x - r2.x);
+        const dy = Math.abs(r1.y - r2.y);
+        if ((dx <= roomW + gapX + 10 && dy === 0) || (dy <= roomH + gapY + 10 && dx === 0)) {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          path.setAttribute("x1", String(r1.x + r1.w / 2));
+          path.setAttribute("y1", String(r1.y + r1.h / 2));
+          path.setAttribute("x2", String(r2.x + r2.w / 2));
+          path.setAttribute("y2", String(r2.y + r2.h / 2));
+          path.setAttribute("stroke", "#334155");
+          path.setAttribute("stroke-width", "8");
+          path.setAttribute("stroke-linecap", "round");
+          group.appendChild(path);
+        }
+      }
+    }
+
+    // Render Room Boxes and NPC Presence Tokens
+    layouts.forEach((room) => {
+      const isHere = room.cleanName.toLowerCase() === currentRoom.toLowerCase() || room.id === currentPlace;
+      const isSelected = room.id === this.selectedNodeId;
+      const placeConfig = (ledger.places?.[room.id] || {}) as PlaceNode;
+
+      // Check route gating if coming from current place
+      const currentRoutes = (ledger.places?.[currentPlace]?.routes || []) as PlaceRoute[];
+      const routeToThis = currentRoutes.find((r) => typeof r === "object" && r.to === room.id);
+      const isLocked = Boolean(routeToThis?.why_not || (routeToThis?.requires && Object.keys(routeToThis.requires).length > 0));
+
+      const roomG = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      roomG.setAttribute("class", "vn-map-node-interactive");
+      roomG.style.cursor = "pointer";
+
+      // Rect
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", String(room.x));
+      rect.setAttribute("y", String(room.y));
+      rect.setAttribute("width", String(room.w));
+      rect.setAttribute("height", String(room.h));
+      rect.setAttribute("rx", "8");
+      rect.setAttribute("fill", isHere ? "rgba(56, 189, 248, 0.16)" : isSelected ? "rgba(99, 102, 241, 0.22)" : "#0f172a");
+      rect.setAttribute("stroke", isHere ? "#38bdf8" : isSelected ? "#818cf8" : isLocked ? "#f43f5e" : "#334155");
+      rect.setAttribute("stroke-width", isHere || isSelected ? "2.5" : "1.5");
+      rect.setAttribute("stroke-dasharray", isLocked ? "4 3" : "none");
+      roomG.appendChild(rect);
+
+      // Title
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", String(room.x + 12));
+      text.setAttribute("y", String(room.y + 24));
+      text.setAttribute("fill", isHere ? "#38bdf8" : "#f1f5f9");
+      text.setAttribute("font-size", "12");
+      text.setAttribute("font-weight", "700");
+      text.textContent = (room.cleanName.replace(/_/g, " ")).toUpperCase();
+      roomG.appendChild(text);
+
+      // Room type / privacy hint
+      const sub = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      sub.setAttribute("x", String(room.x + 12));
+      sub.setAttribute("y", String(room.y + 38));
+      sub.setAttribute("fill", "#64748b");
+      sub.setAttribute("font-size", "9");
+      sub.textContent = placeConfig.norm || (isLocked ? `🔒 ${routeToThis?.why_not || "Restricted"}` : "Interior Zone");
+      roomG.appendChild(sub);
+
+      // Presence badges
+      const npcsInRoom = (ledger.roster || []).filter((r) =>
+        (r.loc || "").toLowerCase().includes(room.cleanName.toLowerCase())
+      );
+
+      let tokenOffset = 0;
+      if (isHere) {
+        // Player badge
+        const playerBadge = this.createPresenceToken(room.x + 12 + tokenOffset, room.y + room.h - 22, "YOU", "#0284c7", "#fff");
+        roomG.appendChild(playerBadge);
+        tokenOffset += 42;
+      }
+
+      npcsInRoom.forEach((npc) => {
+        if (tokenOffset < room.w - 40) {
+          const npcBadge = this.createPresenceToken(room.x + 12 + tokenOffset, room.y + room.h - 22, (npc.name || npc.id).slice(0, 5), "#4f46e5", "#c7d2fe");
+          roomG.appendChild(npcBadge);
+          tokenOffset += 44;
+        }
+      });
+
+      roomG.addEventListener("click", () => {
+        this.selectedNodeId = room.id;
+        this.render(ledger);
+      });
+
+      group.appendChild(roomG);
+    });
   }
 
-  private renderOutdoorLivingWorld(container: HTMLElement, ledger: LedgerData, currentPlace: string): void {
-    const worldCard = document.createElement("div");
-    worldCard.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px;";
+  private renderOutdoorSvg(group: SVGGElement, ledger: LedgerData, currentPlace: string): void {
+    const places = ledger.places || {};
+    const placeKeys = Object.keys(places);
 
-    // Routes and locations in external world
-    const routes = ledger.places?.[currentPlace]?.routes || [];
-    const travelers = ledger.travel || [];
+    const outdoorKeys = placeKeys.length > 0
+      ? placeKeys
+      : ["nerima_district", "tendo_dojo", "furinkan_high", "cat_cafe", "shopping_district", "park"];
 
-    worldCard.innerHTML = `
-      <div style="font-weight: 700; color: #38bdf8; margin-bottom: 8px; font-size: 14px;">🌐 Living World Map & District Connections</div>
-      <p style="font-size: 12px; color: #94a3b8; margin-bottom: 14px;">Actors advance routines continuously. Travel consumes clock minutes.</p>
+    // Distribute nodes in a pleasant circular or multi-hub cartography layout
+    interface NodePos {
+      id: string;
+      x: number;
+      y: number;
+    }
 
-      ${travelers.length > 0 ? `
-        <div style="background: rgba(245,158,11,0.1); border: 1px solid #f59e0b; border-radius: 8px; padding: 10px; margin-bottom: 14px; font-size: 12px; color: #fcd34d;">
-          <strong>🚶 Active Travelers in Transit:</strong>
-          <ul style="margin: 4px 0 0 16px; padding: 0;">
-            ${travelers.map((t) => `<li><strong>${t.actor}</strong>: ${t.from || "Start"} ➔ ${t.to} (ETA: ${t.eta || "En route"})</li>`).join("")}
-          </ul>
+    const nodes: NodePos[] = [];
+    const centerX = 320;
+    const centerY = 200;
+    const radius = 140;
+
+    outdoorKeys.forEach((key, idx) => {
+      if (idx === 0) {
+        nodes.push({ id: key, x: centerX, y: centerY });
+      } else {
+        const angle = ((idx - 1) / (outdoorKeys.length - 1)) * 2 * Math.PI;
+        nodes.push({
+          id: key,
+          x: centerX + Math.cos(angle) * radius,
+          y: centerY + Math.sin(angle) * radius,
+        });
+      }
+    });
+
+    const nodeMap = new Map<string, NodePos>(nodes.map((n) => [n.id, n]));
+
+    // Draw route paths
+    nodes.forEach((source) => {
+      const routes = (places[source.id]?.routes || []) as PlaceRoute[];
+      routes.forEach((route) => {
+        const destId = typeof route === "object" && route.to ? route.to : String(route);
+        const target = nodeMap.get(destId);
+        if (target) {
+          const isGated = typeof route === "object" && Boolean(route.why_not || route.requires);
+          const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          line.setAttribute("x1", String(source.x));
+          line.setAttribute("y1", String(source.y));
+          line.setAttribute("x2", String(target.x));
+          line.setAttribute("y2", String(target.y));
+          line.setAttribute("stroke", isGated ? "#f43f5e" : "#3b82f6");
+          line.setAttribute("stroke-width", "2");
+          line.setAttribute("stroke-dasharray", isGated ? "5 3" : "none");
+          line.setAttribute("opacity", "0.6");
+          group.appendChild(line);
+
+          // Route minute badge on midpoint
+          if (typeof route === "object" && route.minutes) {
+            const mx = (source.x + target.x) / 2;
+            const my = (source.y + target.y) / 2;
+            const pill = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            pill.setAttribute("x", String(mx - 18));
+            pill.setAttribute("y", String(my - 9));
+            pill.setAttribute("width", "36");
+            pill.setAttribute("height", "18");
+            pill.setAttribute("rx", "4");
+            pill.setAttribute("fill", "#0f172a");
+            pill.setAttribute("stroke", "#334155");
+            group.appendChild(pill);
+
+            const minTxt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            minTxt.setAttribute("x", String(mx));
+            minTxt.setAttribute("y", String(my + 4));
+            minTxt.setAttribute("fill", "#94a3b8");
+            minTxt.setAttribute("font-size", "9");
+            minTxt.setAttribute("text-anchor", "middle");
+            minTxt.textContent = `${route.minutes}m`;
+            group.appendChild(minTxt);
+          }
+        }
+      });
+    });
+
+    // Draw Nodes
+    nodes.forEach((node) => {
+      const isHere = node.id.toLowerCase() === currentPlace.toLowerCase();
+      const isSelected = node.id === this.selectedNodeId;
+      const npcs = (ledger.roster || []).filter((r) => (r.loc || "").toLowerCase().includes(node.id.toLowerCase()));
+
+      const nodeG = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      nodeG.setAttribute("class", "vn-map-node-interactive");
+      nodeG.style.cursor = "pointer";
+
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("cx", String(node.x));
+      circle.setAttribute("cy", String(node.y));
+      circle.setAttribute("r", "34");
+      circle.setAttribute("fill", isHere ? "rgba(56, 189, 248, 0.2)" : isSelected ? "rgba(99, 102, 241, 0.25)" : "#0f172a");
+      circle.setAttribute("stroke", isHere ? "#38bdf8" : isSelected ? "#818cf8" : "#334155");
+      circle.setAttribute("stroke-width", isHere || isSelected ? "3" : "1.5");
+      nodeG.appendChild(circle);
+
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", String(node.x));
+      label.setAttribute("y", String(node.y + 4));
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("fill", isHere ? "#38bdf8" : "#f8fafc");
+      label.setAttribute("font-size", "10");
+      label.setAttribute("font-weight", "700");
+      label.textContent = node.id.replace(/_/g, " ").slice(0, 12);
+      nodeG.appendChild(label);
+
+      if (isHere) {
+        const youBadge = this.createPresenceToken(node.x - 18, node.y - 28, "YOU", "#0284c7", "#fff");
+        nodeG.appendChild(youBadge);
+      }
+
+      if (npcs.length > 0) {
+        const countBadge = this.createPresenceToken(node.x - 16, node.y + 14, `👥 ${npcs.length}`, "#4338ca", "#c7d2fe");
+        nodeG.appendChild(countBadge);
+      }
+
+      nodeG.addEventListener("click", () => {
+        this.selectedNodeId = node.id;
+        this.render(ledger);
+      });
+
+      group.appendChild(nodeG);
+    });
+  }
+
+  private createPresenceToken(x: number, y: number, textStr: string, bg: string, fg: string): SVGGElement {
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const width = Math.max(32, textStr.length * 7 + 10);
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", String(x));
+    rect.setAttribute("y", String(y));
+    rect.setAttribute("width", String(width));
+    rect.setAttribute("height", "15");
+    rect.setAttribute("rx", "4");
+    rect.setAttribute("fill", bg);
+    rect.setAttribute("stroke", "rgba(255,255,255,0.2)");
+    rect.setAttribute("stroke-width", "0.5");
+    g.appendChild(rect);
+
+    const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    txt.setAttribute("x", String(x + width / 2));
+    txt.setAttribute("y", String(y + 11));
+    txt.setAttribute("fill", fg);
+    txt.setAttribute("font-size", "9");
+    txt.setAttribute("font-weight", "800");
+    txt.setAttribute("text-anchor", "middle");
+    txt.textContent = textStr;
+    g.appendChild(txt);
+
+    return g;
+  }
+
+  private renderSidebar(sidebar: HTMLElement, ledger: LedgerData, currentPlace: string): void {
+    sidebar.innerHTML = "";
+    const selected = this.selectedNodeId || currentPlace;
+    const cleanName = selected.includes(":") ? selected.split(":")[1]! : selected;
+    const placeConfig = (ledger.places?.[selected] || {}) as PlaceNode;
+    const isHere = selected.toLowerCase() === currentPlace.toLowerCase() || cleanName.toLowerCase() === currentPlace.toLowerCase();
+
+    // Check routing gating
+    const currentRoutes = (ledger.places?.[currentPlace]?.routes || []) as PlaceRoute[];
+    const route = currentRoutes.find((r) => typeof r === "object" && (r.to === selected || r.to === cleanName));
+    const isGated = Boolean(route?.why_not || (route?.requires && Object.keys(route.requires).length > 0));
+    const whyNot = route?.why_not;
+
+    // Presence in selected node
+    const npcsHere = (ledger.roster || []).filter((r) => (r.loc || "").toLowerCase().includes(cleanName.toLowerCase()));
+
+    sidebar.innerHTML = `
+      <div style="border-bottom: 1px solid #334155; padding-bottom: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h4 style="margin: 0; font-size: 13px; color: #38bdf8; text-transform: uppercase;">
+            ${cleanName.replace(/_/g, " ")}
+          </h4>
+          ${isHere ? '<span style="font-size: 10px; background: #0284c7; color: #fff; padding: 2px 6px; border-radius: 4px; font-weight: 700;">CURRENT</span>' : ''}
+        </div>
+        <p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8;">${placeConfig.norm || (placeConfig.indoors ? "Indoor Facility" : "Public District")}</p>
+      </div>
+
+      ${isGated ? `
+        <div style="background: rgba(244, 63, 94, 0.15); border: 1px solid #f43f5e; border-radius: 6px; padding: 8px; font-size: 11px; color: #fda4af;">
+          <strong>🔒 Access Restricted:</strong>
+          <div style="margin-top: 3px;">${whyNot || "Requirements not met."}</div>
         </div>
       ` : ''}
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;">
-        ${routes.map((r: any) => {
-          const dest = typeof r === "object" && r.to ? r.to : String(r);
-          const mins = typeof r === "object" && r.minutes ? r.minutes : 10;
-          return `
-            <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; justify-content: space-between;">
-              <div>
-                <strong style="color: #f8fafc; font-size: 13px;">📍 ${dest}</strong>
-                <div style="font-size: 11px; color: #94a3b8; margin: 4px 0;">⏱️ Transit: ${mins} mins</div>
-              </div>
-              <button class="vn-btn vn-btn-sm vn-btn-primary vn-travel-btn" data-dest="${dest}" style="margin-top: 8px;">Travel</button>
-            </div>
-          `;
-        }).join("")}
+      <div style="display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: #cbd5e1;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #94a3b8;">Privacy / Traffic:</span>
+          <span>${placeConfig.privacy ?? "—"} / ${placeConfig.traffic ?? "—"}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #94a3b8;">Visibility:</span>
+          <span>${placeConfig.visibility ?? "—"}</span>
+        </div>
+        ${placeConfig.population ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Population:</span>
+            <span>${placeConfig.population}</span>
+          </div>
+        ` : ''}
+      </div>
+
+      ${Array.isArray(placeConfig.affordances) && placeConfig.affordances.length > 0 ? `
+        <div>
+          <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px;">Affordances</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+            ${placeConfig.affordances.map((a: string) => `<span style="background: #1e293b; border: 1px solid #475569; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${a}</span>`).join("")}
+          </div>
+        </div>
+      ` : ''}
+
+      ${Array.isArray(placeConfig.hazards) && placeConfig.hazards.length > 0 ? `
+        <div>
+          <div style="font-size: 10px; color: #f59e0b; text-transform: uppercase; margin-bottom: 4px;">⚠️ Hazards</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+            ${placeConfig.hazards.map((h: string) => `<span style="background: rgba(245, 158, 11, 0.15); border: 1px solid #f59e0b; padding: 2px 6px; border-radius: 4px; font-size: 10px; color: #fcd34d;">${h}</span>`).join("")}
+          </div>
+        </div>
+      ` : ''}
+
+      <div>
+        <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px;">Present Cast (${npcsHere.length})</div>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          ${npcsHere.length > 0
+            ? npcsHere.map((n) => `
+                <div style="background: #1e293b; padding: 4px 8px; border-radius: 4px; font-size: 11px; display: flex; justify-content: space-between;">
+                  <span style="color: #c7d2fe; font-weight: 600;">${n.name || n.id}</span>
+                  <span style="color: #94a3b8; font-size: 10px;">${n.posture || n.activity || "Idle"}</span>
+                </div>
+              `).join("")
+            : '<span style="color: #64748b; font-size: 11px;">No detected actors</span>'
+          }
+        </div>
+      </div>
+
+      <div style="margin-top: auto; padding-top: 10px;">
+        ${!isHere ? `
+          <button id="vn-sidebar-navigate-btn" class="vn-btn" style="width: 100%; padding: 8px; font-size: 12px; font-weight: 700; ${isGated ? "background: #475569; cursor: not-allowed; opacity: 0.7;" : "background: #6366f1; cursor: pointer;"}" ${isGated ? "disabled" : ""}>
+            ${isGated ? "🔒 Travel Gated" : `Travel to ${cleanName.replace(/_/g, " ")}`}
+          </button>
+        ` : `
+          <button class="vn-btn" style="width: 100%; padding: 8px; font-size: 12px; background: #0284c7; cursor: default;" disabled>
+            ✓ Already Present Here
+          </button>
+        `}
       </div>
     `;
 
-    worldCard.querySelectorAll(".vn-travel-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const dest = btn.getAttribute("data-dest");
-        if (dest) this.onAction(`*Travels to ${dest}*`);
-      });
+    sidebar.querySelector("#vn-sidebar-navigate-btn")?.addEventListener("click", () => {
+      if (isGated) return;
+      this.onAction(`*Travels to the ${cleanName.replace(/_/g, " ")}*`);
     });
-
-    container.appendChild(worldCard);
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-phone.ts`
@@ -2301,9 +3242,20 @@ export class PhoneTab {
       `;
     }
 
+    const clockTime = this.currentLedger.clock?.t?.split(" ")[1] || this.currentLedger.clock?.t || "12:00";
+    const dateStr = this.currentLedger.clock?.date || "12-10-18";
+    const locStr = this.currentLedger.clock?.location || "Unknown Location";
+    const regionStr = this.currentLedger.clock?.region ? `, ${this.currentLedger.clock.region}` : "";
+    const phaseStr = this.currentLedger.clock?.phase || "Day";
+
     container.innerHTML = `
       ${notifHtml}
-      <div style="flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-content: start; margin-top: 10px;">
+      <div style="text-align: center; margin: 8px 0 16px 0; color: #f8fafc;">
+        <div style="font-size: 32px; font-weight: 300; letter-spacing: -0.5px; line-height: 1;">${clockTime}</div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">${dateStr} • ${phaseStr}</div>
+        <div style="font-size: 11px; color: #38bdf8; margin-top: 2px;">📍 ${locStr}${regionStr}</div>
+      </div>
+      <div style="flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-content: start; margin-top: 6px;">
         <div class="vn-phone-app-icon" data-app="messages" style="display: flex; flex-direction: column; align-items: center; cursor: pointer;">
           <div style="width: 54px; height: 54px; background: #10b981; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 24px;">💬</div>
           <span style="font-size: 11px; color: #fff; margin-top: 4px;">Messages</span>
@@ -3157,7 +4109,6 @@ export class PhoneTab {
     };
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-scene.ts`
@@ -3683,7 +4634,7 @@ export class SceneTab {
 ## File: `src/frontend/hud/tab-stats.ts`
 
 ```typescript
-import type { LedgerData } from "../../shared/types.js";
+import type { LedgerData, ActorDossier } from "../../shared/types.js";
 
 export class StatsTab {
   public root: HTMLElement;
@@ -3697,30 +4648,62 @@ export class StatsTab {
 
   public render(ledger: LedgerData): void {
     this.root.innerHTML = "";
-    const actors = ledger.actors || {};
-    const actorIds = Object.keys(actors);
+    const actors: Record<string, ActorDossier> = { ...(ledger.actors || {}) };
 
+    // Supplement from roster if actors not yet in actors dict
+    if (ledger.roster && Array.isArray(ledger.roster)) {
+      for (const r of ledger.roster) {
+        if (r.id && !actors[r.id]) {
+          actors[r.id] = {
+            id: r.id,
+            name: r.name || r.id,
+            profile: { public_roles: [r.status || "Resident"] },
+          };
+        }
+      }
+    }
+
+    const actorIds = Object.keys(actors);
     if (actorIds.length === 0) {
-      this.root.innerHTML = `<div class="vn-muted" style="padding: 24px; text-align: center;">No actor dossiers recorded.</div>`;
+      this.root.innerHTML = `<div class="vn-muted" style="padding: 32px; text-align: center;">No actor dossiers recorded.</div>`;
       return;
     }
 
+    // Default to first actor that has stats or relations if user has neither, or keep current
     if (!actors[this.selectedActorId]) {
-      this.selectedActorId = actorIds[0]!;
+      // Find one with stats or relations, otherwise first
+      const withStats = actorIds.find(id => actors[id]?.stats || (actors[id]?.relations && Object.keys(actors[id]!.relations!).length > 0));
+      this.selectedActorId = withStats || actorIds[0]!;
     }
 
     const header = document.createElement("div");
     header.className = "vn-tab-header";
-    header.innerHTML = `<h3>📊 Status, Passions & Relationship Metrics</h3>`;
+    header.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <h3 style="margin:0; font-size:15px; color:#f8fafc; display:flex; align-items:center; gap:6px;">
+            <span>📊</span> <span>Status, Passions & 21-Stat Ledger Matrix</span>
+          </h3>
+          <p class="vn-muted" style="margin:2px 0 0 0; font-size:11px;">
+            Comprehensive emotional equilibrium, psychological friction, RPG vitals, and relational dynamics.
+          </p>
+        </div>
+      </div>
+    `;
     this.root.appendChild(header);
 
-    // Actor Selector Dropdown Ribbon
+    // Actor Selector Ribbon
     const controls = document.createElement("div");
-    controls.style.cssText = "display: flex; gap: 10px; margin-bottom: 16px; align-items: center; flex-wrap: wrap;";
+    controls.style.cssText = "display: flex; gap: 10px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; background: #1e293b; padding: 8px 12px; border-radius: 8px; border: 1px solid #334155;";
     controls.innerHTML = `
-      <label style="font-size: 12px; color: #94a3b8;">Actor:</label>
-      <select id="vn-stats-actor-select" style="background: #1e293b; color: #f8fafc; border: 1px solid #475569; border-radius: 6px; padding: 6px 10px; font-size: 13px;">
-        ${actorIds.map((id) => `<option value="${id}" ${id === this.selectedActorId ? "selected" : ""}>${id === "user" ? "Player (You)" : actors[id]?.name || id}</option>`).join("")}
+      <label style="font-size: 12px; color: #94a3b8; font-weight:600;">Inspect Actor:</label>
+      <select id="vn-stats-actor-select" style="background: #0f172a; color: #f8fafc; border: 1px solid #475569; border-radius: 6px; padding: 4px 10px; font-size: 12px;">
+        ${actorIds.map((id) => {
+          const a = actors[id]!;
+          const label = id.toLowerCase() === "user" ? "Player (You)" : a.name || id;
+          const hasMatrix = a.stats ? " [21-Stat]" : "";
+          return `<option value="${id}" ${id === this.selectedActorId ? "selected" : ""}>${label}${hasMatrix}</option>`;
+        }).join("")}
       </select>
     `;
     this.root.appendChild(controls);
@@ -3732,11 +4715,160 @@ export class StatsTab {
     });
 
     const actor = actors[this.selectedActorId]!;
+    const statsMatrix = (actor.stats as Record<string, number | undefined>) || {};
+    const combat = (actor.combat as Record<string, any>) || {};
 
-    // 1. Passions / Emotions Badges
+    // 1. RPG Vitals (HP / MP / Attributes)
+    if (combat && (combat.hp || combat.pwr || combat.tier)) {
+      const vitalsSection = document.createElement("div");
+      vitalsSection.className = "vn-section";
+      vitalsSection.innerHTML = `<h4>⚔️ Vitals & Attributes</h4>`;
+
+      const vBox = document.createElement("div");
+      vBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px;";
+
+      // Parse HP / MP percentages if in "X/Y" format
+      const parseRatio = (val: any) => {
+        if (typeof val === "string" && val.includes("/")) {
+          const [cur, max] = val.split("/").map(Number);
+          return max && max > 0 ? Math.max(0, Math.min(100, (cur / max) * 100)) : 100;
+        }
+        return 100;
+      };
+
+      const hpPct = parseRatio(combat.hp);
+      const mpPct = parseRatio(combat.mp);
+
+      vBox.innerHTML = `
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:11px; color:#94a3b8;">
+          <span>Tier ${combat.tier ?? 1} | Level ${combat.lv ?? 1}</span>
+          <span>EXP: ${combat.exp ?? "0/100"}</span>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;">
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;">
+              <span style="color:#f87171; font-weight:700;">HP</span>
+              <span style="color:#cbd5e1;">${combat.hp ?? "100/100"}</span>
+            </div>
+            <div style="background:#0f172a; border-radius:4px; height:8px; overflow:hidden; border:1px solid #334155;">
+              <div style="background:linear-gradient(90deg, #ef4444, #f87171); width:${hpPct}%; height:100%;"></div>
+            </div>
+          </div>
+
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;">
+              <span style="color:#60a5fa; font-weight:700;">MP</span>
+              <span style="color:#cbd5e1;">${combat.mp ?? "50/50"}</span>
+            </div>
+            <div style="background:#0f172a; border-radius:4px; height:8px; overflow:hidden; border:1px solid #334155;">
+              <div style="background:linear-gradient(90deg, #3b82f6, #60a5fa); width:${mpPct}%; height:100%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(70px, 1fr)); gap:6px; text-align:center;">
+          <div style="background:#0f172a; padding:4px; border-radius:4px; border:1px solid #334155;"><span style="color:#94a3b8; font-size:10px;">PWR</span><br/><strong style="color:#f8fafc;">${combat.pwr ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px; border-radius:4px; border:1px solid #334155;"><span style="color:#94a3b8; font-size:10px;">AGI</span><br/><strong style="color:#f8fafc;">${combat.agi ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px; border-radius:4px; border:1px solid #334155;"><span style="color:#94a3b8; font-size:10px;">INT</span><br/><strong style="color:#f8fafc;">${combat.int ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px; border-radius:4px; border:1px solid #334155;"><span style="color:#94a3b8; font-size:10px;">Eff PWR</span><br/><strong style="color:#38bdf8;">${combat.eff_pwr ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px; border-radius:4px; border:1px solid #334155;"><span style="color:#94a3b8; font-size:10px;">Eff AGI</span><br/><strong style="color:#38bdf8;">${combat.eff_agi ?? "-"}</strong></div>
+        </div>
+      `;
+      vitalsSection.appendChild(vBox);
+      this.root.appendChild(vitalsSection);
+    }
+
+    // 2. The 21-Stat Ledger Matrix (if actor has `stats`)
+    const statKeys = Object.keys(statsMatrix);
+    if (statKeys.length > 0) {
+      const matrixSection = document.createElement("div");
+      matrixSection.className = "vn-section";
+      matrixSection.innerHTML = `<h4>🎲 21-Stat Engine Matrix (${statKeys.length} metrics)</h4>`;
+
+      const matrixBox = document.createElement("div");
+      matrixBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px;";
+
+      // Groups of stats
+      const groups = [
+        {
+          name: "Interpersonal Stance",
+          color: "#818cf8",
+          stats: [
+            { k: "T", name: "Trust", max: 100 },
+            { k: "A", name: "Affinity / Affection", max: 100 },
+            { k: "R", name: "Respect", max: 100 },
+            { k: "F", name: "Fear", max: 100 },
+            { k: "Fam", name: "Familiarity", max: 10 },
+            { k: "G", name: "Grudge", max: 100 },
+          ],
+        },
+        {
+          name: "Psychological Equilibrium",
+          color: "#38bdf8",
+          stats: [
+            { k: "Integ", name: "Integrity", max: 100 },
+            { k: "Stress", name: "Stress Level", max: 100 },
+            { k: "CAU", name: "Caution", max: 100 },
+            { k: "GRD", name: "Guard / Defense", max: 100 },
+            { k: "PRD", name: "Pride", max: 100 },
+            { k: "EMP", name: "Empathy", max: 100 },
+            { k: "STB", name: "Stability", max: 100 },
+            { k: "BLD", name: "Bleed / Leakage", max: 100 },
+          ],
+        },
+        {
+          name: "Behavioral Dynamics",
+          color: "#f43f5e",
+          stats: [
+            { k: "RX", name: "Reactiveness", max: 100 },
+            { k: "RC", name: "Recovery Rate", max: 100 },
+            { k: "Rig", name: "Rigidity", max: 100 },
+            { k: "Mask", name: "Social Facade", max: 100 },
+            { k: "MIS", name: "Misperception", max: 100 },
+            { k: "WV", name: "Willpower", max: 100 },
+            { k: "COMP", name: "Compliance", max: 100 },
+          ],
+        },
+      ];
+
+      for (const grp of groups) {
+        const groupEl = document.createElement("div");
+        groupEl.innerHTML = `<div style="font-size:11px; font-weight:700; color:${grp.color}; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">${grp.name}</div>`;
+        const grid = document.createElement("div");
+        grid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px;";
+
+        for (const def of grp.stats) {
+          const val = statsMatrix[def.k];
+          if (val !== undefined) {
+            const num = Number(val);
+            const pct = Math.max(0, Math.min(100, (num / def.max) * 100));
+            const card = document.createElement("div");
+            card.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 4px 8px; font-size: 11px;";
+            card.innerHTML = `
+              <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                <span style="color:#94a3b8;">${def.k} <span style="font-size:9px; color:#64748b;">(${def.name})</span></span>
+                <strong style="color:#f8fafc;">${num}</strong>
+              </div>
+              <div style="background:#1e293b; border-radius:3px; height:4px; overflow:hidden;">
+                <div style="background:${grp.color}; width:${pct}%; height:100%;"></div>
+              </div>
+            `;
+            grid.appendChild(card);
+          }
+        }
+        groupEl.appendChild(grid);
+        matrixBox.appendChild(groupEl);
+      }
+
+      matrixSection.appendChild(matrixBox);
+      this.root.appendChild(matrixSection);
+    }
+
+    // 3. Current Passions & Emotional Affect
     const passionsSection = document.createElement("div");
     passionsSection.className = "vn-section";
-    passionsSection.innerHTML = `<h4>Current Passions & Affect</h4>`;
+    passionsSection.innerHTML = `<h4>🔥 Current Passions & Affect</h4>`;
     const badgesContainer = document.createElement("div");
     badgesContainer.className = "vn-badges-container";
 
@@ -3768,12 +4900,12 @@ export class StatsTab {
       }
     }
     if (!hasBadge) {
-      badgesContainer.innerHTML = `<span class="vn-muted">Equilibrium / Baseline state</span>`;
+      badgesContainer.innerHTML = `<span class="vn-muted" style="padding:4px;">Equilibrium / Baseline emotional state</span>`;
     }
     passionsSection.appendChild(badgesContainer);
     this.root.appendChild(passionsSection);
 
-    // 2. Relations Section
+    // 4. Relationships Meter Matrix
     const rels = actor.relations || {};
     const availableTargets = Object.keys(rels);
 
@@ -3781,20 +4913,18 @@ export class StatsTab {
     relsSection.className = "vn-section";
 
     if (availableTargets.length === 0) {
-      relsSection.innerHTML = `<h4>Relationships</h4><div class="vn-muted">No relationship edges initialized for this actor.</div>`;
+      relsSection.innerHTML = `<h4>🤝 Interpersonal Relations</h4><div class="vn-muted">No outgoing relationship edges initialized for this actor.</div>`;
       this.root.appendChild(relsSection);
-      return;
-    }
-
-    if (!rels[this.selectedTargetId]) {
-      this.selectedTargetId = availableTargets[0]!;
-    }
+    } else {
+      if (!rels[this.selectedTargetId]) {
+        this.selectedTargetId = availableTargets[0]!;
+      }
 
     relsSection.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
         <h4 style="margin: 0;">Relations Toward:</h4>
         <select id="vn-stats-target-select" style="background: #1e293b; color: #f8fafc; border: 1px solid #475569; border-radius: 6px; padding: 4px 8px; font-size: 12px;">
-          ${availableTargets.map((t) => `<option value="${t}" ${t === this.selectedTargetId ? "selected" : ""}>${t === "user" ? "Player (You)" : actors[t]?.name || t}</option>`).join("")}
+          ${availableTargets.map((t) => `<option value="${t}" ${t === this.selectedTargetId ? "selected" : ""}>${t.toLowerCase() === "user" ? "Player (You)" : actors[t]?.name || t}</option>`).join("")}
         </select>
       </div>
     `;
@@ -3857,11 +4987,11 @@ export class StatsTab {
     `;
     metersContainer.appendChild(extraInfo);
 
-    relsSection.appendChild(metersContainer);
-    this.root.appendChild(relsSection);
+      relsSection.appendChild(metersContainer);
+      this.root.appendChild(relsSection);
+    }
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-wardrobe.ts`
@@ -7297,9 +8427,13 @@ export function parseTwineChoices(text: string): { cleanText: string; choices: T
 
 ```typescript
 export interface ClockState {
-  t?: string;
-  phase?: string;
+  date?: string;      // DD-MM-YY
+  t?: string;         // D# HH:MM
+  phase?: string;     // Dawn | Morning | Afternoon | Dusk | Night | Late Night
   step?: number;
+  location?: string;  // e.g. "Tendo Dojo"
+  region?: string;    // e.g. "Nerima, Tokyo"
+  country?: string;   // e.g. "Japan"
 }
 
 export interface SceneState {
@@ -7318,8 +8452,48 @@ export interface ActorOutfit {
   underwear_top?: string;
   underwear_bottom?: string;
   shoes?: string;
-  accessories?: string[];
+  footwear?: string;
+  accessories?: string[] | string;
+  jewelry?: string[] | string;
+  hair?: string;
+  makeup?: string;
+  scent?: string;
   state?: string;
+  [key: string]: unknown;
+}
+
+export interface ActorCombat {
+  tier?: number | string;
+  lv?: number | string;
+  exp?: string | number;
+  hp?: string | number;
+  mp?: string | number;
+  eff_pwr?: number;
+  eff_agi?: number;
+  pwr?: number;
+  agi?: number;
+  int?: number;
+  talent?: string[] | string;
+  [key: string]: unknown;
+}
+
+export interface ActorLifeModel {
+  orientation?: string;
+  romantic_history?: string;
+  upbringing?: string;
+  family?: string[] | string;
+  occupation?: string;
+  residence?: string;
+  routines?: Array<[string, string, string, string] | Record<string, unknown>>;
+  worldview?: string;
+  self_concept?: string;
+  [key: string]: unknown;
+}
+
+export interface ActorWounds {
+  physical?: string[] | unknown[];
+  psychological?: string[] | unknown[];
+  [key: string]: unknown;
 }
 
 export interface ActorPassions {
@@ -7335,6 +8509,7 @@ export interface ActorPassions {
   sadness?: number;
   guilt?: number;
   joy?: number;
+  [key: string]: number | undefined;
 }
 
 export interface ActorInventory {
@@ -7345,6 +8520,7 @@ export interface ActorInventory {
   carried?: string[];
   room?: string[];
   room_location?: string;
+  [key: string]: unknown;
 }
 
 export interface ActorDossier {
@@ -7356,13 +8532,19 @@ export interface ActorDossier {
     appeal?: number;
     style?: string;
     condition?: string;
+    [key: string]: unknown;
   };
   money?: {
     in_hand?: number;
     in_bank?: number;
     currency?: string;
+    [key: string]: unknown;
   };
-  combat?: Record<string, unknown>;
+  combat?: ActorCombat | Record<string, unknown>;
+  life_model?: ActorLifeModel | Record<string, unknown>;
+  wounds?: ActorWounds | Record<string, unknown>;
+  trauma?: string[] | unknown[];
+  constraints?: string;
   passions?: ActorPassions;
   outfit?: ActorOutfit;
   inventory?: ActorInventory;
@@ -7370,12 +8552,16 @@ export interface ActorDossier {
   profile?: Record<string, unknown>;
   state?: Record<string, unknown>;
   agency?: Record<string, unknown>;
+  knowledge?: Record<string, unknown>;
+  stats?: Record<string, number | unknown>;
   [key: string]: unknown;
 }
 
 export interface PlaceRoute {
   to: string;
   minutes: number | string;
+  requires?: Record<string, unknown>;
+  why_not?: string;
 }
 
 export interface PlaceNode {
@@ -7387,6 +8573,11 @@ export interface PlaceNode {
   norm?: string;
   rhythm?: string;
   resources?: string[];
+  indoors?: boolean;
+  population?: string;
+  hazards?: string[];
+  barriers?: string[];
+  affordances?: string[];
   routes?: Array<PlaceRoute | Record<string, string | number>>;
   [key: string]: unknown;
 }
@@ -7430,7 +8621,7 @@ export interface LedgerData {
   clock?: ClockState;
   scene?: SceneState;
   places?: Record<string, PlaceNode>;
-  roster?: Array<{ id: string; name?: string; lod?: number; status?: string; loc?: string }>;
+  roster?: Array<{ id: string; name?: string; lod?: number; status?: string; loc?: string; posture?: string; activity?: string; [key: string]: unknown }>;
   actors?: Record<string, ActorDossier>;
   bplots?: BPlot[];
   opportunities?: Opportunity[];
@@ -7488,8 +8679,6 @@ export interface AssetManifest {
   }>;
   cgs?: Record<string, string>; // event action/cg name -> url
 }
-
-
 ```
 
 ## File: `test/engine.test.ts`

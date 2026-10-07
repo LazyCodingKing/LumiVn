@@ -24,8 +24,48 @@ export interface ActorOutfit {
   underwear_top?: string;
   underwear_bottom?: string;
   shoes?: string;
-  accessories?: string[];
+  footwear?: string;
+  accessories?: string[] | string;
+  jewelry?: string[] | string;
+  hair?: string;
+  makeup?: string;
+  scent?: string;
   state?: string;
+  [key: string]: unknown;
+}
+
+export interface ActorCombat {
+  tier?: number | string;
+  lv?: number | string;
+  exp?: string | number;
+  hp?: string | number;
+  mp?: string | number;
+  eff_pwr?: number;
+  eff_agi?: number;
+  pwr?: number;
+  agi?: number;
+  int?: number;
+  talent?: string[] | string;
+  [key: string]: unknown;
+}
+
+export interface ActorLifeModel {
+  orientation?: string;
+  romantic_history?: string;
+  upbringing?: string;
+  family?: string[] | string;
+  occupation?: string;
+  residence?: string;
+  routines?: Array<[string, string, string, string] | Record<string, unknown>>;
+  worldview?: string;
+  self_concept?: string;
+  [key: string]: unknown;
+}
+
+export interface ActorWounds {
+  physical?: string[] | unknown[];
+  psychological?: string[] | unknown[];
+  [key: string]: unknown;
 }
 
 export interface ActorPassions {
@@ -41,6 +81,7 @@ export interface ActorPassions {
   sadness?: number;
   guilt?: number;
   joy?: number;
+  [key: string]: number | undefined;
 }
 
 export interface ActorInventory {
@@ -51,6 +92,7 @@ export interface ActorInventory {
   carried?: string[];
   room?: string[];
   room_location?: string;
+  [key: string]: unknown;
 }
 
 export interface ActorDossier {
@@ -62,13 +104,19 @@ export interface ActorDossier {
     appeal?: number;
     style?: string;
     condition?: string;
+    [key: string]: unknown;
   };
   money?: {
     in_hand?: number;
     in_bank?: number;
     currency?: string;
+    [key: string]: unknown;
   };
-  combat?: Record<string, unknown>;
+  combat?: ActorCombat | Record<string, unknown>;
+  life_model?: ActorLifeModel | Record<string, unknown>;
+  wounds?: ActorWounds | Record<string, unknown>;
+  trauma?: string[] | unknown[];
+  constraints?: string;
   passions?: ActorPassions;
   outfit?: ActorOutfit;
   inventory?: ActorInventory;
@@ -76,6 +124,8 @@ export interface ActorDossier {
   profile?: Record<string, unknown>;
   state?: Record<string, unknown>;
   agency?: Record<string, unknown>;
+  knowledge?: Record<string, unknown>;
+  stats?: Record<string, number | unknown>;
   [key: string]: unknown;
 }
 

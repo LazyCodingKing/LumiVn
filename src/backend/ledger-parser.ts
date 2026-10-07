@@ -75,7 +75,7 @@ export function extractLedgerRaw(rawContent: string): string | null {
  * Parses the raw Ledger details content into a structured LedgerData object.
  */
 export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
-  const combined: Record<string, unknown> = {};
+  let combined: Record<string, unknown> = {};
 
   // Check for markdown code blocks (```yaml ... ```)
   const codeBlocks: string[] = [];
@@ -155,6 +155,11 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
     parseYamlChunkWithRecovery(stripped, combined);
   }
 
+  // Flatten nested "ledger" key if present
+  if (combined.ledger && typeof combined.ledger === "object" && !Array.isArray(combined.ledger)) {
+    combined = { ...(combined.ledger as Record<string, unknown>), ...combined };
+  }
+
   // Normalize actor dossiers:
   // In My World 1.79, actors may appear as top-level keys in the YAML document,
   // or under 'actors', or 'user' + NPC ids.
@@ -171,6 +176,7 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
     "bplots",
     "opportunities",
     "init",
+    "ledger",
   ]);
 
   for (const [key, val] of Object.entries(combined)) {

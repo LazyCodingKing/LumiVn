@@ -121,7 +121,13 @@ export class MenuBar {
   }
 
   public setLedger(ledger: LedgerData, hasBPlotNotification = false): void {
-    this.currentLedger = ledger;
+    const raw = ledger as any;
+    if (raw && raw.ledger && typeof raw.ledger === "object" && !Array.isArray(raw.ledger)) {
+      this.currentLedger = { ...raw.ledger, ...raw };
+    } else {
+      this.currentLedger = ledger || {};
+    }
+
     if (this.phoneBadge) {
       this.phoneBadge.style.display = hasBPlotNotification ? "inline-block" : "none";
     }

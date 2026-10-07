@@ -3261,7 +3261,7 @@ function extractLedgerRaw(rawContent) {
   return match[1] || "";
 }
 function parseLedgerYaml(rawLedgerText) {
-  const combined = {};
+  let combined = {};
   const codeBlocks = [];
   let blockMatch;
   YAML_BLOCK_RE.lastIndex = 0;
@@ -3331,6 +3331,9 @@ function parseLedgerYaml(rawLedgerText) {
 `);
     parseYamlChunkWithRecovery(stripped, combined);
   }
+  if (combined.ledger && typeof combined.ledger === "object" && !Array.isArray(combined.ledger)) {
+    combined = { ...combined.ledger, ...combined };
+  }
   const actors = {};
   const standardRootKeys = new Set([
     "world",
@@ -3343,7 +3346,8 @@ function parseLedgerYaml(rawLedgerText) {
     "journal",
     "bplots",
     "opportunities",
-    "init"
+    "init",
+    "ledger"
   ]);
   for (const [key, val] of Object.entries(combined)) {
     if (!standardRootKeys.has(key) && val && typeof val === "object" && !Array.isArray(val)) {

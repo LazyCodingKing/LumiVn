@@ -101,9 +101,20 @@ export class PhoneTab {
       `;
     }
 
+    const clockTime = this.currentLedger.clock?.t?.split(" ")[1] || this.currentLedger.clock?.t || "12:00";
+    const dateStr = this.currentLedger.clock?.date || "12-10-18";
+    const locStr = this.currentLedger.clock?.location || "Unknown Location";
+    const regionStr = this.currentLedger.clock?.region ? `, ${this.currentLedger.clock.region}` : "";
+    const phaseStr = this.currentLedger.clock?.phase || "Day";
+
     container.innerHTML = `
       ${notifHtml}
-      <div style="flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-content: start; margin-top: 10px;">
+      <div style="text-align: center; margin: 8px 0 16px 0; color: #f8fafc;">
+        <div style="font-size: 32px; font-weight: 300; letter-spacing: -0.5px; line-height: 1;">${clockTime}</div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">${dateStr} • ${phaseStr}</div>
+        <div style="font-size: 11px; color: #38bdf8; margin-top: 2px;">📍 ${locStr}${regionStr}</div>
+      </div>
+      <div style="flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-content: start; margin-top: 6px;">
         <div class="vn-phone-app-icon" data-app="messages" style="display: flex; flex-direction: column; align-items: center; cursor: pointer;">
           <div style="width: 54px; height: 54px; background: #10b981; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 24px;">💬</div>
           <span style="font-size: 11px; color: #fff; margin-top: 4px;">Messages</span>

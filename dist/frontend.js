@@ -27373,6 +27373,83 @@ class DialogueBox {
 }
 
 // src/frontend/hud/tab-characters.ts
+function normalizeGoal(g) {
+  if (Array.isArray(g)) {
+    return {
+      id: String(g[0] ?? "goal"),
+      intent: String(g[1] ?? ""),
+      priority: g[2] ?? 0,
+      commitment: g[3] ?? 0,
+      deadline: String(g[4] ?? ""),
+      cause: String(g[5] ?? ""),
+      progress: g[6] ?? 0,
+      status: String(g[7] ?? "active")
+    };
+  }
+  return {
+    id: String(g?.id ?? "goal"),
+    intent: String(g?.intent ?? g?.goal ?? g?.title ?? ""),
+    priority: g?.priority ?? 0,
+    commitment: g?.commitment ?? 0,
+    deadline: String(g?.deadline ?? ""),
+    cause: String(g?.cause ?? ""),
+    progress: g?.progress ?? 0,
+    status: String(g?.status ?? "active")
+  };
+}
+function normalizeSecret(s) {
+  if (Array.isArray(s)) {
+    return {
+      truth: String(s[0] ?? ""),
+      knows: Array.isArray(s[1]) ? s[1].map(String) : s[1] ? [String(s[1])] : [],
+      suspects: Array.isArray(s[2]) ? s[2].map(String) : s[2] ? [String(s[2])] : [],
+      exposure: Number(s[3] ?? 0),
+      cover: String(s[4] ?? "")
+    };
+  }
+  return {
+    truth: String(s?.truth ?? s?.secret ?? ""),
+    knows: Array.isArray(s?.knows) ? s.knows.map(String) : [],
+    suspects: Array.isArray(s?.suspects) ? s.suspects.map(String) : [],
+    exposure: Number(s?.exposure ?? 0),
+    cover: String(s?.cover ?? "")
+  };
+}
+function normalizeBelief(b) {
+  if (Array.isArray(b)) {
+    return {
+      proposition: String(b[0] ?? ""),
+      confidence: Number(b[1] ?? 100),
+      source: String(b[2] ?? "direct"),
+      basis: String(b[3] ?? ""),
+      timestamp: String(b[4] ?? "")
+    };
+  }
+  return {
+    proposition: String(b?.proposition ?? b?.p ?? b?.belief ?? ""),
+    confidence: Number(b?.confidence ?? b?.conf ?? 100),
+    source: String(b?.source ?? "direct"),
+    basis: String(b?.basis ?? ""),
+    timestamp: String(b?.timestamp ?? b?.t ?? "")
+  };
+}
+function normalizeRoutine(r) {
+  if (Array.isArray(r)) {
+    return {
+      time: String(r[0] ?? ""),
+      action: String(r[1] ?? ""),
+      place: String(r[2] ?? ""),
+      phase: String(r[3] ?? "")
+    };
+  }
+  return {
+    time: String(r?.time ?? r?.t ?? ""),
+    action: String(r?.action ?? r?.activity ?? ""),
+    place: String(r?.place ?? r?.loc ?? ""),
+    phase: String(r?.phase ?? "")
+  };
+}
+
 class CharactersTab {
   root;
   selectedActorId = null;
@@ -27396,6 +27473,10 @@ class CharactersTab {
       }
     }
     const allKeys = Object.keys(actors);
+    if (allKeys.length === 0) {
+      this.root.innerHTML = `<div class="vn-muted" style="text-align:center; padding: 32px;">No characters recorded in the ledger yet.</div>`;
+      return;
+    }
     const actorIds = allKeys.sort((a, b) => {
       if (a.toLowerCase() === "user")
         return -1;
@@ -27403,19 +27484,29 @@ class CharactersTab {
         return 1;
       return a.localeCompare(b);
     });
-    const header = document.createElement("div");
-    header.className = "vn-tab-header";
-    header.innerHTML = `<h3>\uD83D\uDC65 Cast & Character Records</h3><p class="vn-muted">Select a character to inspect attire, equipment, tells, and relationships.</p>`;
-    this.root.appendChild(header);
-    if (actorIds.length === 0) {
-      this.root.innerHTML += `<div class="vn-muted" style="text-align:center; padding: 24px;">No characters recorded yet.</div>`;
-      return;
-    }
     if (!this.selectedActorId || !actors[this.selectedActorId]) {
       this.selectedActorId = actorIds[0];
     }
+    const header = document.createElement("div");
+    header.className = "vn-tab-header";
+    header.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <h3 style="margin:0; font-size:15px; color:#f8fafc; display:flex; align-items:center; gap:6px;">
+            <span>\uD83D\uDC65</span> <span>Cast & Living World Dossiers</span>
+          </h3>
+          <p class="vn-muted" style="margin:2px 0 0 0; font-size:11px;">
+            Inspect character personas, attire, hidden caches, tells, active goals, and guarded secrets.
+          </p>
+        </div>
+        <span style="font-size:11px; background:#1e293b; border:1px solid #334155; padding:3px 8px; border-radius:6px; color:#94a3b8;">
+          ${actorIds.length} actors tracked
+        </span>
+      </div>
+    `;
+    this.root.appendChild(header);
     const ribbon = document.createElement("div");
-    ribbon.style.cssText = "display: flex; gap: 14px; overflow-x: auto; padding: 6px 4px 16px 4px; border-bottom: 1px solid #334155; margin-bottom: 18px;";
+    ribbon.style.cssText = "display: flex; gap: 12px; overflow-x: auto; padding: 6px 4px 14px 4px; border-bottom: 1px solid #334155; margin-bottom: 16px;";
     for (const id of actorIds) {
       const actor = actors[id];
       const isSelected = id === this.selectedActorId;
@@ -27429,11 +27520,14 @@ class CharactersTab {
       }
       const item = document.createElement("div");
       item.style.cssText = `display: flex; flex-direction: column; align-items: center; cursor: pointer; min-width: 68px; transition: transform 0.15s ease;`;
+      const displayName = id.toLowerCase() === "user" ? "Player (You)" : actor.name || id;
       item.innerHTML = `
-        <div style="width: 56px; height: 56px; border-radius: 50%; overflow: hidden; border: 2px solid ${isSelected ? "#818cf8" : "#475569"}; box-shadow: ${isSelected ? "0 0 10px rgba(99,102,241,0.6)" : "none"}; background: #1e293b; display: flex; align-items: center; justify-content: center;">
-          ${avatarUrl ? `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="${actor.name || id}" />` : `<span style="font-size: 20px;">\uD83D\uDC64</span>`}
+        <div style="width: 52px; height: 52px; border-radius: 50%; overflow: hidden; border: 2px solid ${isSelected ? "#818cf8" : "#475569"}; box-shadow: ${isSelected ? "0 0 10px rgba(99,102,241,0.6)" : "none"}; background: #1e293b; display: flex; align-items: center; justify-content: center; position: relative;">
+          ${avatarUrl ? `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="${displayName}" />` : `<span style="font-size: 22px;">\uD83D\uDC64</span>`}
         </div>
-        <span style="font-size: 11px; margin-top: 5px; color: ${isSelected ? "#f8fafc" : "#94a3b8"}; font-weight: ${isSelected ? "700" : "500"}; max-width: 64px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${actor.name || id}</span>
+        <span style="font-size: 11px; margin-top: 5px; color: ${isSelected ? "#f8fafc" : "#94a3b8"}; font-weight: ${isSelected ? "700" : "500"}; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          ${displayName}
+        </span>
       `;
       item.addEventListener("click", () => {
         this.selectedActorId = id;
@@ -27442,97 +27536,366 @@ class CharactersTab {
       ribbon.appendChild(item);
     }
     this.root.appendChild(ribbon);
-    const actor = actors[this.selectedActorId];
-    this.renderActorDetails(actor, ledger);
+    const currentActor = actors[this.selectedActorId];
+    this.renderActorDetails(currentActor, ledger);
   }
   renderActorDetails(actor, ledger) {
-    const detailsContainer = document.createElement("div");
-    detailsContainer.style.cssText = "display: flex; flex-direction: column; gap: 16px;";
-    const prof = actor.profile || {};
-    const life = actor.life_model || {};
+    const container = document.createElement("div");
+    container.style.cssText = "display: flex; flex-direction: column; gap: 14px;";
+    const isUser = (actor.id || "").toLowerCase() === "user";
+    const displayName = isUser ? "Player (You)" : actor.name || actor.id || "Unknown";
     const app = actor.appearance || {};
-    const idCard = document.createElement("div");
-    idCard.className = "vn-section";
-    idCard.innerHTML = `
-      <h4>${actor.name || actor.id} — Overview</h4>
-      <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; font-size: 13px; line-height: 1.5; color: #cbd5e1;">
-        <div><strong>Occupation:</strong> ${life.occupation || "Unknown"} | <strong>Age/Traits:</strong> ${app.age || "Unknown"}, ${app.traits || "None"}</div>
-        <div style="margin-top: 4px;"><strong>Style & Appeal:</strong> ${app.style || "Casual"} (${app.appeal ?? "?"}/100)</div>
-        <div style="margin-top: 4px;"><strong>Current Want:</strong> <span style="color: #38bdf8;">${actor.agency?.want_now || "None declared"}</span></div>
-      </div>
-    `;
-    detailsContainer.appendChild(idCard);
-    const disp = prof.dispositions || {};
-    const dispKeys = Object.keys(disp);
-    if (dispKeys.length > 0) {
-      const dispSection = document.createElement("div");
-      dispSection.className = "vn-section";
-      dispSection.innerHTML = `<h4>Dispositions & Psychological Traits</h4>`;
-      const grid = document.createElement("div");
-      grid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px;";
-      for (const k of dispKeys) {
-        const item = document.createElement("div");
-        item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font-size: 11px;";
-        item.innerHTML = `<span style="color: #94a3b8; text-transform: capitalize;">${k}:</span> <strong style="color: #f8fafc;">${disp[k]}</strong>`;
-        grid.appendChild(item);
-      }
-      dispSection.appendChild(grid);
-      detailsContainer.appendChild(dispSection);
-    }
-    const boundaries = prof.boundaries || [];
-    const redLines = prof.red_lines || [];
-    if (boundaries.length > 0 || redLines.length > 0) {
-      const boundSection = document.createElement("div");
-      boundSection.className = "vn-section";
-      boundSection.innerHTML = `
-        <h4>Limits & Boundaries</h4>
-        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px; color: #cbd5e1;">
-          ${boundaries.length > 0 ? `<div><strong>Boundaries:</strong> ${boundaries.join(", ")}</div>` : ""}
-          ${redLines.length > 0 ? `<div style="margin-top: 4px; color: #fca5a5;"><strong>Red Lines:</strong> ${redLines.join(", ")}</div>` : ""}
-        </div>
-      `;
-      detailsContainer.appendChild(boundSection);
-    }
+    const money = actor.money || {};
+    const combat = actor.combat || {};
+    const life = actor.life_model || {};
+    const outfit = actor.outfit || {};
+    const inv = actor.inventory || {};
+    const wounds = actor.wounds || {};
+    const trauma = Array.isArray(actor.trauma) ? actor.trauma : [];
+    const prof = actor.profile || {};
+    const state = actor.state || {};
+    const agency = actor.agency || {};
+    const know = actor.knowledge || {};
     const rels = actor.relations || {};
+    const conditionStr = app.condition || state.condition || "Normal";
+    const wantStr = agency.want_now || "None declared";
+    const banner = document.createElement("div");
+    banner.className = "vn-section";
+    banner.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.5; color: #cbd5e1;";
+    banner.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:8px; border-bottom:1px solid #334155; padding-bottom:6px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h4 style="margin:0; font-size:15px; color:#f8fafc;">${displayName}</h4>
+          <span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe;">
+            ${life.occupation || "Resident"}
+          </span>
+          <span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(234,179,8,0.2); border:1px solid #eab308; color:#fef08a;">
+            ${conditionStr}
+          </span>
+        </div>
+        <div style="font-size:11px; color:#94a3b8;">
+          Appeal: <strong style="color:#f43f5e;">${app.appeal ?? 50}/100</strong>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:6px; margin-bottom:8px;">
+        <div><span style="color:#94a3b8;">Age:</span> <strong>${app.age || "Unknown"}</strong></div>
+        <div><span style="color:#94a3b8;">Style:</span> <strong>${app.style || "Casual"}</strong></div>
+        <div><span style="color:#94a3b8;">Residence:</span> <strong>${life.residence || "Current Scene"}</strong></div>
+        <div><span style="color:#94a3b8;">Orientation:</span> <strong>${life.orientation || "Unspecified"}</strong></div>
+      </div>
+
+      ${app.traits ? `<div style="margin-bottom:6px; background:#0f172a; padding:6px 8px; border-radius:4px; border-left:3px solid #818cf8;"><strong>Traits:</strong> ${app.traits}</div>` : ""}
+
+      <div style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); border-radius:4px; padding:6px 8px; color:#e0f2fe; margin-top:4px;">
+        <span style="color:#38bdf8; font-weight:700;">\uD83C\uDFAF Immediate Want:</span> ${wantStr}
+      </div>
+
+      ${actor.constraints ? `
+        <div style="margin-top:6px; background:rgba(244,63,94,0.1); border:1px solid rgba(244,63,94,0.3); border-radius:4px; padding:6px 8px; color:#fecdd3;">
+          <span style="color:#f43f5e; font-weight:700;">⚠️ Constraint / Taboo:</span> ${actor.constraints}
+        </div>
+      ` : ""}
+    `;
+    container.appendChild(banner);
+    const outfitSection = document.createElement("div");
+    outfitSection.className = "vn-section";
+    outfitSection.innerHTML = `<h4>\uD83D\uDC57 Attire & Wardrobe</h4>`;
+    const outfitGrid = document.createElement("div");
+    outfitGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px;";
+    const outfitKeys = [
+      { label: "Top", key: "top", icon: "\uD83D\uDC55" },
+      { label: "Bottom", key: "bottom", icon: "\uD83D\uDC56" },
+      { label: "Underwear Top", key: "underwear_top", icon: "\uD83D\uDC59" },
+      { label: "Underwear Bottom", key: "underwear_bottom", icon: "\uD83E\uDE72" },
+      { label: "Footwear", key: "shoes", icon: "\uD83D\uDC5F" },
+      { label: "Hair & Makeup", key: "hair", icon: "\uD83D\uDC84" },
+      { label: "Scent", key: "scent", icon: "✨" },
+      { label: "Dishevelment", key: "state", icon: "\uD83E\uDDF5" }
+    ];
+    let hasOutfitItems = false;
+    for (const item of outfitKeys) {
+      let val = outfit[item.key] || (item.key === "shoes" ? outfit["footwear"] : undefined);
+      if (val) {
+        hasOutfitItems = true;
+        const box = document.createElement("div");
+        box.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font-size: 11px;";
+        box.innerHTML = `
+          <div style="color: #94a3b8; margin-bottom: 2px;">${item.icon} ${item.label}</div>
+          <div style="color: #f8fafc; font-weight: 600;">${val}</div>
+        `;
+        outfitGrid.appendChild(box);
+      }
+    }
+    if (outfit.accessories) {
+      hasOutfitItems = true;
+      const accList = Array.isArray(outfit.accessories) ? outfit.accessories.join(", ") : outfit.accessories;
+      const accBox = document.createElement("div");
+      accBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font-size: 11px; grid-column: 1 / -1;";
+      accBox.innerHTML = `
+        <div style="color: #94a3b8; margin-bottom: 2px;">\uD83D\uDC8D Accessories & Jewelry</div>
+        <div style="color: #f8fafc; font-weight: 600;">${accList}</div>
+      `;
+      outfitGrid.appendChild(accBox);
+    }
+    if (!hasOutfitItems) {
+      outfitGrid.innerHTML = `<div class="vn-muted" style="padding:8px;">Standard default attire</div>`;
+    }
+    outfitSection.appendChild(outfitGrid);
+    container.appendChild(outfitSection);
+    const invSection = document.createElement("div");
+    invSection.className = "vn-section";
+    invSection.innerHTML = `<h4>\uD83C\uDF92 Equipment, Carried Gear & Finances</h4>`;
+    const currencySymbol = money.currency || "$";
+    const inHandCash = money.in_hand ?? 0;
+    const inBankCash = money.in_bank ?? 0;
+    const inHandL = inv.in_hand?.L || "Empty";
+    const inHandR = inv.in_hand?.R || "Empty";
+    const carriedList = Array.isArray(inv.carried) ? inv.carried : [];
+    const roomList = Array.isArray(inv.room) ? inv.room : [];
+    const invBox = document.createElement("div");
+    invBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px;";
+    invBox.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid #334155; padding-bottom:8px;">
+        <div style="display:flex; gap:16px;">
+          <div><span style="color:#94a3b8;">In Hand:</span> <strong style="color:#22c55e;">${currencySymbol}${inHandCash}</strong></div>
+          <div><span style="color:#94a3b8;">In Bank:</span> <strong style="color:#38bdf8;">${currencySymbol}${inBankCash}</strong></div>
+        </div>
+        <div style="font-size:11px; color:#cbd5e1;">
+          Hands: <span style="color:#f8fafc;">[L: ${inHandL}] [R: ${inHandR}]</span>
+        </div>
+      </div>
+
+      <div>
+        <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">Carried On Person:</div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          ${carriedList.length > 0 ? carriedList.map((item) => `<span style="background:#0f172a; border:1px solid #475569; padding:2px 8px; border-radius:4px; font-size:11px; color:#f8fafc;">\uD83D\uDCE6 ${item}</span>`).join("") : `<span class="vn-muted">Nothing carried</span>`}
+        </div>
+      </div>
+
+      ${roomList.length > 0 ? `
+        <div style="margin-top:4px;">
+          <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">Stored in Room (${inv.room_location || "Quarters"}):</div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px;">
+            ${roomList.map((item) => `<span style="background:#0f172a; border:1px solid #334155; padding:2px 8px; border-radius:4px; font-size:11px; color:#94a3b8;">\uD83D\uDDC4️ ${item}</span>`).join("")}
+          </div>
+        </div>
+      ` : ""}
+    `;
+    invSection.appendChild(invBox);
+    container.appendChild(invSection);
+    if (combat && (combat.hp || combat.pwr || combat.eff_pwr || combat.tier)) {
+      const combatSection = document.createElement("div");
+      combatSection.className = "vn-section";
+      combatSection.innerHTML = `<h4>⚔️ Combat Vitals & Aptitudes</h4>`;
+      const cBox = document.createElement("div");
+      cBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px;";
+      cBox.innerHTML = `
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px; border-bottom:1px solid #334155; padding-bottom:6px;">
+          <div>Tier: <strong style="color:#eab308;">${combat.tier ?? 1}</strong> | Lv: <strong style="color:#f8fafc;">${combat.lv ?? 1}</strong> (${combat.exp ?? "0/100"})</div>
+          <div style="display:flex; gap:12px;">
+            <div>HP: <strong style="color:#ef4444;">${combat.hp ?? "100/100"}</strong></div>
+            <div>MP: <strong style="color:#3b82f6;">${combat.mp ?? "50/50"}</strong></div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(90px, 1fr)); gap:6px; margin-bottom:8px;">
+          <div style="background:#0f172a; padding:4px 8px; border-radius:4px;">PWR: <strong>${combat.pwr ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px 8px; border-radius:4px;">AGI: <strong>${combat.agi ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px 8px; border-radius:4px;">INT: <strong>${combat.int ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px 8px; border-radius:4px;">Eff PWR: <strong>${combat.eff_pwr ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px 8px; border-radius:4px;">Eff AGI: <strong>${combat.eff_agi ?? "-"}</strong></div>
+        </div>
+
+        ${combat.talent ? `
+          <div style="font-size:11px;">
+            <span style="color:#94a3b8;">Talents & Disciplines:</span>
+            <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+              ${(Array.isArray(combat.talent) ? combat.talent : [combat.talent]).map((t) => `<span style="background:rgba(129,140,248,0.15); border:1px solid #818cf8; color:#c7d2fe; padding:2px 6px; border-radius:4px;">✦ ${t}</span>`).join("")}
+            </div>
+          </div>
+        ` : ""}
+      `;
+      combatSection.appendChild(cBox);
+      container.appendChild(combatSection);
+    }
+    const physWounds = Array.isArray(wounds.physical) ? wounds.physical : [];
+    const psychWounds = Array.isArray(wounds.psychological) ? wounds.psychological : [];
+    const tells = prof.tells ? Array.isArray(prof.tells) ? prof.tells : [prof.tells] : [];
+    const psychoSection = document.createElement("div");
+    psychoSection.className = "vn-section";
+    psychoSection.innerHTML = `<h4>\uD83E\uDDE0 Condition, Tells & Wounds</h4>`;
+    const psychoBox = document.createElement("div");
+    psychoBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px;";
+    psychoBox.innerHTML = `
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px;">
+        <div>
+          <div style="color:#fca5a5; font-weight:700; font-size:11px; margin-bottom:3px;">Physical Wounds:</div>
+          <div>${physWounds.length > 0 ? physWounds.map((w) => `<span style="display:inline-block; background:rgba(239,68,68,0.2); border:1px solid #ef4444; color:#fca5a5; padding:2px 6px; border-radius:4px; margin-right:4px; margin-bottom:4px;">\uD83E\uDE79 ${w}</span>`).join("") : `<span class="vn-muted">None</span>`}</div>
+        </div>
+        <div>
+          <div style="color:#fcd34d; font-weight:700; font-size:11px; margin-bottom:3px;">Psychological Wounds & Trauma:</div>
+          <div>${psychWounds.length > 0 || trauma.length > 0 ? [...psychWounds, ...trauma].map((pw) => `<span style="display:inline-block; background:rgba(245,158,11,0.2); border:1px solid #f59e0b; color:#fde68a; padding:2px 6px; border-radius:4px; margin-right:4px; margin-bottom:4px;">⚠️ ${pw}</span>`).join("") : `<span class="vn-muted">None</span>`}</div>
+        </div>
+      </div>
+
+      ${tells.length > 0 ? `
+        <div style="margin-top:4px; border-top:1px solid #334155; padding-top:6px;">
+          <div style="color:#38bdf8; font-weight:700; font-size:11px; margin-bottom:3px;">\uD83D\uDC41️ Behavioral Tells & Micro-Expressions:</div>
+          <div style="color:#e0f2fe; font-size:11px;">${tells.join("; ")}</div>
+        </div>
+      ` : ""}
+
+      ${prof.defense || prof.blind_spot ? `
+        <div style="margin-top:2px; display:flex; flex-wrap:wrap; gap:12px; font-size:11px; color:#94a3b8;">
+          ${prof.defense ? `<div>Defense: <strong style="color:#cbd5e1;">${prof.defense}</strong></div>` : ""}
+          ${prof.blind_spot ? `<div>Blind Spot: <strong style="color:#cbd5e1;">${prof.blind_spot}</strong></div>` : ""}
+        </div>
+      ` : ""}
+    `;
+    psychoSection.appendChild(psychoBox);
+    container.appendChild(psychoSection);
+    const routines = Array.isArray(life.routines) ? life.routines.map(normalizeRoutine) : [];
+    const lifeSection = document.createElement("div");
+    lifeSection.className = "vn-section";
+    lifeSection.innerHTML = `<h4>\uD83D\uDCD6 Persona, Upbringing & Routines</h4>`;
+    const lifeBox = document.createElement("div");
+    lifeBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display:flex; flex-direction:column; gap:8px;";
+    lifeBox.innerHTML = `
+      ${life.romantic_history ? `<div><span style="color:#94a3b8;">Romantic History:</span> <strong style="color:#f8fafc;">${life.romantic_history}</strong></div>` : ""}
+      ${life.upbringing ? `<div><span style="color:#94a3b8;">Upbringing:</span> <span style="color:#cbd5e1;">${life.upbringing}</span></div>` : ""}
+      ${life.worldview ? `<div><span style="color:#94a3b8;">Worldview:</span> <span style="color:#cbd5e1;">"${life.worldview}"</span></div>` : ""}
+      ${life.family ? `<div><span style="color:#94a3b8;">Family:</span> <span style="color:#cbd5e1;">${Array.isArray(life.family) ? life.family.join(", ") : life.family}</span></div>` : ""}
+
+      ${routines.length > 0 ? `
+        <div style="margin-top:6px; border-top:1px solid #334155; padding-top:6px;">
+          <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">Daily Routines & Schedules:</div>
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            ${routines.map((r) => `
+              <div style="display:flex; justify-content:space-between; background:#0f172a; padding:4px 8px; border-radius:4px; font-size:11px;">
+                <span style="color:#38bdf8; font-weight:700;">${r.time} (${r.phase})</span>
+                <span style="color:#f8fafc;">${r.action}</span>
+                <span style="color:#94a3b8;">@ ${r.place}</span>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      ` : ""}
+    `;
+    lifeSection.appendChild(lifeBox);
+    container.appendChild(lifeSection);
+    const rawGoals = Array.isArray(agency.goals) ? agency.goals : [];
+    if (rawGoals.length > 0) {
+      const goals = rawGoals.map(normalizeGoal);
+      const goalSection = document.createElement("div");
+      goalSection.className = "vn-section";
+      goalSection.innerHTML = `<h4>\uD83C\uDFAF Active Goals & Directives (${goals.length})</h4>`;
+      const goalList = document.createElement("div");
+      goalList.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+      for (const g of goals) {
+        const item = document.createElement("div");
+        item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px;";
+        item.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <strong style="color:#38bdf8; font-size:12px;">${g.intent}</strong>
+            <span style="padding:1px 6px; border-radius:4px; background:rgba(34,197,94,0.2); border:1px solid #22c55e; color:#86efac;">
+              ${g.status} (${g.progress}%)
+            </span>
+          </div>
+          <div style="display:flex; gap:12px; color:#94a3b8; flex-wrap:wrap;">
+            <span>Priority: <strong style="color:#f8fafc;">${g.priority}</strong></span>
+            <span>Commitment: <strong style="color:#f8fafc;">${g.commitment}</strong></span>
+            ${g.deadline ? `<span>Deadline: <strong style="color:#fca5a5;">${g.deadline}</strong></span>` : ""}
+          </div>
+          ${g.cause ? `<div style="margin-top:4px; color:#cbd5e1; font-style:italic;">Cause: ${g.cause}</div>` : ""}
+        `;
+        goalList.appendChild(item);
+      }
+      goalSection.appendChild(goalList);
+      container.appendChild(goalSection);
+    }
+    const rawSecrets = Array.isArray(know.secrets) ? know.secrets : [];
+    const rawBeliefs = Array.isArray(know.beliefs) ? know.beliefs : [];
+    if (rawSecrets.length > 0 || rawBeliefs.length > 0) {
+      const knowSection = document.createElement("div");
+      knowSection.className = "vn-section";
+      knowSection.innerHTML = `<h4>\uD83D\uDD12 Guarded Secrets & Epistemic Beliefs</h4>`;
+      const knowBox = document.createElement("div");
+      knowBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display:flex; flex-direction:column; gap:8px;";
+      if (rawSecrets.length > 0) {
+        const secrets = rawSecrets.map(normalizeSecret);
+        knowBox.innerHTML += `
+          <div>
+            <div style="color:#f43f5e; font-weight:700; font-size:11px; margin-bottom:4px;">Guarded Secrets:</div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${secrets.map((s) => `
+                <div style="background:#0f172a; border-left:3px solid #f43f5e; padding:6px 8px; border-radius:4px; font-size:11px;">
+                  <div style="color:#fecdd3; font-weight:600;">"${s.truth}"</div>
+                  <div style="display:flex; gap:12px; margin-top:3px; color:#94a3b8; font-size:10px;">
+                    <span>Exposure Risk: <strong style="color:#fb7185;">${s.exposure}%</strong></span>
+                    <span>Knows: <strong style="color:#f8fafc;">${s.knows.join(", ") || "Self only"}</strong></span>
+                    ${s.cover ? `<span>Cover: <em>${s.cover}</em></span>` : ""}
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+      if (rawBeliefs.length > 0) {
+        const beliefs = rawBeliefs.map(normalizeBelief);
+        knowBox.innerHTML += `
+          <div style="margin-top:4px;">
+            <div style="color:#38bdf8; font-weight:700; font-size:11px; margin-bottom:4px;">Epistemic Beliefs:</div>
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              ${beliefs.map((b) => `
+                <div style="background:#0f172a; padding:4px 8px; border-radius:4px; font-size:11px; display:flex; justify-content:space-between;">
+                  <span style="color:#e0f2fe;">"${b.proposition}"</span>
+                  <span style="color:#94a3b8; font-size:10px;">conf: ${b.confidence}% (${b.source})</span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+      knowSection.appendChild(knowBox);
+      container.appendChild(knowSection);
+    }
     const targetIds = Object.keys(rels);
-    const relsSection = document.createElement("div");
-    relsSection.className = "vn-section";
-    relsSection.innerHTML = `<h4>Relationship Matrix (${targetIds.length})</h4>`;
-    if (targetIds.length === 0) {
-      relsSection.innerHTML += `<div class="vn-muted">No relational links recorded.</div>`;
-    } else {
+    if (targetIds.length > 0) {
+      const relsSection = document.createElement("div");
+      relsSection.className = "vn-section";
+      relsSection.innerHTML = `<h4>\uD83E\uDD1D Interpersonal Relations (${targetIds.length})</h4>`;
       const relsList = document.createElement("div");
-      relsList.style.cssText = "display: flex; flex-direction: column; gap: 10px;";
+      relsList.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
       for (const targetId of targetIds) {
         const r = rels[targetId];
-        const targetName = targetId === "user" ? "Player (You)" : ledger.actors?.[targetId]?.name || targetId;
-        const bThreshold = r.betrayal_threshold !== undefined && r.betrayal_threshold !== null ? r.betrayal_threshold : "N/A";
+        const targetName = targetId.toLowerCase() === "user" ? "Player (You)" : ledger.actors?.[targetId]?.name || targetId;
+        const bThreshold = r.betrayal_threshold ?? "N/A";
         const card = document.createElement("div");
-        card.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px;";
+        card.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 8px 10px; font-size: 11px;";
         card.innerHTML = `
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <strong style="color: #818cf8; font-size: 13px;">Towards ${targetName}</strong>
-            <span style="font-size: 11px; background: rgba(239,68,68,0.2); border: 1px solid #ef4444; color: #fca5a5; padding: 2px 6px; border-radius: 4px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <strong style="color:#818cf8; font-size:12px;">Towards ${targetName}</strong>
+            <span style="font-size:10px; background:rgba(239,68,68,0.2); border:1px solid #ef4444; color:#fca5a5; padding:1px 6px; border-radius:4px;">
               Betrayal Thresh: ${bThreshold}
             </span>
           </div>
-          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 6px; color: #cbd5e1; margin-bottom: 6px;">
+          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(80px, 1fr)); gap:4px; color:#cbd5e1;">
             <div>Affinity: <strong>${r.affinity ?? 0}</strong></div>
             <div>Trust: <strong>${r.trust ?? 0}</strong></div>
             <div>Respect: <strong>${r.respect ?? 0}</strong></div>
             <div>Attraction: <strong>${r.attraction ?? 0}</strong></div>
             <div>Loyalty: <strong>${r.loyalty ?? 0}</strong></div>
-            <div>Sacrifice: <strong>${r.sacrifice_willingness ?? 0}</strong></div>
           </div>
-          ${r.leverage && r.leverage.length > 0 ? `<div style="font-size: 11px; color: #f59e0b;">Leverage: ${r.leverage.join(", ")}</div>` : ""}
-          ${r.obligations && r.obligations.length > 0 ? `<div style="font-size: 11px; color: #38bdf8;">Obligations: ${r.obligations.join(", ")}</div>` : ""}
+          ${r.leverage && r.leverage.length > 0 ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${r.leverage.join(", ")}</div>` : ""}
         `;
         relsList.appendChild(card);
       }
       relsSection.appendChild(relsList);
+      container.appendChild(relsSection);
     }
-    detailsContainer.appendChild(relsSection);
-    this.root.appendChild(detailsContainer);
+    this.root.appendChild(container);
   }
 }
 
@@ -27634,25 +27997,53 @@ class StatsTab {
   }
   render(ledger) {
     this.root.innerHTML = "";
-    const actors = ledger.actors || {};
+    const actors = { ...ledger.actors || {} };
+    if (ledger.roster && Array.isArray(ledger.roster)) {
+      for (const r of ledger.roster) {
+        if (r.id && !actors[r.id]) {
+          actors[r.id] = {
+            id: r.id,
+            name: r.name || r.id,
+            profile: { public_roles: [r.status || "Resident"] }
+          };
+        }
+      }
+    }
     const actorIds = Object.keys(actors);
     if (actorIds.length === 0) {
-      this.root.innerHTML = `<div class="vn-muted" style="padding: 24px; text-align: center;">No actor dossiers recorded.</div>`;
+      this.root.innerHTML = `<div class="vn-muted" style="padding: 32px; text-align: center;">No actor dossiers recorded.</div>`;
       return;
     }
     if (!actors[this.selectedActorId]) {
-      this.selectedActorId = actorIds[0];
+      const withStats = actorIds.find((id) => actors[id]?.stats || actors[id]?.relations && Object.keys(actors[id].relations).length > 0);
+      this.selectedActorId = withStats || actorIds[0];
     }
     const header = document.createElement("div");
     header.className = "vn-tab-header";
-    header.innerHTML = `<h3>\uD83D\uDCCA Status, Passions & Relationship Metrics</h3>`;
+    header.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <h3 style="margin:0; font-size:15px; color:#f8fafc; display:flex; align-items:center; gap:6px;">
+            <span>\uD83D\uDCCA</span> <span>Status, Passions & 21-Stat Ledger Matrix</span>
+          </h3>
+          <p class="vn-muted" style="margin:2px 0 0 0; font-size:11px;">
+            Comprehensive emotional equilibrium, psychological friction, RPG vitals, and relational dynamics.
+          </p>
+        </div>
+      </div>
+    `;
     this.root.appendChild(header);
     const controls = document.createElement("div");
-    controls.style.cssText = "display: flex; gap: 10px; margin-bottom: 16px; align-items: center; flex-wrap: wrap;";
+    controls.style.cssText = "display: flex; gap: 10px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; background: #1e293b; padding: 8px 12px; border-radius: 8px; border: 1px solid #334155;";
     controls.innerHTML = `
-      <label style="font-size: 12px; color: #94a3b8;">Actor:</label>
-      <select id="vn-stats-actor-select" style="background: #1e293b; color: #f8fafc; border: 1px solid #475569; border-radius: 6px; padding: 6px 10px; font-size: 13px;">
-        ${actorIds.map((id) => `<option value="${id}" ${id === this.selectedActorId ? "selected" : ""}>${id === "user" ? "Player (You)" : actors[id]?.name || id}</option>`).join("")}
+      <label style="font-size: 12px; color: #94a3b8; font-weight:600;">Inspect Actor:</label>
+      <select id="vn-stats-actor-select" style="background: #0f172a; color: #f8fafc; border: 1px solid #475569; border-radius: 6px; padding: 4px 10px; font-size: 12px;">
+        ${actorIds.map((id) => {
+      const a = actors[id];
+      const label = id.toLowerCase() === "user" ? "Player (You)" : a.name || id;
+      const hasMatrix = a.stats ? " [21-Stat]" : "";
+      return `<option value="${id}" ${id === this.selectedActorId ? "selected" : ""}>${label}${hasMatrix}</option>`;
+    }).join("")}
       </select>
     `;
     this.root.appendChild(controls);
@@ -27662,9 +28053,143 @@ class StatsTab {
       this.render(ledger);
     });
     const actor = actors[this.selectedActorId];
+    const statsMatrix = actor.stats || {};
+    const combat = actor.combat || {};
+    if (combat && (combat.hp || combat.pwr || combat.tier)) {
+      const vitalsSection = document.createElement("div");
+      vitalsSection.className = "vn-section";
+      vitalsSection.innerHTML = `<h4>⚔️ Vitals & Attributes</h4>`;
+      const vBox = document.createElement("div");
+      vBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px;";
+      const parseRatio = (val) => {
+        if (typeof val === "string" && val.includes("/")) {
+          const [cur, max] = val.split("/").map(Number);
+          return max && max > 0 ? Math.max(0, Math.min(100, cur / max * 100)) : 100;
+        }
+        return 100;
+      };
+      const hpPct = parseRatio(combat.hp);
+      const mpPct = parseRatio(combat.mp);
+      vBox.innerHTML = `
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:11px; color:#94a3b8;">
+          <span>Tier ${combat.tier ?? 1} | Level ${combat.lv ?? 1}</span>
+          <span>EXP: ${combat.exp ?? "0/100"}</span>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;">
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;">
+              <span style="color:#f87171; font-weight:700;">HP</span>
+              <span style="color:#cbd5e1;">${combat.hp ?? "100/100"}</span>
+            </div>
+            <div style="background:#0f172a; border-radius:4px; height:8px; overflow:hidden; border:1px solid #334155;">
+              <div style="background:linear-gradient(90deg, #ef4444, #f87171); width:${hpPct}%; height:100%;"></div>
+            </div>
+          </div>
+
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;">
+              <span style="color:#60a5fa; font-weight:700;">MP</span>
+              <span style="color:#cbd5e1;">${combat.mp ?? "50/50"}</span>
+            </div>
+            <div style="background:#0f172a; border-radius:4px; height:8px; overflow:hidden; border:1px solid #334155;">
+              <div style="background:linear-gradient(90deg, #3b82f6, #60a5fa); width:${mpPct}%; height:100%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(70px, 1fr)); gap:6px; text-align:center;">
+          <div style="background:#0f172a; padding:4px; border-radius:4px; border:1px solid #334155;"><span style="color:#94a3b8; font-size:10px;">PWR</span><br/><strong style="color:#f8fafc;">${combat.pwr ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px; border-radius:4px; border:1px solid #334155;"><span style="color:#94a3b8; font-size:10px;">AGI</span><br/><strong style="color:#f8fafc;">${combat.agi ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px; border-radius:4px; border:1px solid #334155;"><span style="color:#94a3b8; font-size:10px;">INT</span><br/><strong style="color:#f8fafc;">${combat.int ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px; border-radius:4px; border:1px solid #334155;"><span style="color:#94a3b8; font-size:10px;">Eff PWR</span><br/><strong style="color:#38bdf8;">${combat.eff_pwr ?? "-"}</strong></div>
+          <div style="background:#0f172a; padding:4px; border-radius:4px; border:1px solid #334155;"><span style="color:#94a3b8; font-size:10px;">Eff AGI</span><br/><strong style="color:#38bdf8;">${combat.eff_agi ?? "-"}</strong></div>
+        </div>
+      `;
+      vitalsSection.appendChild(vBox);
+      this.root.appendChild(vitalsSection);
+    }
+    const statKeys = Object.keys(statsMatrix);
+    if (statKeys.length > 0) {
+      const matrixSection = document.createElement("div");
+      matrixSection.className = "vn-section";
+      matrixSection.innerHTML = `<h4>\uD83C\uDFB2 21-Stat Engine Matrix (${statKeys.length} metrics)</h4>`;
+      const matrixBox = document.createElement("div");
+      matrixBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px;";
+      const groups = [
+        {
+          name: "Interpersonal Stance",
+          color: "#818cf8",
+          stats: [
+            { k: "T", name: "Trust", max: 100 },
+            { k: "A", name: "Affinity / Affection", max: 100 },
+            { k: "R", name: "Respect", max: 100 },
+            { k: "F", name: "Fear", max: 100 },
+            { k: "Fam", name: "Familiarity", max: 10 },
+            { k: "G", name: "Grudge", max: 100 }
+          ]
+        },
+        {
+          name: "Psychological Equilibrium",
+          color: "#38bdf8",
+          stats: [
+            { k: "Integ", name: "Integrity", max: 100 },
+            { k: "Stress", name: "Stress Level", max: 100 },
+            { k: "CAU", name: "Caution", max: 100 },
+            { k: "GRD", name: "Guard / Defense", max: 100 },
+            { k: "PRD", name: "Pride", max: 100 },
+            { k: "EMP", name: "Empathy", max: 100 },
+            { k: "STB", name: "Stability", max: 100 },
+            { k: "BLD", name: "Bleed / Leakage", max: 100 }
+          ]
+        },
+        {
+          name: "Behavioral Dynamics",
+          color: "#f43f5e",
+          stats: [
+            { k: "RX", name: "Reactiveness", max: 100 },
+            { k: "RC", name: "Recovery Rate", max: 100 },
+            { k: "Rig", name: "Rigidity", max: 100 },
+            { k: "Mask", name: "Social Facade", max: 100 },
+            { k: "MIS", name: "Misperception", max: 100 },
+            { k: "WV", name: "Willpower", max: 100 },
+            { k: "COMP", name: "Compliance", max: 100 }
+          ]
+        }
+      ];
+      for (const grp of groups) {
+        const groupEl = document.createElement("div");
+        groupEl.innerHTML = `<div style="font-size:11px; font-weight:700; color:${grp.color}; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">${grp.name}</div>`;
+        const grid = document.createElement("div");
+        grid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px;";
+        for (const def of grp.stats) {
+          const val = statsMatrix[def.k];
+          if (val !== undefined) {
+            const num = Number(val);
+            const pct = Math.max(0, Math.min(100, num / def.max * 100));
+            const card = document.createElement("div");
+            card.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 4px 8px; font-size: 11px;";
+            card.innerHTML = `
+              <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                <span style="color:#94a3b8;">${def.k} <span style="font-size:9px; color:#64748b;">(${def.name})</span></span>
+                <strong style="color:#f8fafc;">${num}</strong>
+              </div>
+              <div style="background:#1e293b; border-radius:3px; height:4px; overflow:hidden;">
+                <div style="background:${grp.color}; width:${pct}%; height:100%;"></div>
+              </div>
+            `;
+            grid.appendChild(card);
+          }
+        }
+        groupEl.appendChild(grid);
+        matrixBox.appendChild(groupEl);
+      }
+      matrixSection.appendChild(matrixBox);
+      this.root.appendChild(matrixSection);
+    }
     const passionsSection = document.createElement("div");
     passionsSection.className = "vn-section";
-    passionsSection.innerHTML = `<h4>Current Passions & Affect</h4>`;
+    passionsSection.innerHTML = `<h4>\uD83D\uDD25 Current Passions & Affect</h4>`;
     const badgesContainer = document.createElement("div");
     badgesContainer.className = "vn-badges-container";
     const passions = actor.passions || {};
@@ -27694,7 +28219,7 @@ class StatsTab {
       }
     }
     if (!hasBadge) {
-      badgesContainer.innerHTML = `<span class="vn-muted">Equilibrium / Baseline state</span>`;
+      badgesContainer.innerHTML = `<span class="vn-muted" style="padding:4px;">Equilibrium / Baseline emotional state</span>`;
     }
     passionsSection.appendChild(badgesContainer);
     this.root.appendChild(passionsSection);
@@ -27703,55 +28228,54 @@ class StatsTab {
     const relsSection = document.createElement("div");
     relsSection.className = "vn-section";
     if (availableTargets.length === 0) {
-      relsSection.innerHTML = `<h4>Relationships</h4><div class="vn-muted">No relationship edges initialized for this actor.</div>`;
+      relsSection.innerHTML = `<h4>\uD83E\uDD1D Interpersonal Relations</h4><div class="vn-muted">No outgoing relationship edges initialized for this actor.</div>`;
       this.root.appendChild(relsSection);
-      return;
-    }
-    if (!rels[this.selectedTargetId]) {
-      this.selectedTargetId = availableTargets[0];
-    }
-    relsSection.innerHTML = `
+    } else {
+      if (!rels[this.selectedTargetId]) {
+        this.selectedTargetId = availableTargets[0];
+      }
+      relsSection.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
         <h4 style="margin: 0;">Relations Toward:</h4>
         <select id="vn-stats-target-select" style="background: #1e293b; color: #f8fafc; border: 1px solid #475569; border-radius: 6px; padding: 4px 8px; font-size: 12px;">
-          ${availableTargets.map((t) => `<option value="${t}" ${t === this.selectedTargetId ? "selected" : ""}>${t === "user" ? "Player (You)" : actors[t]?.name || t}</option>`).join("")}
+          ${availableTargets.map((t) => `<option value="${t}" ${t === this.selectedTargetId ? "selected" : ""}>${t.toLowerCase() === "user" ? "Player (You)" : actors[t]?.name || t}</option>`).join("")}
         </select>
       </div>
     `;
-    const targetSelect = relsSection.querySelector("#vn-stats-target-select");
-    targetSelect.addEventListener("change", () => {
-      this.selectedTargetId = targetSelect.value;
-      this.render(ledger);
-    });
-    const activeRel = rels[this.selectedTargetId] || {};
-    const metersContainer = document.createElement("div");
-    metersContainer.className = "vn-meters-container";
-    const relMeters = [
-      { label: "Affinity", min: -100, max: 100, val: Number(activeRel.affinity ?? 0) },
-      { label: "Trust", min: -100, max: 100, val: Number(activeRel.trust ?? 0) },
-      { label: "Respect", min: -100, max: 100, val: Number(activeRel.respect ?? 0) },
-      { label: "Attraction", min: -100, max: 100, val: Number(activeRel.attraction ?? 0) },
-      { label: "Fear", min: 0, max: 100, val: Number(activeRel.fear ?? 0) },
-      { label: "Familiarity", min: 0, max: 100, val: Number(activeRel.familiarity ?? 0) },
-      { label: "Attachment", min: 0, max: 100, val: Number(activeRel.attachment ?? 0) },
-      { label: "Grudge", min: 0, max: 100, val: Number(activeRel.grudge ?? 0) },
-      { label: "Loyalty", min: 0, max: 100, val: Number(activeRel.loyalty ?? 0) },
-      { label: "Sacrifice Willingness", min: 0, max: 100, val: Number(activeRel.sacrifice_willingness ?? 0) }
-    ];
-    for (const m of relMeters) {
-      const pct = m.min < 0 ? Math.max(0, Math.min(100, (m.val + 100) / 200 * 100)) : Math.max(0, Math.min(100, m.val / m.max * 100));
-      const row = document.createElement("div");
-      row.className = "vn-meter-row";
-      row.innerHTML = `
+      const targetSelect = relsSection.querySelector("#vn-stats-target-select");
+      targetSelect.addEventListener("change", () => {
+        this.selectedTargetId = targetSelect.value;
+        this.render(ledger);
+      });
+      const activeRel = rels[this.selectedTargetId] || {};
+      const metersContainer = document.createElement("div");
+      metersContainer.className = "vn-meters-container";
+      const relMeters = [
+        { label: "Affinity", min: -100, max: 100, val: Number(activeRel.affinity ?? 0) },
+        { label: "Trust", min: -100, max: 100, val: Number(activeRel.trust ?? 0) },
+        { label: "Respect", min: -100, max: 100, val: Number(activeRel.respect ?? 0) },
+        { label: "Attraction", min: -100, max: 100, val: Number(activeRel.attraction ?? 0) },
+        { label: "Fear", min: 0, max: 100, val: Number(activeRel.fear ?? 0) },
+        { label: "Familiarity", min: 0, max: 100, val: Number(activeRel.familiarity ?? 0) },
+        { label: "Attachment", min: 0, max: 100, val: Number(activeRel.attachment ?? 0) },
+        { label: "Grudge", min: 0, max: 100, val: Number(activeRel.grudge ?? 0) },
+        { label: "Loyalty", min: 0, max: 100, val: Number(activeRel.loyalty ?? 0) },
+        { label: "Sacrifice Willingness", min: 0, max: 100, val: Number(activeRel.sacrifice_willingness ?? 0) }
+      ];
+      for (const m of relMeters) {
+        const pct = m.min < 0 ? Math.max(0, Math.min(100, (m.val + 100) / 200 * 100)) : Math.max(0, Math.min(100, m.val / m.max * 100));
+        const row = document.createElement("div");
+        row.className = "vn-meter-row";
+        row.innerHTML = `
         <div class="vn-meter-header"><span>${m.label}</span><span>${m.val}</span></div>
         <div class="vn-meter-bar-bg"><div class="vn-meter-bar-fill" style="width: ${pct}%"></div></div>
       `;
-      metersContainer.appendChild(row);
-    }
-    const bThresh = activeRel.betrayal_threshold ?? "N/A";
-    const extraInfo = document.createElement("div");
-    extraInfo.style.cssText = "margin-top: 14px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px; display: flex; flex-direction: column; gap: 6px;";
-    extraInfo.innerHTML = `
+        metersContainer.appendChild(row);
+      }
+      const bThresh = activeRel.betrayal_threshold ?? "N/A";
+      const extraInfo = document.createElement("div");
+      extraInfo.style.cssText = "margin-top: 14px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px; display: flex; flex-direction: column; gap: 6px;";
+      extraInfo.innerHTML = `
       <div style="display:flex; justify-content:space-between;">
         <span style="color: #94a3b8;">Betrayal Threshold:</span>
         <strong style="color: #fca5a5;">${bThresh}</strong>
@@ -27769,9 +28293,10 @@ class StatsTab {
         <span style="color: #38bdf8;">${activeRel.obligations && activeRel.obligations.length ? activeRel.obligations.join(", ") : "None"}</span>
       </div>
     `;
-    metersContainer.appendChild(extraInfo);
-    relsSection.appendChild(metersContainer);
-    this.root.appendChild(relsSection);
+      metersContainer.appendChild(extraInfo);
+      relsSection.appendChild(metersContainer);
+      this.root.appendChild(relsSection);
+    }
   }
 }
 
@@ -28119,7 +28644,7 @@ class MapTab {
       const routeToThis = currentRoutes.find((r) => typeof r === "object" && r.to === room.id);
       const isLocked = Boolean(routeToThis?.why_not || routeToThis?.requires && Object.keys(routeToThis.requires).length > 0);
       const roomG = document.createElementNS("http://www.w3.org/2000/svg", "g");
-      roomG.className.baseVal = "vn-map-node-interactive";
+      roomG.setAttribute("class", "vn-map-node-interactive");
       roomG.style.cursor = "pointer";
       const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
       rect.setAttribute("x", String(room.x));
@@ -28235,7 +28760,7 @@ class MapTab {
       const isSelected = node.id === this.selectedNodeId;
       const npcs = (ledger.roster || []).filter((r) => (r.loc || "").toLowerCase().includes(node.id.toLowerCase()));
       const nodeG = document.createElementNS("http://www.w3.org/2000/svg", "g");
-      nodeG.className.baseVal = "vn-map-node-interactive";
+      nodeG.setAttribute("class", "vn-map-node-interactive");
       nodeG.style.cursor = "pointer";
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       circle.setAttribute("cx", String(node.x));
@@ -28474,9 +28999,19 @@ class PhoneTab {
         </div>
       `;
     }
+    const clockTime = this.currentLedger.clock?.t?.split(" ")[1] || this.currentLedger.clock?.t || "12:00";
+    const dateStr = this.currentLedger.clock?.date || "12-10-18";
+    const locStr = this.currentLedger.clock?.location || "Unknown Location";
+    const regionStr = this.currentLedger.clock?.region ? `, ${this.currentLedger.clock.region}` : "";
+    const phaseStr = this.currentLedger.clock?.phase || "Day";
     container.innerHTML = `
       ${notifHtml}
-      <div style="flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-content: start; margin-top: 10px;">
+      <div style="text-align: center; margin: 8px 0 16px 0; color: #f8fafc;">
+        <div style="font-size: 32px; font-weight: 300; letter-spacing: -0.5px; line-height: 1;">${clockTime}</div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">${dateStr} • ${phaseStr}</div>
+        <div style="font-size: 11px; color: #38bdf8; margin-top: 2px;">\uD83D\uDCCD ${locStr}${regionStr}</div>
+      </div>
+      <div style="flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-content: start; margin-top: 6px;">
         <div class="vn-phone-app-icon" data-app="messages" style="display: flex; flex-direction: column; align-items: center; cursor: pointer;">
           <div style="width: 54px; height: 54px; background: #10b981; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 24px;">\uD83D\uDCAC</div>
           <span style="font-size: 11px; color: #fff; margin-top: 4px;">Messages</span>
@@ -32491,7 +33026,7 @@ function extractLedgerRaw(rawContent) {
   return match[1] || "";
 }
 function parseLedgerYaml(rawLedgerText) {
-  const combined = {};
+  let combined = {};
   const codeBlocks = [];
   let blockMatch;
   YAML_BLOCK_RE.lastIndex = 0;
@@ -32561,6 +33096,9 @@ function parseLedgerYaml(rawLedgerText) {
 `);
     parseYamlChunkWithRecovery(stripped, combined);
   }
+  if (combined.ledger && typeof combined.ledger === "object" && !Array.isArray(combined.ledger)) {
+    combined = { ...combined.ledger, ...combined };
+  }
   const actors = {};
   const standardRootKeys = new Set([
     "world",
@@ -32573,7 +33111,8 @@ function parseLedgerYaml(rawLedgerText) {
     "journal",
     "bplots",
     "opportunities",
-    "init"
+    "init",
+    "ledger"
   ]);
   for (const [key, val] of Object.entries(combined)) {
     if (!standardRootKeys.has(key) && val && typeof val === "object" && !Array.isArray(val)) {
@@ -33786,7 +34325,12 @@ class MenuBar {
     return this.panelOverlay;
   }
   setLedger(ledger, hasBPlotNotification = false) {
-    this.currentLedger = ledger;
+    const raw = ledger;
+    if (raw && raw.ledger && typeof raw.ledger === "object" && !Array.isArray(raw.ledger)) {
+      this.currentLedger = { ...raw.ledger, ...raw };
+    } else {
+      this.currentLedger = ledger || {};
+    }
     if (this.phoneBadge) {
       this.phoneBadge.style.display = hasBPlotNotification ? "inline-block" : "none";
     }
