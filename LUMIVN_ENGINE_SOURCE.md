@@ -20,11 +20,11 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "bun-types": "^1.3.14",
+    "happy-dom": "^20.14.5",
     "lumiverse-spindle-types": "0.6.36",
     "typescript": "^5.9.0"
   }
 }
-
 ```
 
 ## File: `spindle.json`
@@ -48,7 +48,24 @@
   "entry_frontend": "dist/frontend.js",
   "minimum_lumiverse_version": "1.1.6"
 }
+```
 
+## File: `tsconfig.json`
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["bun-types"],
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"]
+}
 ```
 
 ## File: `src/backend.ts`
@@ -528,7 +545,6 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
     }
   }
 });
-
 ```
 
 ## File: `src/backend/asset-resolver.ts`
@@ -810,7 +826,6 @@ export class AssetResolver {
     };
   }
 }
-
 ```
 
 ## File: `src/backend/ledger-parser.ts`
@@ -1191,7 +1206,6 @@ export class StorageManager {
     }
   }
 }
-
 ```
 
 ## File: `src/frontend.ts`
@@ -1205,6 +1219,7 @@ import {
   registerDiagnosticsDrawer,
   type DiagnosticData,
 } from "./frontend/studio/diagnostics-drawer.js";
+import { diagBus } from "./frontend/utils/diag-bus.js";
 
 const CLEANUP_KEY = "__lumivnCleanup";
 
@@ -1420,19 +1435,25 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (payload?.type === "vn_force_open") {
       if (!overlay.isActive()) toggleStage();
       diagDrawer?.pushLog("Stage launched via Command Palette.", "info");
+      diagBus.pushLog("Stage launched via Command Palette.", "info");
     } else if (payload?.type === "vn_diagnostic_update" && payload.data) {
       diagDrawer?.updateDiagnostic(payload.data as DiagnosticData);
+      diagBus.setTelemetry(payload.data as DiagnosticData);
     } else if (payload?.type === "vn_state" && payload.state) {
       const st = payload.state as VnPresentationState;
       overlay.updatePresentation(st);
       diagDrawer?.setLatestLedger(st.ledger);
+      diagBus.setLedger(st.ledger);
     } else if (payload?.type === "vn_log") {
       diagDrawer?.pushLog(String(payload.message), (payload.level as any) || "info");
+      diagBus.pushLog(String(payload.message), (payload.level as any) || "info");
     } else if (payload?.type === "vn_manifest" && payload.manifest) {
       diagDrawer?.setLatestManifest?.(payload.manifest);
-      overlay.setManifest(payload.manifest);
+      overlay.setManifest(payload.manifest as any);
+      diagBus.setManifest(payload.manifest as any);
     } else if (payload?.type === "vn_error") {
       diagDrawer?.pushLog(String(payload.error), "error");
+      diagBus.pushLog(String(payload.error), "error");
     }
   });
 
@@ -1457,7 +1478,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   (globalThis as Record<string, unknown>)[CLEANUP_KEY] = cleanup;
   return cleanup;
 }
-
 ```
 
 ## File: `src/frontend/hud/menu-bar.ts`
@@ -2283,6 +2303,261 @@ export class CharactersTab {
 }
 ```
 
+## File: `src/frontend/hud/tab-diagnostics.ts`
+
+```typescript
+import type { LedgerData, AssetManifest } from "../../shared/types.js";
+import { diagBus, type LogEntry } from "../utils/diag-bus.js";
+
+export class DiagnosticsTab {
+  public root: HTMLElement;
+  private currentLedger: LedgerData = {};
+  private currentManifest?: AssetManifest;
+  private activeFilter: "all" | "info" | "warn" | "error" = "all";
+  private unsubscribeBus?: () => void;
+
+  constructor() {
+    this.root = document.createElement("div");
+    this.root.className = "vn-hud-tab vn-tab-diagnostics";
+  }
+
+  public render(ledger: LedgerData, manifest?: AssetManifest): void {
+    this.currentLedger = ledger;
+    this.currentManifest = manifest;
+    diagBus.setLedger(ledger);
+    if (manifest) diagBus.setManifest(manifest);
+
+    this.root.innerHTML = "";
+    this.root.style.cssText = "display: flex; flex-direction: column; gap: 14px; height: 100%; color: #f1f5f9; font-family: system-ui, -apple-system, sans-serif;";
+
+    const telemetry = diagBus.getTelemetry();
+    const hasLedger = Boolean(ledger && (ledger.clock || ledger.scene || ledger.actors));
+    const deltaStatus = hasLedger ? "accepted" : "idle";
+
+    // 1. Header & Quick Copy Action Bar
+    const header = document.createElement("div");
+    header.style.cssText = "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid #334155; padding-bottom: 10px;";
+    header.innerHTML = `
+      <div>
+        <h3 style="margin: 0; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 6px;">
+          <span>🛠️</span> <span>Engine Diagnostics & Clipboard Export</span>
+        </h3>
+        <p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8;">
+          Inspect delta synchronization, export living world ledgers, and view engine logs.
+        </p>
+      </div>
+      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+        <button id="vn-copy-all-btn" class="vn-btn vn-btn-sm" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; color: #fff; font-weight: 700; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 11px; box-shadow: 0 2px 8px rgba(99,102,241,0.4);">
+          📋 Copy All
+        </button>
+        <button id="vn-copy-yaml-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #38bdf8; font-weight: 600; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          📄 Copy Ledger (YAML)
+        </button>
+        <button id="vn-copy-json-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          📦 Copy State (JSON)
+        </button>
+        <button id="vn-copy-diag-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          📜 Copy Logs
+        </button>
+      </div>
+    `;
+    this.root.appendChild(header);
+
+    // Copy Button Handlers
+    const showToast = (btn: HTMLButtonElement, label: string) => {
+      const orig = btn.textContent;
+      btn.textContent = "✓ Copied!";
+      btn.style.borderColor = "#10b981";
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.style.borderColor = "";
+      }, 1500);
+    };
+
+    header.querySelector("#vn-copy-all-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      await navigator.clipboard.writeText(diagBus.exportAllBundle()).catch(() => undefined);
+      showToast(btn, "Copy All");
+    });
+
+    header.querySelector("#vn-copy-yaml-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      const yamlStr = diagBus.formatLedgerYaml(this.currentLedger);
+      await navigator.clipboard.writeText(yamlStr).catch(() => undefined);
+      showToast(btn, "Copy Ledger (YAML)");
+    });
+
+    header.querySelector("#vn-copy-json-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      await navigator.clipboard.writeText(JSON.stringify(this.currentLedger, null, 2)).catch(() => undefined);
+      showToast(btn, "Copy State (JSON)");
+    });
+
+    header.querySelector("#vn-copy-diag-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      const logLines = diagBus.getLogs().map((l) => `[${l.timestamp}] [${l.level.toUpperCase()}] ${l.message}`).join("\n");
+      await navigator.clipboard.writeText(logLines).catch(() => undefined);
+      showToast(btn, "Copy Logs");
+    });
+
+    // 2. Middle Row: Delta Telemetry Card + Actors Presence Breakdown (Living World style)
+    const midRow = document.createElement("div");
+    midRow.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;";
+
+    const participants = ledger.scene?.participants || [];
+    const actorEntries = Object.entries(ledger.actors || {});
+    const rosterEntries = ledger.roster || [];
+
+    midRow.innerHTML = `
+      <!-- Delta & Telemetry Status Card -->
+      <div style="background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+          <strong style="color: #38bdf8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Delta Telemetry Status</strong>
+          <span style="font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; ${deltaStatus === "accepted" ? "background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid #10b981;" : "background: rgba(245,158,11,0.2); color: #fbbf24; border: 1px solid #f59e0b;"}">
+            ${deltaStatus === "accepted" ? "● Delta Accepted" : "○ Waiting Delta"}
+          </span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px;">
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Clock Anchor:</span>
+            <span style="font-weight: 600; color: #f8fafc;">${ledger.clock?.t || "Unknown"} (${ledger.clock?.phase || "Day"})${ledger.clock?.date ? ` • ${ledger.clock.date}` : ""}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Place Scoping:</span>
+            <span style="font-weight: 600; color: #38bdf8;">${ledger.scene?.place || "default"}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Region / Country:</span>
+            <span style="color: #cbd5e1;">${[ledger.clock?.location, ledger.clock?.region, ledger.clock?.country].filter(Boolean).join(", ") || "Nerima, Tokyo"}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Background Rendered:</span>
+            <span style="color: #94a3b8; font-family: monospace; font-size: 10px;">${(telemetry?.bgUrl || "Default").slice(0, 30)}...</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Living Roster & Epistemics Presence Card -->
+      <div style="background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+          <strong style="color: #a78bfa; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Epistemic Presence Breakdown</strong>
+          <span style="font-size: 10px; color: #94a3b8;">${actorEntries.length} dossiers loaded</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 11px;">
+          <div>
+            <span style="color: #38bdf8; font-weight: 600;">Spotlight (${participants.length}):</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
+              ${participants.length > 0
+                ? participants.map((p) => `<span style="background: rgba(56,189,248,0.2); color: #7dd3fc; border: 1px solid #0284c7; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">👤 ${p}</span>`).join("")
+                : '<span style="color: #64748b; font-size: 10px;">No spotlight participants</span>'
+              }
+            </div>
+          </div>
+          <div>
+            <span style="color: #94a3b8;">Living Roster (${rosterEntries.length}):</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
+              ${rosterEntries.slice(0, 6).map((r) => `<span style="background: #1e293b; border: 1px solid #334155; padding: 1px 6px; border-radius: 4px; font-size: 10px; color: #cbd5e1;">${r.name || r.id} (${r.loc || "?"})</span>`).join("")}
+              ${rosterEntries.length > 6 ? `<span style="color: #64748b; font-size: 10px;">+${rosterEntries.length - 6} more</span>` : ""}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    this.root.appendChild(midRow);
+
+    // 3. Bottom Row: Diagnostic Console & Raw Ledger Viewer Split
+    const bottomSplit = document.createElement("div");
+    bottomSplit.style.cssText = "flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 220px; overflow: hidden;";
+
+    // Left Pane: Diagnostic Log Console
+    const consoleBox = document.createElement("div");
+    consoleBox.style.cssText = "background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;";
+    consoleBox.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Engine Diagnostic Log</span>
+        <div style="display: flex; gap: 4px; align-items: center;">
+          <button id="vn-filter-all" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "all" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">All</button>
+          <button id="vn-filter-info" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "info" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Info</button>
+          <button id="vn-filter-warn" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "warn" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Warn</button>
+          <button id="vn-filter-error" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "error" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Err</button>
+          <button id="vn-clear-logs" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: #1e293b; color: #94a3b8; cursor: pointer; margin-left: 4px;">Clear</button>
+        </div>
+      </div>
+      <div id="vn-diag-stream" style="flex: 1; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; color: #cbd5e1; display: flex; flex-direction: column; gap: 3px; user-select: text; max-height: 200px;">
+      </div>
+    `;
+
+    // Right Pane: Raw Ledger / Markdown Inspector
+    const ledgerBox = document.createElement("div");
+    ledgerBox.style.cssText = "background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;";
+    ledgerBox.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase;">Active World Ledger Viewer</span>
+        <button id="vn-copy-editor-btn" style="padding: 2px 8px; font-size: 10px; background: #1e293b; border: 1px solid #475569; border-radius: 4px; color: #38bdf8; font-weight: 600; cursor: pointer;">
+          📋 Copy Block
+        </button>
+      </div>
+      <textarea id="vn-ledger-editor" readonly style="flex: 1; background: #090d16; border: 1px solid #334155; border-radius: 6px; color: #a5b4fc; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; padding: 8px; resize: none; outline: none; user-select: text; white-space: pre; max-height: 200px;">${diagBus.formatLedgerYaml(this.currentLedger)}</textarea>
+    `;
+
+    bottomSplit.appendChild(consoleBox);
+    bottomSplit.appendChild(ledgerBox);
+    this.root.appendChild(bottomSplit);
+
+    // Setup filter listeners
+    const stream = consoleBox.querySelector("#vn-diag-stream") as HTMLElement;
+    const renderLogs = () => {
+      if (!stream) return;
+      stream.innerHTML = "";
+      const logs = diagBus.getLogs();
+      const filtered = this.activeFilter === "all" ? logs : logs.filter((l) => l.level === this.activeFilter);
+      if (filtered.length === 0) {
+        stream.innerHTML = '<div style="color: #64748b; font-style: italic;">No logs for this filter.</div>';
+        return;
+      }
+      for (const entry of filtered) {
+        const item = document.createElement("div");
+        item.style.wordBreak = "break-word";
+        item.style.color =
+          entry.level === "error"
+            ? "#f43f5e"
+            : entry.level === "warn"
+            ? "#f59e0b"
+            : entry.level === "action"
+            ? "#38bdf8"
+            : "#cbd5e1";
+        item.textContent = `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}`;
+        stream.appendChild(item);
+      }
+      stream.scrollTop = stream.scrollHeight;
+    };
+
+    renderLogs();
+
+    consoleBox.querySelector("#vn-filter-all")?.addEventListener("click", () => { this.activeFilter = "all"; this.render(this.currentLedger, this.currentManifest); });
+    consoleBox.querySelector("#vn-filter-info")?.addEventListener("click", () => { this.activeFilter = "info"; this.render(this.currentLedger, this.currentManifest); });
+    consoleBox.querySelector("#vn-filter-warn")?.addEventListener("click", () => { this.activeFilter = "warn"; this.render(this.currentLedger, this.currentManifest); });
+    consoleBox.querySelector("#vn-filter-error")?.addEventListener("click", () => { this.activeFilter = "error"; this.render(this.currentLedger, this.currentManifest); });
+    consoleBox.querySelector("#vn-clear-logs")?.addEventListener("click", () => { diagBus.clearLogs(); renderLogs(); });
+
+    ledgerBox.querySelector("#vn-copy-editor-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      const textarea = ledgerBox.querySelector("#vn-ledger-editor") as HTMLTextAreaElement;
+      if (textarea) {
+        await navigator.clipboard.writeText(textarea.value).catch(() => undefined);
+        showToast(btn, "Copy Block");
+      }
+    });
+
+    // Subscribe to bus updates
+    if (this.unsubscribeBus) this.unsubscribeBus();
+    this.unsubscribeBus = diagBus.subscribe(() => {
+      renderLogs();
+    });
+  }
+}
+```
+
 ## File: `src/frontend/hud/tab-inventory.ts`
 
 ```typescript
@@ -2425,7 +2700,6 @@ export class InventoryTab {
     this.root.appendChild(roomSection);
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-journal.ts`
@@ -2527,7 +2801,6 @@ export class JournalTab {
     this.root.appendChild(journalSection);
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-map.ts`
@@ -4628,7 +4901,6 @@ export class SceneTab {
     return `data:${file.mimeType || "image/png"};base64,${btoa(binary)}`;
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-stats.ts`
@@ -5102,7 +5374,6 @@ export class WardrobeTab {
     this.root.appendChild(footer);
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/audio-player.ts`
@@ -5282,7 +5553,6 @@ export class VnAudioEngine {
     }
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/backlog.ts`
@@ -5365,7 +5635,6 @@ export class BacklogModal {
     this.root.style.display = "none";
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/beat-splitter.ts`
@@ -5567,7 +5836,6 @@ export function splitParagraphIntoBeats(
 
   return beats.length > 0 ? beats : [{ speaker: defaultSpeaker, text: "...", rawText: "..." }];
 }
-
 ```
 
 ## File: `src/frontend/stage/choice-modal.ts`
@@ -5634,7 +5902,6 @@ export class ChoiceModal {
     this.root.style.display = "none";
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/dialogue-box.ts`
@@ -6092,7 +6359,6 @@ export class DialogueBox {
     this.backlogModal.root.remove();
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/overlay.ts`
@@ -7070,7 +7336,6 @@ export class StageOverlay {
     this.styleEl?.remove();
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/particles.ts`
@@ -7318,7 +7583,6 @@ export class ParticleEngine {
     this.canvas.remove();
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/rich-text.ts`
@@ -7438,7 +7702,6 @@ export const TEXT_EFFECTS_CSS = `
   transform: translateY(-1px);
 }
 `;
-
 ```
 
 ## File: `src/frontend/stage/sprite-transform.ts`
@@ -7483,7 +7746,6 @@ export function resetSpriteTransform(actorId: string): void {
     localStorage.removeItem(STORAGE_PREFIX + actorId.toLowerCase().trim());
   } catch {}
 }
-
 ```
 
 ## File: `src/frontend/stage/staging.ts`
@@ -7707,7 +7969,6 @@ export class StageRenderer {
     this.particleEngine.destroy();
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/theme.ts`
@@ -7793,7 +8054,6 @@ export function applyVnTheme(rootEl: HTMLElement, themeId = "default"): void {
   rootEl.style.setProperty("--vn-glow", theme.glow);
   rootEl.style.setProperty("--vn-text", theme.text);
 }
-
 ```
 
 ## File: `src/frontend/stage/tts-engine.ts`
@@ -7904,7 +8164,6 @@ export class VnTtsEngine {
     window.speechSynthesis.speak(utterance);
   }
 }
-
 ```
 
 ## File: `src/frontend/studio/asset-drawer.ts`
@@ -8093,7 +8352,6 @@ export function registerAssetDrawer(ctx: SpindleFrontendContext): SpindleDrawerT
 
   return handle;
 }
-
 ```
 
 ## File: `src/frontend/studio/diagnostics-drawer.ts`
@@ -8152,7 +8410,10 @@ export function registerDiagnosticsDrawer(
       <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid #334155; border-radius: 10px; padding: 12px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <h4 style="margin: 0; font-size: 11px; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px;">Turn Telemetry</h4>
-          <div style="display: flex; gap: 6px;">
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button id="vn-copy-all-drawer-btn" style="padding: 2px 8px; font-size: 10px; background: #6366f1; border: none; border-radius: 4px; color: #fff; font-weight: 700; cursor: pointer;">
+              📋 Copy All
+            </button>
             <button id="vn-copy-state-btn" style="padding: 2px 8px; font-size: 10px; background: #1e293b; border: 1px solid #475569; border-radius: 4px; color: #cbd5e1; cursor: pointer;">
               📋 Copy State JSON
             </button>
@@ -8203,6 +8464,7 @@ export function registerDiagnosticsDrawer(
   root.querySelector("#vn-launch-btn")?.addEventListener("click", onLaunchStage);
 
   const logStream = root.querySelector("#vn-log-stream") as HTMLElement;
+  const copyAllDrawerBtn = root.querySelector("#vn-copy-all-drawer-btn") as HTMLButtonElement;
   const copyLogsBtn = root.querySelector("#vn-copy-logs-btn") as HTMLButtonElement;
   const copyStateBtn = root.querySelector("#vn-copy-state-btn") as HTMLButtonElement;
   const copyManifestBtn = root.querySelector("#vn-copy-manifest-btn") as HTMLButtonElement;
@@ -8210,6 +8472,22 @@ export function registerDiagnosticsDrawer(
   root.querySelector("#vn-clear-log-btn")?.addEventListener("click", () => {
     if (logStream) logStream.innerHTML = "";
     rawLogHistory = [];
+  });
+
+  copyAllDrawerBtn?.addEventListener("click", async () => {
+    try {
+      const bundle = {
+        timestamp: new Date().toISOString(),
+        ledger: latestLedgerData,
+        manifest: latestManifestData,
+        logs: rawLogHistory,
+      };
+      await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
+      copyAllDrawerBtn.textContent = "✓ Copied!";
+      setTimeout(() => (copyAllDrawerBtn.textContent = "📋 Copy All"), 1500);
+    } catch (e) {
+      pushLog(`Failed to copy all: ${String(e)}`, "error");
+    }
   });
 
   const pushLog = (msg: string, level: "info" | "warn" | "error" | "action" = "info") => {
@@ -8295,7 +8573,6 @@ export function registerDiagnosticsDrawer(
 
   return { tab, pushLog, updateDiagnostic, setLatestLedger, setLatestManifest };
 }
-
 ```
 
 ## File: `src/frontend/utils/bg-remover.ts`
@@ -8350,7 +8627,171 @@ function blobToDataUrl(blob: Blob): Promise<string> {
     reader.readAsDataURL(blob);
   });
 }
+```
 
+## File: `src/frontend/utils/diag-bus.ts`
+
+```typescript
+import type { LedgerData, AssetManifest } from "../../shared/types.js";
+import type { DiagnosticData } from "../studio/diagnostics-drawer.js";
+
+export interface LogEntry {
+  timestamp: string;
+  level: "info" | "warn" | "error" | "action";
+  message: string;
+}
+
+export type DiagListener = () => void;
+
+class DiagnosticBus {
+  private logs: LogEntry[] = [];
+  private telemetry: DiagnosticData | null = null;
+  private latestLedger: LedgerData = {};
+  private latestManifest: AssetManifest | null = null;
+  private listeners: Set<DiagListener> = new Set();
+  private maxLogs = 500;
+
+  constructor() {
+    this.pushLog("LumiVN Diagnostic Bus initialized.", "info");
+  }
+
+  public subscribe(listener: DiagListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch {}
+    }
+  }
+
+  public pushLog(message: string, level: "info" | "warn" | "error" | "action" = "info"): void {
+    const time = new Date().toLocaleTimeString();
+    this.logs.push({ timestamp: time, level, message });
+    if (this.logs.length > this.maxLogs) {
+      this.logs.shift();
+    }
+    this.notify();
+  }
+
+  public clearLogs(): void {
+    this.logs = [];
+    this.notify();
+  }
+
+  public getLogs(): readonly LogEntry[] {
+    return this.logs;
+  }
+
+  public setTelemetry(data: DiagnosticData): void {
+    this.telemetry = data;
+    this.pushLog(
+      `Turn telemetry: place='${data.placeId}', bg='${(data.bgUrl || "").slice(0, 32)}...', cast=[${(data.participants || []).join(", ")}]`,
+      "info"
+    );
+    this.notify();
+  }
+
+  public getTelemetry(): DiagnosticData | null {
+    return this.telemetry;
+  }
+
+  public setLedger(ledger: LedgerData): void {
+    this.latestLedger = ledger;
+    this.notify();
+  }
+
+  public getLedger(): LedgerData {
+    return this.latestLedger;
+  }
+
+  public setManifest(manifest: AssetManifest): void {
+    this.latestManifest = manifest;
+    this.notify();
+  }
+
+  public getManifest(): AssetManifest | null {
+    return this.latestManifest;
+  }
+
+  /** Formats current ledger into a clean YAML representation */
+  public formatLedgerYaml(ledger?: LedgerData): string {
+    const data = ledger || this.latestLedger;
+    try {
+      // Basic YAML serializer for clean Markdown ledger blocks
+      const lines: string[] = ["```yaml"];
+      lines.push("# My World 1.79 World Ledger");
+
+      if (data.clock) {
+        lines.push("clock:");
+        if (data.clock.t) lines.push(`  t: "${data.clock.t}"`);
+        if (data.clock.phase) lines.push(`  phase: "${data.clock.phase}"`);
+        if (data.clock.date) lines.push(`  date: "${data.clock.date}"`);
+        if (data.clock.location) lines.push(`  location: "${data.clock.location}"`);
+        if (data.clock.region) lines.push(`  region: "${data.clock.region}"`);
+        if (data.clock.country) lines.push(`  country: "${data.clock.country}"`);
+      }
+
+      if (data.scene) {
+        lines.push("scene:");
+        if (data.scene.place) lines.push(`  place: "${data.scene.place}"`);
+        if (data.scene.participants && data.scene.participants.length > 0) {
+          lines.push(`  participants: [${data.scene.participants.map((p) => `"${p}"`).join(", ")}]`);
+        }
+      }
+
+      if (data.roster && data.roster.length > 0) {
+        lines.push("roster:");
+        for (const r of data.roster) {
+          lines.push(`  - id: "${r.id}"`);
+          if (r.name) lines.push(`    name: "${r.name}"`);
+          if (r.loc) lines.push(`    loc: "${r.loc}"`);
+          if (r.status) lines.push(`    status: "${r.status}"`);
+        }
+      }
+
+      if (data.actors && Object.keys(data.actors).length > 0) {
+        lines.push("actors:");
+        for (const [id, doc] of Object.entries(data.actors)) {
+          lines.push(`  ${id}:`);
+          if (doc.name) lines.push(`    name: "${doc.name}"`);
+          if (doc.outfit) {
+            lines.push("    outfit:");
+            if (doc.outfit.top) lines.push(`      top: "${doc.outfit.top}"`);
+            if (doc.outfit.bottom) lines.push(`      bottom: "${doc.outfit.bottom}"`);
+            if (doc.outfit.underwear_top) lines.push(`      underwear_top: "${doc.outfit.underwear_top}"`);
+            if (doc.outfit.underwear_bottom) lines.push(`      underwear_bottom: "${doc.outfit.underwear_bottom}"`);
+            if (doc.outfit.shoes) lines.push(`      shoes: "${doc.outfit.shoes}"`);
+          }
+        }
+      }
+
+      lines.push("```");
+      return lines.join("\n");
+    } catch {
+      return JSON.stringify(data, null, 2);
+    }
+  }
+
+  /** Bundles all diagnostics, ledger, manifest, and logs into a single export JSON */
+  public exportAllBundle(): string {
+    const bundle = {
+      timestamp: new Date().toISOString(),
+      telemetry: this.telemetry,
+      clock: this.latestLedger.clock,
+      scene: this.latestLedger.scene,
+      ledger: this.latestLedger,
+      manifest: this.latestManifest,
+      logs: this.logs,
+    };
+    return JSON.stringify(bundle, null, 2);
+  }
+}
+
+export const diagBus = new DiagnosticBus();
 ```
 
 ## File: `src/shared/text-effects.ts`
@@ -8420,7 +8861,6 @@ export function parseTwineChoices(text: string): { cleanText: string; choices: T
 
   return { cleanText, choices };
 }
-
 ```
 
 ## File: `src/shared/types.ts`
@@ -9017,26 +9457,486 @@ describe("LumiVN Multi-Actor Spotlight Matching", () => {
   });
 });
 
+import { diagBus } from "../src/frontend/utils/diag-bus.js";
 
+describe("LumiVN Robust YAML Recovery & Diagnostic Export", () => {
+  test("recovers actor dossiers even when flow mappings contain unescaped quotes", () => {
+    const rawYaml = `
+clock:
+  date: "14-09-18"
+  t: "D1 16:32"
+  phase: "Afternoon"
+  location: "Living Room"
+  region: "Westchester"
+  country: "USA"
 
+actors:
+  user:
+    name: "User"
+    outfit:
+      top: "cream knit sweater"
+      bottom: "high-waisted jeans"
+    inventory:
+      in_hand: { L: "duffel bag", R: null }
+  jessica:
+    name: "Jessica"
+    outfit:
+      top: "loose silk blouse"
+    tells: { lying: "Says "Weeee!" or "Boop!" nervously", fidget: "plays with necklace" }
+  tessa:
+    name: "Tessa"
+    outfit:
+      top: "cropped tank"
+    tells: { smug: "Smirks and twirls hair" }
+`;
+    const parsed = parseLedgerYaml(rawYaml);
+    expect(parsed).toBeDefined();
+    expect(parsed.clock?.date).toBe("14-09-18");
+    expect(parsed.actors).toBeDefined();
+    expect(Object.keys(parsed.actors || {})).toContain("user");
+    expect(Object.keys(parsed.actors || {})).toContain("jessica");
+    expect(Object.keys(parsed.actors || {})).toContain("tessa");
+    expect(parsed.actors?.["jessica"]?.outfit?.top).toBe("loose silk blouse");
+  });
+
+  test("diagBus formats clean YAML and exports complete telemetry bundle", () => {
+    diagBus.setLedger({
+      clock: { t: "D1 16:32", phase: "Afternoon", date: "14-09-18", region: "Nerima" },
+      scene: { place: "tendo_residence:foyer", participants: ["user", "jessica"] },
+    });
+    const yaml = diagBus.formatLedgerYaml();
+    expect(yaml).toContain("```yaml");
+    expect(yaml).toContain('t: "D1 16:32"');
+    expect(yaml).toContain('date: "14-09-18"');
+    expect(yaml).toContain('place: "tendo_residence:foyer"');
+
+    const bundleStr = diagBus.exportAllBundle();
+    const bundle = JSON.parse(bundleStr);
+    expect(bundle.clock.t).toBe("D1 16:32");
+    expect(bundle.scene.participants).toContain("user");
+  });
+});
 ```
 
-## File: `tsconfig.json`
+## File: `test/hud-tabs.test.ts`
 
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["bun-types"],
-    "strict": true,
-    "noUncheckedIndexedAccess": false,
-    "skipLibCheck": true
-  },
-  "include": ["src/**/*.ts"]
-}
+```typescript
+import { describe, expect, test, beforeAll } from "bun:test";
+import { Window } from "happy-dom";
 
+// Initialize happy-dom globals for headless UI testing
+const window = new Window();
+globalThis.window = window as any;
+globalThis.document = window.document as any;
+globalThis.HTMLElement = window.HTMLElement as any;
+globalThis.HTMLSelectElement = window.HTMLSelectElement as any;
+globalThis.HTMLButtonElement = window.HTMLButtonElement as any;
+globalThis.HTMLDivElement = window.HTMLDivElement as any;
+globalThis.customElements = window.customElements as any;
+
+import { parseLedgerYaml } from "../src/backend/ledger-parser.js";
+import { CharactersTab } from "../src/frontend/hud/tab-characters.js";
+import { StatsTab } from "../src/frontend/hud/tab-stats.js";
+import { InventoryTab } from "../src/frontend/hud/tab-inventory.js";
+import { WardrobeTab } from "../src/frontend/hud/tab-wardrobe.js";
+import { MapTab } from "../src/frontend/hud/tab-map.js";
+import { PhoneTab } from "../src/frontend/hud/tab-phone.js";
+import { JournalTab } from "../src/frontend/hud/tab-journal.js";
+import { SceneTab } from "../src/frontend/hud/tab-scene.js";
+import { MenuBar } from "../src/frontend/hud/menu-bar.js";
+
+const FENCE = "```";
+const REALISTIC_MY_WORLD_YAML =
+  FENCE +
+  "yaml\n" +
+  `ledger:
+  world:
+    name: "Dames Mansion"
+    genre: "Slice of Life / Drama"
+  clock:
+    date: "12-10-18"
+    t: "D1 16:30"
+    phase: "Afternoon"
+    location: "Dames Mansion"
+    region: "Suburban Estate"
+    country: "USA"
+    step: 1
+  scene:
+    place: "dames_mansion:foyer"
+    time: "D1 16:30"
+    participants: ["user", "jessica", "tessa"]
+    threads: ["lease_signing_wine", "tessa_teasing_pretty_boy"]
+    pressures: ["Leslie is upstairs and doesn't know her ex just moved in"]
+  places:
+    "dames_mansion:foyer":
+      function: "Entryway"
+      traffic: 3
+      privacy: 1
+      routes:
+        - to: "dames_mansion:living_room"
+          minutes: 1
+        - to: "dames_mansion:upstairs_hall"
+          minutes: 1
+    "dames_mansion:living_room":
+      function: "Common Lounge"
+      traffic: 4
+      privacy: 2
+  roster:
+    - id: "jessica"
+      name: "Jessica"
+      lod: 3
+      status: "Tipsy, welcoming User"
+      loc: "dames_mansion:foyer"
+    - id: "tessa"
+      name: "Tessa"
+      lod: 3
+      status: "Teasing User at bottom of stairs"
+      loc: "dames_mansion:foyer"
+    - id: "leslie"
+      name: "Leslie"
+      lod: 1
+      status: "Filming upstairs"
+      loc: "dames_mansion:upstairs_hall"
+  actors:
+    user:
+      id: "user"
+      appearance:
+        age: 22
+        traits: "Slender, androgynous, striking symmetry"
+        appeal: 90
+        style: "Casual chic"
+        condition: "Flustered"
+      money:
+        in_hand: 140
+        in_bank: 1250
+        currency: "$"
+      combat:
+        tier: 1
+        lv: 1
+        exp: "0/100"
+        hp: "120/120"
+        mp: "60/60"
+        pwr: 14
+        agi: 16
+        int: 24
+        eff_pwr: 14
+        eff_agi: 16
+        talent: ["Adaptability", "Bartering"]
+      life_model:
+        orientation: "Open"
+        romantic_history: "Ex-boyfriend of Leslie Dames"
+        occupation: "College Graduate / Transmigrator"
+        residence: "Dames Mansion Room 3"
+        routines:
+          - ["08:00", "Morning routine", "bedroom", "Morning"]
+          - ["16:30", "Arrival at mansion", "foyer", "Afternoon"]
+      wounds:
+        physical: []
+        psychological: ["Transmigration shock"]
+      passions:
+        anger: 0
+        shame: 0
+        arousal: 20
+        stress: 15
+        fear: 5
+      outfit:
+        top: "Fitted heather-gray henley"
+        bottom: "Dark slim-fit jeans"
+        underwear_top: "none"
+        underwear_bottom: "Calvin Klein trunks"
+        shoes: "White leather sneakers"
+        accessories: ["Silver wrist watch"]
+        state: "Pristine"
+      inventory:
+        in_hand:
+          L: "Empty"
+          R: "Canvas duffel bag"
+        carried: ["2018 smartphone", "Wallet", "Lease agreement"]
+        room: ["Extra clothes in suitcase"]
+        room_location: "Room 3"
+      agency:
+        want_now: "Settle into the mansion and avoid Leslie for now"
+      relations: {}
+    jessica:
+      id: "jessica"
+      name: "Jessica"
+      appearance:
+        age: 44
+        traits: "Long black curly hair, glasses, curvy/fit yoga build"
+        appeal: 88
+        style: "Athleisure"
+        condition: "Buzzed"
+      money:
+        in_hand: 80
+        in_bank: 45000
+        currency: "$"
+      combat:
+        tier: 1
+        lv: 2
+        hp: "130/130"
+        mp: "70/70"
+        pwr: 12
+        agi: 14
+        int: 20
+        talent: ["Hostessing", "Seductive Hospitality"]
+      life_model:
+        orientation: "Bi-curious"
+        romantic_history: "Married to absentee husband"
+        occupation: "Landlady"
+        residence: "Master Bedroom"
+      wounds:
+        physical: []
+        psychological: ["Lonely marriage"]
+      passions:
+        anger: 0
+        arousal: 35
+        joy: 40
+        stress: 10
+      outfit:
+        top: "Lavender sports bra"
+        bottom: "Tight gray yoga pants"
+        shoes: "Barefoot"
+        accessories: ["Diamond wedding ring"]
+      inventory:
+        in_hand:
+          L: "Empty"
+          R: "Glass of Pinot Noir"
+        carried: ["House master keys", "iPhone"]
+      profile:
+        tells: ["Pours wine to cover awkward pauses", "Touches hair when sizing someone up"]
+        defense: "Maternal charm"
+      agency:
+        want_now: "Make the handsome new tenant feel welcome"
+        goals:
+          - ["g_jess_1", "Get the new tenant settled and enjoy his attention", 80, 60, "Tonight", "Lonely with husband away", 15, "active"]
+      knowledge:
+        secrets:
+          - ["Keeps high-end bondage gear locked in dresser", ["jessica"], ["tessa"], 10, "Yoga storage"]
+        beliefs:
+          - ["User is remarkably polite and handsome", 95, "direct", "@b:W", "D1 16:30"]
+      relations:
+        user:
+          affinity: 20
+          trust: 15
+          respect: 10
+          attraction: 45
+          loyalty: 10
+          betrayal_threshold: 40
+          leverage: ["Holds his lease"]
+      stats:
+        T: 15
+        A: 20
+        R: 10
+        F: 0
+        Fam: 2
+        G: 0
+        Integ: 70
+        Stress: 10
+        CAU: 25
+        GRD: 30
+        PRD: 40
+        EMP: 80
+        STB: 75
+        BLD: 20
+        RX: 35
+        RC: 60
+        Rig: 15
+        Mask: 40
+        MIS: 10
+        WV: 30
+        COMP: 15
+  opportunities:
+    - id: "opp_wine_welcome"
+      what: "Accept a glass of wine with Jessica"
+      wanted_by: ["jessica"]
+      cost: "Might lower inhibitions"
+      payoff: "+15 Jessica Affinity, unlocks private talk"
+      status: "lead"
+  journal:
+    - id: "j_arrival"
+      time: "D1 16:30"
+      place: "dames_mansion:foyer"
+      action: "Arrived at Dames Mansion with duffel bag"
+      outcome: "Greeted by landlady Jessica with wine"
+` +
+  FENCE;
+
+describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
+  let parsedLedger: any;
+
+  beforeAll(() => {
+    parsedLedger = parseLedgerYaml(REALISTIC_MY_WORLD_YAML);
+  });
+
+  test("1. parseLedgerYaml unwraps nested 'ledger:' envelope correctly", () => {
+    expect(parsedLedger).toBeDefined();
+    expect(parsedLedger.clock?.date).toBe("12-10-18");
+    expect(parsedLedger.clock?.location).toBe("Dames Mansion");
+    expect(parsedLedger.scene?.place).toBe("dames_mansion:foyer");
+    expect(parsedLedger.places?.["dames_mansion:foyer"]).toBeDefined();
+    expect(parsedLedger.actors).toBeDefined();
+    expect(Object.keys(parsedLedger.actors)).toContain("user");
+    expect(Object.keys(parsedLedger.actors)).toContain("jessica");
+    expect(parsedLedger.opportunities?.length).toBe(1);
+    expect(parsedLedger.journal?.length).toBe(1);
+  });
+
+  test("2. MenuBar.setLedger safely hydrates currentLedger", () => {
+    const actions: string[] = [];
+    const menuBar = new MenuBar((act) => actions.push(act));
+    menuBar.setLedger(parsedLedger);
+
+    const overlay = menuBar.getOverlay();
+    expect(overlay).toBeDefined();
+    expect(overlay.className).toContain("vn-hud-overlay");
+  });
+
+  test("3. CharactersTab renders avatar ribbon, attire, inventory, combat, and secrets", () => {
+    const tab = new CharactersTab();
+    tab.render(parsedLedger);
+
+    const html = tab.root.innerHTML;
+    // Header & Ribbon
+    expect(html).toContain("Cast &amp; Living World Dossiers");
+    expect(html).toContain("Player (You)");
+    expect(html).toContain("Jessica");
+
+    // Attire breakdown
+    expect(html).toContain("Attire &amp; Wardrobe");
+    expect(html).toContain("Fitted heather-gray henley");
+    expect(html).toContain("Dark slim-fit jeans");
+    expect(html).toContain("Calvin Klein trunks");
+    expect(html).toContain("White leather sneakers");
+
+    // Equipment & Money
+    expect(html).toContain("Equipment, Carried Gear &amp; Finances");
+    expect(html).toContain("$140");
+    expect(html).toContain("$1250");
+    expect(html).toContain("Canvas duffel bag");
+    expect(html).toContain("2018 smartphone");
+
+    // Combat attributes
+    expect(html).toContain("Combat Vitals &amp; Aptitudes");
+    expect(html).toContain("120/120");
+    expect(html).toContain("Bartering");
+
+    // Life model & Want
+    expect(html).toContain("Immediate Want:");
+    expect(html).toContain("Settle into the mansion");
+  });
+
+  test("4. StatsTab renders cleanly without crashing on empty user relations, and displays 21-stat matrix", () => {
+    const tab = new StatsTab();
+    // Render with user default
+    tab.render(parsedLedger);
+    let html = tab.root.innerHTML;
+
+    expect(html).toContain("Status, Passions &amp; 21-Stat Ledger Matrix");
+    expect(html).toContain("Inspect Actor:");
+    expect(html).toContain("Vitals &amp; Attributes");
+    expect(html).toContain("No outgoing relationship edges initialized");
+
+    // Now switch selected actor to jessica who has 21-stat matrix and relations
+    (tab as any).selectedActorId = "jessica";
+    tab.render(parsedLedger);
+    html = tab.root.innerHTML;
+
+    // 21-stat matrix verification
+    expect(html).toContain("21-Stat Engine Matrix");
+    expect(html).toContain("Interpersonal Stance");
+    expect(html).toContain("Psychological Equilibrium");
+    expect(html).toContain("Behavioral Dynamics");
+    expect(html).toContain("Integ");
+    expect(html).toContain("Stress");
+    expect(html).toContain("EMP");
+
+    // Passions badges
+    expect(html).toContain("Current Passions &amp; Affect");
+    expect(html).toContain("Arousal");
+    expect(html).toContain("Joy");
+
+    // Relationships toward User
+    expect(html).toContain("Relations Toward:");
+    expect(html).toContain("Affinity");
+    expect(html).toContain("Attraction");
+    expect(html).toContain("Betrayal Threshold:");
+  });
+
+  test("5. InventoryTab renders in-hand equipment, carried items, and room containers", () => {
+    let triggeredAction = "";
+    const tab = new InventoryTab((act) => { triggeredAction = act; });
+    tab.render(parsedLedger, "user");
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("Inventory &amp; Containers");
+    expect(html).toContain("Canvas duffel bag");
+    expect(html).toContain("2018 smartphone");
+    expect(html).toContain("Extra clothes in suitcase");
+  });
+
+  test("6. WardrobeTab renders outfit layers and state", () => {
+    let triggeredAction = "";
+    const tab = new WardrobeTab((act) => { triggeredAction = act; });
+    tab.render(parsedLedger, "user");
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("Wardrobe &amp; Dressing");
+    expect(html).toContain("Fitted heather-gray henley");
+    expect(html).toContain("Dark slim-fit jeans");
+    expect(html).toContain("Calvin Klein trunks");
+    expect(html).toContain("White leather sneakers");
+  });
+
+  test("7. MapTab renders indoor/outdoor nodes and navigation routes", () => {
+    let travelTarget = "";
+    const tab = new MapTab((act) => { travelTarget = act; });
+    tab.render(parsedLedger);
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("Interactive Cartography &amp; Blueprint");
+    expect(html).toContain("dames_mansion:foyer");
+    expect(html).toContain("LIVING ROOM");
+  });
+
+  test("8. PhoneTab renders clock, location, and OS interface", () => {
+    let actionTriggered = "";
+    const mockCtx: any = {
+      getActiveChat: () => ({ id: "chat-123" }),
+      user: { id: "user-123" },
+      storage: { get: () => null, set: () => {} },
+    };
+    const tab = new PhoneTab(mockCtx, (act) => { actionTriggered = act; });
+    tab.render(parsedLedger);
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("16:30");
+    expect(html).toContain("Dames Mansion");
+    expect(html).toContain("Messages");
+    expect(html).toContain("Wallet");
+  });
+
+  test("9. JournalTab renders active opportunities and historical journal entries", () => {
+    const tab = new JournalTab();
+    tab.render(parsedLedger);
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("Journal &amp; Opportunity Leads");
+    expect(html).toContain("Accept a glass of wine with Jessica");
+    expect(html).toContain("Arrived at Dames Mansion with duffel bag");
+  });
+
+  test("10. SceneTab renders participants and stage state", () => {
+    const mockCtx: any = {
+      getActiveChat: () => ({ id: "chat-123" }),
+      user: { id: "user-123" },
+    };
+    const tab = new SceneTab(mockCtx);
+    tab.render(parsedLedger);
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("Scene Visuals");
+    expect(html).toContain("dames_mansion:foyer");
+  });
+});
 ```
 
