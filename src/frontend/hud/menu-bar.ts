@@ -1,6 +1,7 @@
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { LedgerData, AssetManifest } from "../../shared/types.js";
 import { CharactersTab } from "./tab-characters.js";
+import { BPlotsTab } from "./tab-bplots.js";
 import { WardrobeTab } from "./tab-wardrobe.js";
 import { StatsTab } from "./tab-stats.js";
 import { InventoryTab } from "./tab-inventory.js";
@@ -11,7 +12,17 @@ import { SceneTab } from "./tab-scene.js";
 import { DiagnosticsTab } from "./tab-diagnostics.js";
 import type { SpriteTransform } from "../stage/sprite-transform.js";
 
-export type HudTabId = "characters" | "wardrobe" | "stats" | "inventory" | "map" | "phone" | "journal" | "scene" | "diagnostics";
+export type HudTabId =
+  | "characters"
+  | "bplots"
+  | "wardrobe"
+  | "stats"
+  | "inventory"
+  | "map"
+  | "phone"
+  | "journal"
+  | "scene"
+  | "diagnostics";
 
 export interface MenuBarOptions {
   ctx: SpindleFrontendContext;
@@ -26,6 +37,7 @@ export class MenuBar {
   private phoneBadge: HTMLElement | null = null;
 
   private charactersTab: CharactersTab;
+  private bplotsTab: BPlotsTab;
   private wardrobeTab: WardrobeTab;
   private statsTab: StatsTab;
   private inventoryTab: InventoryTab;
@@ -68,6 +80,7 @@ export class MenuBar {
 
     // Instantiate tab views
     this.charactersTab = new CharactersTab();
+    this.bplotsTab = new BPlotsTab();
     this.wardrobeTab = new WardrobeTab(options.onAction);
     this.statsTab = new StatsTab();
     this.inventoryTab = new InventoryTab(options.onAction);
@@ -80,6 +93,7 @@ export class MenuBar {
     // Render bar buttons
     const barItems: Array<{ id: HudTabId; icon: string; label: string }> = [
       { id: "characters", icon: "👥", label: "Cast" },
+      { id: "bplots", icon: "📡", label: "B-Plots" },
       { id: "wardrobe", icon: "👗", label: "Wardrobe" },
       { id: "stats", icon: "📊", label: "Stats" },
       { id: "inventory", icon: "🎒", label: "Inventory" },
@@ -166,6 +180,10 @@ export class MenuBar {
       case "characters":
         this.charactersTab.render(this.currentLedger, this.currentManifest);
         this.panelBody.appendChild(this.charactersTab.root);
+        break;
+      case "bplots":
+        this.bplotsTab.render(this.currentLedger);
+        this.panelBody.appendChild(this.bplotsTab.root);
         break;
       case "wardrobe":
         this.wardrobeTab.render(this.currentLedger);

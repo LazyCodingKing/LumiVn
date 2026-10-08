@@ -20,6 +20,7 @@ import { MapTab } from "../src/frontend/hud/tab-map.js";
 import { PhoneTab } from "../src/frontend/hud/tab-phone.js";
 import { JournalTab } from "../src/frontend/hud/tab-journal.js";
 import { SceneTab } from "../src/frontend/hud/tab-scene.js";
+import { BPlotsTab } from "../src/frontend/hud/tab-bplots.js";
 import { MenuBar } from "../src/frontend/hud/menu-bar.js";
 import { DiagnosticsTab } from "../src/frontend/hud/tab-diagnostics.js";
 import { diagBus } from "../src/frontend/utils/diag-bus.js";
@@ -481,5 +482,50 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     const bundle = JSON.parse(diagBus.exportAllBundle());
     expect(bundle.directorNote).toBeDefined();
     expect(bundle.directorNote.directorNote).toBe("Maintain romantic tension during the interview.");
+  });
+
+  test("12. BPlotsTab renders active b-plots, offscreen cast, latents, travel, and environmental fronts", () => {
+    const tab = new BPlotsTab();
+    tab.render({
+      scene: {
+        place: "dames_mansion:foyer",
+        latents: [
+          { who: "leslie", errand: "Returning from grocery", route: "Main Street", window_opens: "17:00", status: "pending" },
+        ],
+      },
+      roster: [
+        { id: "leslie", name: "Leslie", lod: 2, loc: "grocery_store", status: "Shopping" },
+      ],
+      travel: [
+        { actor: "delivery_courier", purpose: "Package dropoff", from: "depot", to: "dames_mansion", depart: "16:15", eta: "16:45", status: "en_route" },
+      ],
+      bplots: [
+        {
+          id: "bp_1",
+          who: "Neighborhood Council",
+          want: "Rezoning hearing approval",
+          doing: "Canvassing votes",
+          scope: "neighborhood",
+          ripple: 2,
+          status: "active",
+          next: { move: "Distribute flyers", due: "Tomorrow" },
+        },
+      ],
+      fronts: [
+        { id: "heatwave", cause: "Severe summer heatwave", stage: "escalating", pressure: 4, due: "D2", known_by: ["User", "Jessica"] },
+      ],
+    });
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("B-Plots, Fronts &amp; Offscreen Cast");
+    expect(html).toContain("Neighborhood Council");
+    expect(html).toContain("Stage 2: Ambient Echo");
+    expect(html).toContain("Rezoning hearing approval");
+    expect(html).toContain("Leslie");
+    expect(html).toContain("LOD 2");
+    expect(html).toContain("Returning from grocery");
+    expect(html).toContain("delivery_courier");
+    expect(html).toContain("heatwave");
+    expect(html).toContain("Pressure 4/5");
   });
 });

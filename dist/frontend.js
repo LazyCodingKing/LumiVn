@@ -27415,6 +27415,56 @@ function normalizeGoal(g) {
     status: String(g?.status ?? "active")
   };
 }
+function normalizePlan(p) {
+  if (Array.isArray(p)) {
+    return {
+      goal: String(p[0] ?? ""),
+      steps: Array.isArray(p[1]) ? p[1] : p[1] ? [p[1]] : [],
+      now: String(p[2] ?? ""),
+      preconditions: Array.isArray(p[3]) ? p[3] : p[3] ? [p[3]] : [],
+      revisions: Number(p[4] ?? 0)
+    };
+  }
+  return {
+    goal: String(p?.goal ?? ""),
+    steps: Array.isArray(p?.steps) ? p.steps : p?.steps ? [p.steps] : [],
+    now: String(p?.now ?? ""),
+    preconditions: Array.isArray(p?.preconditions) ? p.preconditions : p?.preconditions ? [p.preconditions] : [],
+    revisions: Number(p?.revisions ?? 0)
+  };
+}
+function normalizeMemory(m) {
+  if (Array.isArray(m)) {
+    return {
+      evt: String(m[0] ?? ""),
+      interpretation: String(m[1] ?? ""),
+      salience: Number(m[2] ?? 0),
+      imprint: String(m[3] ?? ""),
+      with: String(m[4] ?? "")
+    };
+  }
+  return {
+    evt: String(m?.evt ?? m?.event ?? ""),
+    interpretation: String(m?.interpretation ?? ""),
+    salience: Number(m?.salience ?? 0),
+    imprint: String(m?.imprint ?? ""),
+    with: String(m?.with ?? "")
+  };
+}
+function normalizeExpectation(e) {
+  if (Array.isArray(e)) {
+    return {
+      situation: String(e[0] ?? ""),
+      expect: String(e[1] ?? ""),
+      conf: Number(e[2] ?? 100)
+    };
+  }
+  return {
+    situation: String(e?.situation ?? ""),
+    expect: String(e?.expect ?? ""),
+    conf: Number(e?.conf ?? 100)
+  };
+}
 function normalizeSecret(s) {
   if (Array.isArray(s)) {
     return {
@@ -27490,6 +27540,18 @@ class CharactersTab {
         }
       }
     }
+    if (ledger.scene?.participants && Array.isArray(ledger.scene.participants)) {
+      for (const p of ledger.scene.participants) {
+        if (typeof p === "string" && !actors[p]) {
+          actors[p] = {
+            id: p,
+            name: p,
+            life_model: { occupation: "Participant" },
+            agency: { want_now: "Present in scene" }
+          };
+        }
+      }
+    }
     const allKeys = Object.keys(actors);
     if (allKeys.length === 0) {
       this.root.innerHTML = `<div class="vn-muted" style="text-align:center; padding: 32px;">No characters recorded in the ledger yet.</div>`;
@@ -27525,10 +27587,18 @@ class CharactersTab {
     this.root.appendChild(header);
     const ribbon = document.createElement("div");
     ribbon.style.cssText = "display: flex; gap: 12px; overflow-x: auto; padding: 6px 4px 14px 4px; border-bottom: 1px solid #334155; margin-bottom: 16px;";
+    const rosterMap = new Map;
+    if (ledger.roster && Array.isArray(ledger.roster)) {
+      for (const r of ledger.roster) {
+        if (r.id)
+          rosterMap.set(r.id.toLowerCase(), r);
+      }
+    }
     for (const id of actorIds) {
       const actor = actors[id];
       const isSelected = id === this.selectedActorId;
       const cleanId = id.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      const rosterItem = rosterMap.get(id.toLowerCase());
       let avatarUrl = "";
       if (manifest?.characters?.[cleanId]) {
         const charData = manifest.characters[cleanId];
@@ -27542,10 +27612,12 @@ class CharactersTab {
       item.innerHTML = `
         <div style="width: 52px; height: 52px; border-radius: 50%; overflow: hidden; border: 2px solid ${isSelected ? "#818cf8" : "#475569"}; box-shadow: ${isSelected ? "0 0 10px rgba(99,102,241,0.6)" : "none"}; background: #1e293b; display: flex; align-items: center; justify-content: center; position: relative;">
           ${avatarUrl ? `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="${displayName}" />` : `<span style="font-size: 22px;">\uD83D\uDC64</span>`}
+          ${rosterItem ? `<span style="position: absolute; bottom: 0; right: 0; font-size: 9px; background: #0f172a; padding: 1px 3px; border-radius: 3px; border: 1px solid #334155; color: #a5b4fc; font-weight: 700;">L${rosterItem.lod ?? 1}</span>` : ""}
         </div>
         <span style="font-size: 11px; margin-top: 5px; color: ${isSelected ? "#f8fafc" : "#94a3b8"}; font-weight: ${isSelected ? "700" : "500"}; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
           ${displayName}
         </span>
+        ${rosterItem?.loc ? `<span style="font-size: 9px; color: #64748b; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${rosterItem.loc}</span>` : ""}
       `;
       item.addEventListener("click", () => {
         this.selectedActorId = id;
@@ -27577,6 +27649,7 @@ class CharactersTab {
     const rels = actor.relations || {};
     const conditionStr = app.condition || state.condition || "Normal";
     const wantStr = agency.want_now || "None declared";
+    const selfConcept = prof.self_concept || life.self_concept || "";
     const banner = document.createElement("div");
     banner.className = "vn-section";
     banner.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.5; color: #cbd5e1;";
@@ -27609,13 +27682,157 @@ class CharactersTab {
         <span style="color:#38bdf8; font-weight:700;">\uD83C\uDFAF Immediate Want:</span> ${wantStr}
       </div>
 
-      ${actor.constraints ? `
+      ${selfConcept ? `
+        <div style="margin-top:6px; background:#0f172a; border-left:3px solid #38bdf8; padding:6px 8px; border-radius:4px; color:#cbd5e1; font-size:11px;">
+          <span style="color:#38bdf8; font-weight:700;">\uD83E\uDE9E Self-Concept:</span> "${selfConcept}"
+        </div>
+      ` : ""}
+
+      ${actor.constraints || prof.constraints ? `
         <div style="margin-top:6px; background:rgba(244,63,94,0.1); border:1px solid rgba(244,63,94,0.3); border-radius:4px; padding:6px 8px; color:#fecdd3;">
-          <span style="color:#f43f5e; font-weight:700;">⚠️ Constraint / Taboo:</span> ${actor.constraints}
+          <span style="color:#f43f5e; font-weight:700;">⚠️ Constraint / Taboo:</span> ${actor.constraints || prof.constraints}
+        </div>
+      ` : ""}
+
+      ${prof.boundaries || prof.red_lines ? `
+        <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px; font-size:11px;">
+          ${prof.boundaries ? `<div><span style="color:#f59e0b; font-weight:600;">\uD83D\uDEA7 Boundaries:</span> <span style="color:#fde68a;">${Array.isArray(prof.boundaries) ? prof.boundaries.join("; ") : prof.boundaries}</span></div>` : ""}
+          ${prof.red_lines ? `<div><span style="color:#ef4444; font-weight:600;">\uD83D\uDEAB Red Lines:</span> <span style="color:#fca5a5;">${Array.isArray(prof.red_lines) ? prof.red_lines.join("; ") : prof.red_lines}</span></div>` : ""}
+        </div>
+      ` : ""}
+
+      ${prof.values || prof.public_roles || prof.capabilities ? `
+        <div style="margin-top:6px; padding-top:6px; border-top:1px solid #334155; display:flex; flex-direction:column; gap:4px; font-size:11px;">
+          ${prof.values ? `<div><span style="color:#94a3b8;">Values:</span> <strong style="color:#f8fafc;">${Array.isArray(prof.values) ? prof.values.join(", ") : prof.values}</strong></div>` : ""}
+          ${prof.public_roles ? `<div><span style="color:#94a3b8;">Public Roles:</span> <span style="color:#cbd5e1;">${Array.isArray(prof.public_roles) ? prof.public_roles.join(", ") : prof.public_roles}</span></div>` : ""}
+          ${prof.capabilities ? `<div><span style="color:#94a3b8;">Capabilities:</span> <span style="color:#cbd5e1;">${Array.isArray(prof.capabilities) ? prof.capabilities.join(", ") : prof.capabilities}</span></div>` : ""}
         </div>
       ` : ""}
     `;
+    const rawPassions = actor.passions;
+    if (rawPassions) {
+      let passionBadges = [];
+      if (Array.isArray(rawPassions)) {
+        passionBadges = rawPassions.map((p) => {
+          if (typeof p === "string")
+            return p;
+          if (typeof p === "object" && p !== null) {
+            const label = p.name || p.id || "passion";
+            const val = p.intensity ?? p.value ?? "";
+            const target = p.target ? ` ➔ ${p.target}` : "";
+            return `${label}${target}: ${val}`;
+          }
+          return String(p);
+        });
+      } else if (typeof rawPassions === "object") {
+        passionBadges = Object.entries(rawPassions).map(([k, v]) => `${k}: ${v}`);
+      }
+      if (passionBadges.length > 0) {
+        const pContainer = document.createElement("div");
+        pContainer.style.cssText = "margin-top: 8px; padding-top: 6px; border-top: 1px solid #334155;";
+        pContainer.innerHTML = `
+          <div style="font-size: 11px; color: #f43f5e; font-weight: 700; margin-bottom: 4px;">❤️ Passions & Emotional Drives:</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            ${passionBadges.map((badge) => `<span style="background: rgba(244,63,94,0.15); border: 1px solid rgba(244,63,94,0.4); color: #fda4af; font-size: 11px; padding: 2px 8px; border-radius: 4px;">\uD83D\uDD25 ${badge}</span>`).join("")}
+          </div>
+        `;
+        banner.appendChild(pContainer);
+      }
+    }
     container.appendChild(banner);
+    const disps = prof.dispositions;
+    if (disps && typeof disps === "object" && Object.keys(disps).length > 0) {
+      const dispSection = document.createElement("div");
+      dispSection.className = "vn-section";
+      dispSection.innerHTML = `<h4>\uD83E\uDDED Personality Dispositions</h4>`;
+      const dispGrid = document.createElement("div");
+      dispGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px;";
+      const dispLabels = {
+        risk: "Risk Propensity",
+        assertiveness: "Assertiveness",
+        empathy: "Empathy",
+        impulse_control: "Impulse Control",
+        curiosity: "Curiosity",
+        sociability: "Sociability",
+        status_sensitivity: "Status Sensitivity",
+        acquisitiveness: "Acquisitiveness",
+        persistence: "Persistence"
+      };
+      for (const [k, v] of Object.entries(disps)) {
+        const label = dispLabels[k] || k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        const box = document.createElement("div");
+        box.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; font-size: 11px;";
+        box.innerHTML = `
+          <div style="color: #94a3b8; font-size: 10px; margin-bottom: 2px;">${label}</div>
+          <div style="color: #f8fafc; font-weight: 700;">${v}</div>
+        `;
+        dispGrid.appendChild(box);
+      }
+      dispSection.appendChild(dispGrid);
+      container.appendChild(dispSection);
+    }
+    const hasNeeds = state.needs && (Array.isArray(state.needs) ? state.needs.length > 0 : Object.keys(state.needs).length > 0);
+    const affectEpisodes = state.affect?.episodes || state.affect_episodes;
+    const hasAffect = Array.isArray(affectEpisodes) && affectEpisodes.length > 0;
+    if (hasNeeds || hasAffect) {
+      const needsSection = document.createElement("div");
+      needsSection.className = "vn-section";
+      needsSection.innerHTML = `<h4>⚡ Active Needs & Affect Episodes</h4>`;
+      const nBox = document.createElement("div");
+      nBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px;";
+      if (hasNeeds) {
+        let needsItems = [];
+        if (Array.isArray(state.needs)) {
+          needsItems = state.needs.map((n) => {
+            if (Array.isArray(n))
+              return { name: String(n[0] ?? ""), urgency: n[1] ?? 0 };
+            if (typeof n === "object" && n !== null)
+              return { name: String(n.name ?? n.need ?? ""), urgency: n.urgency ?? n.value ?? 0 };
+            return { name: String(n), urgency: "" };
+          });
+        } else if (typeof state.needs === "object" && state.needs !== null) {
+          needsItems = Object.entries(state.needs).map(([k, v]) => ({ name: k, urgency: String(v) }));
+        }
+        nBox.innerHTML += `
+          <div>
+            <div style="color: #38bdf8; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Pressing Needs:</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              ${needsItems.map((n) => `
+                <span style="background: #0f172a; border: 1px solid #0284c7; padding: 3px 8px; border-radius: 4px; font-size: 11px;">
+                  <strong style="color: #7dd3fc;">${n.name}</strong>${n.urgency !== "" ? `<span style="color: #94a3b8;"> (urgency: ${n.urgency})</span>` : ""}
+                </span>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+      if (hasAffect) {
+        const epFormatted = affectEpisodes.map((ep) => {
+          if (typeof ep === "string")
+            return ep;
+          if (Array.isArray(ep))
+            return `${ep[0] ?? ""}${ep[1] ? ` ➔ ${ep[1]}` : ""}${ep[2] !== undefined ? ` (${ep[2]})` : ""}`;
+          if (typeof ep === "object" && ep !== null) {
+            return `${ep.name || ep.emotion || "affect"}${ep.target ? ` ➔ ${ep.target}` : ""}${ep.intensity !== undefined ? ` (${ep.intensity})` : ""}`;
+          }
+          return String(ep);
+        });
+        nBox.innerHTML += `
+          <div style="${hasNeeds ? "border-top: 1px solid #334155; padding-top: 6px;" : ""}">
+            <div style="color: #eab308; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Affect Episodes:</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              ${epFormatted.map((ep) => `
+                <span style="background: rgba(234,179,8,0.15); border: 1px solid #eab308; color: #fef08a; padding: 2px 8px; border-radius: 4px; font-size: 11px;">
+                  ⚡ ${ep}
+                </span>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+      needsSection.appendChild(nBox);
+      container.appendChild(needsSection);
+    }
     const outfitSection = document.createElement("div");
     outfitSection.className = "vn-section";
     outfitSection.innerHTML = `<h4>\uD83D\uDC57 Attire & Wardrobe</h4>`;
@@ -27746,7 +27963,16 @@ class CharactersTab {
     }
     const physWounds = Array.isArray(wounds.physical) ? wounds.physical : [];
     const psychWounds = Array.isArray(wounds.psychological) ? wounds.psychological : [];
-    const tells = prof.tells ? Array.isArray(prof.tells) ? prof.tells : [prof.tells] : [];
+    let formattedTells = [];
+    if (prof.tells) {
+      if (Array.isArray(prof.tells)) {
+        formattedTells = prof.tells.map(String);
+      } else if (typeof prof.tells === "object") {
+        formattedTells = Object.entries(prof.tells).map(([cue, desc]) => `${cue.toUpperCase()}: ${desc}`);
+      } else {
+        formattedTells = [String(prof.tells)];
+      }
+    }
     const psychoSection = document.createElement("div");
     psychoSection.className = "vn-section";
     psychoSection.innerHTML = `<h4>\uD83E\uDDE0 Condition, Tells & Wounds</h4>`;
@@ -27764,10 +27990,12 @@ class CharactersTab {
         </div>
       </div>
 
-      ${tells.length > 0 ? `
+      ${formattedTells.length > 0 ? `
         <div style="margin-top:4px; border-top:1px solid #334155; padding-top:6px;">
           <div style="color:#38bdf8; font-weight:700; font-size:11px; margin-bottom:3px;">\uD83D\uDC41️ Behavioral Tells & Micro-Expressions:</div>
-          <div style="color:#e0f2fe; font-size:11px;">${tells.join("; ")}</div>
+          <div style="display:flex; flex-direction:column; gap:3px;">
+            ${formattedTells.map((t) => `<div style="background:#0f172a; padding:4px 8px; border-radius:4px; font-size:11px; color:#e0f2fe;">${t}</div>`).join("")}
+          </div>
         </div>
       ` : ""}
 
@@ -27810,47 +28038,167 @@ class CharactersTab {
     lifeSection.appendChild(lifeBox);
     container.appendChild(lifeSection);
     const rawGoals = Array.isArray(agency.goals) ? agency.goals : [];
-    if (rawGoals.length > 0) {
-      const goals = rawGoals.map(normalizeGoal);
-      const goalSection = document.createElement("div");
-      goalSection.className = "vn-section";
-      goalSection.innerHTML = `<h4>\uD83C\uDFAF Active Goals & Directives (${goals.length})</h4>`;
-      const goalList = document.createElement("div");
-      goalList.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
-      for (const g of goals) {
-        const item = document.createElement("div");
-        item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px;";
-        item.innerHTML = `
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <strong style="color:#38bdf8; font-size:12px;">${g.intent}</strong>
-            <span style="padding:1px 6px; border-radius:4px; background:rgba(34,197,94,0.2); border:1px solid #22c55e; color:#86efac;">
-              ${g.status} (${g.progress}%)
-            </span>
-          </div>
-          <div style="display:flex; gap:12px; color:#94a3b8; flex-wrap:wrap;">
-            <span>Priority: <strong style="color:#f8fafc;">${g.priority}</strong></span>
-            <span>Commitment: <strong style="color:#f8fafc;">${g.commitment}</strong></span>
-            ${g.deadline ? `<span>Deadline: <strong style="color:#fca5a5;">${g.deadline}</strong></span>` : ""}
-          </div>
-          ${g.cause ? `<div style="margin-top:4px; color:#cbd5e1; font-style:italic;">Cause: ${g.cause}</div>` : ""}
-        `;
-        goalList.appendChild(item);
+    const rawPlans = Array.isArray(agency.plans) ? agency.plans : [];
+    const rawPolicies = Array.isArray(agency.policies) ? agency.policies : [];
+    const rawCommitments = Array.isArray(agency.commitments) ? agency.commitments : [];
+    if (rawGoals.length > 0 || rawPlans.length > 0 || rawPolicies.length > 0 || rawCommitments.length > 0) {
+      const agencySection = document.createElement("div");
+      agencySection.className = "vn-section";
+      agencySection.innerHTML = `<h4>\uD83C\uDFAF Agency, Plans & Directives</h4>`;
+      const agencyBody = document.createElement("div");
+      agencyBody.style.cssText = "display: flex; flex-direction: column; gap: 10px;";
+      if (rawGoals.length > 0) {
+        const goals = rawGoals.map(normalizeGoal);
+        const goalList = document.createElement("div");
+        goalList.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
+        goalList.innerHTML = `<div style="color: #38bdf8; font-weight: 700; font-size: 11px;">Active Goals (${goals.length}):</div>`;
+        for (const g of goals) {
+          const item = document.createElement("div");
+          item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px;";
+          item.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <strong style="color:#38bdf8; font-size:12px;">${g.intent}</strong>
+              <span style="padding:1px 6px; border-radius:4px; background:rgba(34,197,94,0.2); border:1px solid #22c55e; color:#86efac;">
+                ${g.status} (${g.progress}%)
+              </span>
+            </div>
+            <div style="display:flex; gap:12px; color:#94a3b8; flex-wrap:wrap;">
+              <span>Priority: <strong style="color:#f8fafc;">${g.priority}</strong></span>
+              <span>Commitment: <strong style="color:#f8fafc;">${g.commitment}</strong></span>
+              ${g.deadline ? `<span>Deadline: <strong style="color:#fca5a5;">${g.deadline}</strong></span>` : ""}
+            </div>
+            ${g.cause ? `<div style="margin-top:4px; color:#cbd5e1; font-style:italic;">Cause: ${g.cause}</div>` : ""}
+          `;
+          goalList.appendChild(item);
+        }
+        agencyBody.appendChild(goalList);
       }
-      goalSection.appendChild(goalList);
-      container.appendChild(goalSection);
+      if (rawPlans.length > 0) {
+        const plans = rawPlans.map(normalizePlan);
+        const planList = document.createElement("div");
+        planList.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
+        planList.innerHTML = `<div style="color: #818cf8; font-weight: 700; font-size: 11px;">Action Plans (${plans.length}):</div>`;
+        for (const p of plans) {
+          const item = document.createElement("div");
+          item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px;";
+          item.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <strong style="color:#c7d2fe; font-size:12px;">Goal: ${p.goal}</strong>
+              <span style="font-size:10px; color:#94a3b8;">Rev: ${p.revisions}</span>
+            </div>
+            ${p.now ? `<div style="background:#0f172a; padding:4px 8px; border-radius:4px; margin-bottom:4px; color:#38bdf8;"><strong>Current Step:</strong> ${p.now}</div>` : ""}
+            ${p.steps.length > 0 ? `
+              <div style="color:#94a3b8; margin-top:2px;">
+                Steps: <span style="color:#cbd5e1;">${p.steps.join(" ➔ ")}</span>
+              </div>
+            ` : ""}
+            ${p.preconditions.length > 0 ? `
+              <div style="color:#94a3b8; margin-top:2px;">
+                Preconditions: <span style="color:#fde68a;">${p.preconditions.join("; ")}</span>
+              </div>
+            ` : ""}
+          `;
+          planList.appendChild(item);
+        }
+        agencyBody.appendChild(planList);
+      }
+      if (rawPolicies.length > 0 || rawCommitments.length > 0) {
+        const polBox = document.createElement("div");
+        polBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px; display: flex; flex-direction: column; gap: 6px;";
+        if (rawPolicies.length > 0) {
+          polBox.innerHTML += `
+            <div>
+              <span style="color: #f59e0b; font-weight: 700;">Operating Policies:</span>
+              <ul style="margin: 2px 0 0 16px; padding: 0; color: #cbd5e1;">
+                ${rawPolicies.map((pol) => `<li>${typeof pol === "object" ? JSON.stringify(pol) : String(pol)}</li>`).join("")}
+              </ul>
+            </div>
+          `;
+        }
+        if (rawCommitments.length > 0) {
+          polBox.innerHTML += `
+            <div>
+              <span style="color: #22c55e; font-weight: 700;">Active Commitments:</span>
+              <ul style="margin: 2px 0 0 16px; padding: 0; color: #cbd5e1;">
+                ${rawCommitments.map((com) => `<li>${typeof com === "object" ? JSON.stringify(com) : String(com)}</li>`).join("")}
+              </ul>
+            </div>
+          `;
+        }
+        agencyBody.appendChild(polBox);
+      }
+      agencySection.appendChild(agencyBody);
+      container.appendChild(agencySection);
     }
     const rawSecrets = Array.isArray(know.secrets) ? know.secrets : [];
     const rawBeliefs = Array.isArray(know.beliefs) ? know.beliefs : [];
-    if (rawSecrets.length > 0 || rawBeliefs.length > 0) {
+    const rawMemories = Array.isArray(know.memories) ? know.memories : [];
+    const rawExpectations = Array.isArray(know.expectations) ? know.expectations : [];
+    const heldLeverage = know.held_leverage;
+    const presentsAs = know.presents_as;
+    if (rawSecrets.length > 0 || rawBeliefs.length > 0 || rawMemories.length > 0 || rawExpectations.length > 0 || heldLeverage || presentsAs) {
       const knowSection = document.createElement("div");
       knowSection.className = "vn-section";
-      knowSection.innerHTML = `<h4>\uD83D\uDD12 Guarded Secrets & Epistemic Beliefs</h4>`;
+      knowSection.innerHTML = `<h4>\uD83D\uDD12 Epistemics, Memories & Guarded Secrets</h4>`;
       const knowBox = document.createElement("div");
       knowBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display:flex; flex-direction:column; gap:8px;";
+      if (presentsAs) {
+        knowBox.innerHTML += `
+          <div style="background: #0f172a; padding: 6px 8px; border-radius: 4px; font-size: 11px; border-left: 3px solid #818cf8;">
+            <strong style="color: #818cf8;">Presents As:</strong> <span style="color: #e0f2fe;">${typeof presentsAs === "object" ? JSON.stringify(presentsAs) : String(presentsAs)}</span>
+          </div>
+        `;
+      }
+      if (heldLeverage && (Array.isArray(heldLeverage) ? heldLeverage.length > 0 : true)) {
+        const levList = Array.isArray(heldLeverage) ? heldLeverage : [heldLeverage];
+        knowBox.innerHTML += `
+          <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); padding: 6px 8px; border-radius: 4px; font-size: 11px;">
+            <strong style="color: #f59e0b;">Held Leverage:</strong>
+            <span style="color: #fde68a;">${levList.map((x) => typeof x === "object" ? x.truth || x.id || JSON.stringify(x) : String(x)).join("; ")}</span>
+          </div>
+        `;
+      }
+      if (rawMemories.length > 0) {
+        const memories = rawMemories.map(normalizeMemory);
+        knowBox.innerHTML += `
+          <div style="margin-top: 4px;">
+            <div style="color: #c084fc; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Salient Memories (${memories.length}):</div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              ${memories.map((m) => `
+                <div style="background: #0f172a; padding: 6px 8px; border-radius: 4px; font-size: 11px;">
+                  <div style="color: #f8fafc; font-weight: 600;">"${m.evt}"</div>
+                  <div style="display: flex; gap: 10px; margin-top: 2px; color: #94a3b8; font-size: 10px; flex-wrap: wrap;">
+                    <span>Interpretation: <strong style="color: #cbd5e1;">${m.interpretation || "—"}</strong></span>
+                    <span>Salience: <strong style="color: #d8b4fe;">${m.salience}</strong></span>
+                    ${m.with ? `<span>With: ${m.with}</span>` : ""}
+                    ${m.imprint ? `<span>Imprint: <em>${m.imprint}</em></span>` : ""}
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+      if (rawExpectations.length > 0) {
+        const expects = rawExpectations.map(normalizeExpectation);
+        knowBox.innerHTML += `
+          <div style="margin-top: 4px;">
+            <div style="color: #38bdf8; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Social & Situational Expectations (${expects.length}):</div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              ${expects.map((e) => `
+                <div style="background: #0f172a; padding: 4px 8px; border-radius: 4px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+                  <span><strong style="color: #7dd3fc;">[${e.situation}]</strong> <span style="color: #e0f2fe;">${e.expect}</span></span>
+                  <span style="color: #94a3b8; font-size: 10px;">conf: ${e.conf}%</span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
       if (rawSecrets.length > 0) {
         const secrets = rawSecrets.map(normalizeSecret);
         knowBox.innerHTML += `
-          <div>
+          <div style="margin-top: 4px;">
             <div style="color:#f43f5e; font-weight:700; font-size:11px; margin-bottom:4px;">Guarded Secrets:</div>
             <div style="display:flex; flex-direction:column; gap:6px;">
               ${secrets.map((s) => `
@@ -27913,8 +28261,18 @@ class CharactersTab {
             <div>Attraction: <strong>${r.attraction ?? 0}</strong></div>
             <div>Loyalty: <strong>${r.loyalty ?? 0}</strong></div>
           </div>
-          ${r.leverage && r.leverage.length > 0 ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${(Array.isArray(r.leverage) ? r.leverage : [r.leverage]).map((x) => typeof x === "object" ? x.truth || x.id || JSON.stringify(x) : String(x)).join(", ")}</div>` : ""}
-          ${r.obligations && r.obligations.length > 0 ? `<div style="margin-top:4px; color:#38bdf8;">Obligations: ${(Array.isArray(r.obligations) ? r.obligations : [r.obligations]).map((x) => typeof x === "object" ? x.truth || x.id || JSON.stringify(x) : String(x)).join(", ")}</div>` : ""}
+          ${r.grievances && (Array.isArray(r.grievances) ? r.grievances.length > 0 : true) ? `
+            <div style="margin-top:4px; color:#f87171;">
+              Grievances: <span style="color:#fecdd3;">${(Array.isArray(r.grievances) ? r.grievances : [r.grievances]).map(String).join("; ")}</span>
+            </div>
+          ` : ""}
+          ${r.shared_secrets && (Array.isArray(r.shared_secrets) ? r.shared_secrets.length > 0 : true) ? `
+            <div style="margin-top:4px; color:#c084fc;">
+              Shared Secrets: <span style="color:#e9d5ff;">${(Array.isArray(r.shared_secrets) ? r.shared_secrets : [r.shared_secrets]).map(String).join("; ")}</span>
+            </div>
+          ` : ""}
+          ${r.leverage && (Array.isArray(r.leverage) ? r.leverage.length > 0 : true) ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${(Array.isArray(r.leverage) ? r.leverage : [r.leverage]).map((x) => typeof x === "object" ? x.truth || x.id || JSON.stringify(x) : String(x)).join(", ")}</div>` : ""}
+          ${r.obligations && (Array.isArray(r.obligations) ? r.obligations.length > 0 : true) ? `<div style="margin-top:4px; color:#38bdf8;">Obligations: ${(Array.isArray(r.obligations) ? r.obligations : [r.obligations]).map((x) => typeof x === "object" ? x.truth || x.id || JSON.stringify(x) : String(x)).join(", ")}</div>` : ""}
         `;
         relsList.appendChild(card);
       }
@@ -27922,6 +28280,202 @@ class CharactersTab {
       container.appendChild(relsSection);
     }
     this.root.appendChild(container);
+  }
+}
+
+// src/frontend/hud/tab-bplots.ts
+class BPlotsTab {
+  root;
+  constructor() {
+    this.root = document.createElement("div");
+    this.root.className = "vn-hud-tab vn-tab-bplots";
+  }
+  render(ledger) {
+    this.root.innerHTML = "";
+    this.root.style.cssText = "display: flex; flex-direction: column; gap: 14px; color: #f1f5f9; font-family: system-ui, sans-serif;";
+    const bplots = ledger.bplots || [];
+    const roster = ledger.roster || [];
+    const currentPlace = (ledger.scene?.place || "").toLowerCase();
+    const offscreenCast = roster.filter((r) => {
+      const isOffLOD = r.lod === 1 || r.lod === 2;
+      const isDifferentLoc = r.loc && r.loc.toLowerCase() !== currentPlace;
+      return (isOffLOD || isDifferentLoc) && (r.id || "").toLowerCase() !== "user";
+    });
+    const fronts = ledger.fronts || [];
+    const travel = ledger.travel || [];
+    const latents = ledger.scene?.latents || [];
+    const header = document.createElement("div");
+    header.className = "vn-tab-header";
+    header.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div>
+          <h3 style="margin: 0; font-size: 15px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+            <span>\uD83D\uDCE1</span> <span>B-Plots, Fronts & Offscreen Cast</span>
+          </h3>
+          <p class="vn-muted" style="margin: 2px 0 0 0; font-size: 11px;">
+            Distant third-party agendas, active ripple stages, offscreen errands, and environmental fronts.
+          </p>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <span style="font-size: 11px; background: rgba(99,102,241,0.2); border: 1px solid #6366f1; padding: 2px 8px; border-radius: 6px; color: #c7d2fe;">
+            ${bplots.length} B-Plots
+          </span>
+          <span style="font-size: 11px; background: rgba(56,189,248,0.2); border: 1px solid #38bdf8; padding: 2px 8px; border-radius: 6px; color: #7dd3fc;">
+            ${offscreenCast.length} Offscreen Cast
+          </span>
+        </div>
+      </div>
+    `;
+    this.root.appendChild(header);
+    const bpSection = document.createElement("div");
+    bpSection.className = "vn-section";
+    bpSection.innerHTML = `<h4>\uD83C\uDF10 Active B-Plots & Distant Agendas (${bplots.length})</h4>`;
+    if (bplots.length === 0) {
+      bpSection.innerHTML += `<div class="vn-muted" style="padding: 10px; background: #0f172a; border-radius: 6px;">No external B-plots active on the ledger.</div>`;
+    } else {
+      const bpList = document.createElement("div");
+      bpList.style.cssText = "display: flex; flex-direction: column; gap: 10px;";
+      for (const bp of bplots) {
+        const card = document.createElement("div");
+        card.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;";
+        const ripple = bp.ripple ?? 1;
+        const rippleColor = ripple === 3 ? "#ef4444" : ripple === 2 ? "#f59e0b" : "#38bdf8";
+        const rippleLabel = ripple === 3 ? "Stage 3: Collision" : ripple === 2 ? "Stage 2: Ambient Echo" : "Stage 1: Isolated";
+        const knowsList = Array.isArray(bp.knows) ? bp.knows.join("; ") : bp.knows || "None";
+        const hooksList = Array.isArray(bp.hooks) ? bp.hooks.join(", ") : bp.hooks || "None";
+        const carriersList = (bp.carriers || []).map((c) => `${c.what || "News"} from ${c.from || "Source"} (ETA: ${c.eta || "?"})`).join("; ");
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 6px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <strong style="color: #f8fafc; font-size: 13px;">${bp.who || bp.id || "Unknown Entity"}</strong>
+              <span style="font-size: 10px; background: #0f172a; border: 1px solid #475569; padding: 1px 6px; border-radius: 4px; color: #94a3b8;">
+                ${bp.scope || "personal"}
+              </span>
+              <span style="font-size: 10px; background: rgba(34,197,94,0.15); border: 1px solid #22c55e; padding: 1px 6px; border-radius: 4px; color: #86efac;">
+                ${bp.status || "active"}
+              </span>
+            </div>
+            <span style="font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: ${rippleColor}22; border: 1px solid ${rippleColor}; color: ${rippleColor};">
+              ${rippleLabel}
+            </span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; font-size: 11px;">
+            <div><span style="color: #94a3b8;">Want:</span> <strong style="color: #f8fafc;">${bp.want || "Unstated"}</strong></div>
+            <div><span style="color: #94a3b8;">Current Activity:</span> <span style="color: #cbd5e1;">${bp.doing || "Routine"}</span></div>
+          </div>
+
+          ${bp.next ? `
+            <div style="background: #0f172a; border-radius: 6px; padding: 6px 10px; font-size: 11px; display: flex; justify-content: space-between;">
+              <span><strong style="color: #38bdf8;">Next Move:</strong> ${bp.next.move || "Advance plan"}</span>
+              <span style="color: #fca5a5; font-weight: 600;">Due: ${bp.next.due || "TBD"}</span>
+            </div>
+          ` : ""}
+
+          <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #cbd5e1;">
+            ${bp.vector ? `<div><span style="color: #94a3b8;">Ripple Vector:</span> <em>${bp.vector}</em></div>` : ""}
+            ${carriersList ? `<div><span style="color: #94a3b8;">Carriers & Outward News:</span> ${carriersList}</div>` : ""}
+            <div><span style="color: #94a3b8;">Beliefs / What they know:</span> ${knowsList}</div>
+            <div><span style="color: #94a3b8;">Scene Hooks:</span> <span style="color: #a78bfa;">${hooksList}</span></div>
+          </div>
+        `;
+        bpList.appendChild(card);
+      }
+      bpSection.appendChild(bpList);
+    }
+    this.root.appendChild(bpSection);
+    const offSection = document.createElement("div");
+    offSection.className = "vn-section";
+    offSection.innerHTML = `<h4>\uD83D\uDC65 Offscreen Cast & Area Latents (${offscreenCast.length + latents.length + travel.length})</h4>`;
+    const offGrid = document.createElement("div");
+    offGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;";
+    for (const actor of offscreenCast) {
+      const card = document.createElement("div");
+      card.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 11px; display: flex; flex-direction: column; gap: 4px;";
+      card.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <strong style="color: #38bdf8; font-size: 12px;">${actor.name || actor.id}</strong>
+          <span style="font-size: 10px; background: #0f172a; padding: 1px 6px; border-radius: 4px; color: #a5b4fc;">
+            LOD ${actor.lod ?? 1}
+          </span>
+        </div>
+        <div><span style="color: #94a3b8;">Location:</span> <strong style="color: #f8fafc;">${actor.loc || "Unknown"}</strong></div>
+        <div><span style="color: #94a3b8;">Status / Errand:</span> <span style="color: #cbd5e1;">${actor.status || "On routine"}</span></div>
+        ${actor.tick !== undefined ? `<div style="font-size: 10px; color: #64748b;">Tick: ${actor.tick} | Record: ${actor.record || "normal"}</div>` : ""}
+      `;
+      offGrid.appendChild(card);
+    }
+    for (const lat of latents) {
+      const card = document.createElement("div");
+      card.style.cssText = "background: #1e293b; border: 1px solid #6366f1; border-radius: 8px; padding: 10px; font-size: 11px; display: flex; flex-direction: column; gap: 4px;";
+      card.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <strong style="color: #c084fc; font-size: 12px;">⏳ ${lat.who || lat.id} (Latent)</strong>
+          <span style="font-size: 10px; background: rgba(139,92,246,0.2); color: #d8b4fe; padding: 1px 6px; border-radius: 4px;">
+            ${lat.status || "pending"}
+          </span>
+        </div>
+        <div><span style="color: #94a3b8;">Errand:</span> <span style="color: #f8fafc;">${lat.errand || "None"}</span></div>
+        ${lat.route ? `<div><span style="color: #94a3b8;">Route:</span> ${lat.route}</div>` : ""}
+        ${lat.window_opens ? `<div><span style="color: #94a3b8;">Window Opens:</span> <strong style="color: #fca5a5;">${lat.window_opens}</strong></div>` : ""}
+      `;
+      offGrid.appendChild(card);
+    }
+    for (const tr of travel) {
+      const card = document.createElement("div");
+      card.style.cssText = "background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 10px; font-size: 11px; display: flex; flex-direction: column; gap: 4px;";
+      card.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <strong style="color: #38bdf8; font-size: 12px;">\uD83D\uDEB6 ${tr.actor} (In Transit)</strong>
+          <span style="font-size: 10px; background: rgba(56,189,248,0.2); color: #7dd3fc; padding: 1px 6px; border-radius: 4px;">
+            ${tr.status || "en_route"}
+          </span>
+        </div>
+        <div><span style="color: #94a3b8;">Route:</span> ${tr.from || "?"} ➔ ${tr.to || "?"}</div>
+        <div><span style="color: #94a3b8;">Purpose:</span> ${tr.purpose || "Travel"}</div>
+        <div style="display: flex; justify-content: space-between; margin-top: 2px;">
+          <span>Depart: ${tr.depart || "—"}</span>
+          <span style="color: #fca5a5; font-weight: 600;">ETA: ${tr.eta || "—"}</span>
+        </div>
+      `;
+      offGrid.appendChild(card);
+    }
+    if (offscreenCast.length === 0 && latents.length === 0 && travel.length === 0) {
+      offSection.innerHTML += `<div class="vn-muted" style="padding: 10px; background: #0f172a; border-radius: 6px;">All tracked cast members are currently on the active scene.</div>`;
+    } else {
+      offSection.appendChild(offGrid);
+    }
+    this.root.appendChild(offSection);
+    if (fronts.length > 0) {
+      const frontSec = document.createElement("div");
+      frontSec.className = "vn-section";
+      frontSec.innerHTML = `<h4>⚡ Environmental Fronts & Rising Tensions (${fronts.length})</h4>`;
+      const fList = document.createElement("div");
+      fList.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+      for (const f of fronts) {
+        const item = document.createElement("div");
+        item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; font-size: 11px;";
+        const press = f.pressure ?? 0;
+        const pressColor = press >= 4 ? "#ef4444" : press >= 3 ? "#f59e0b" : "#38bdf8";
+        item.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <strong style="color: #f8fafc; font-size: 12px;">${f.id}</strong>
+            <span style="font-weight: 700; color: ${pressColor}; background: ${pressColor}22; border: 1px solid ${pressColor}; padding: 1px 6px; border-radius: 4px;">
+              Pressure ${press}/5
+            </span>
+          </div>
+          <div style="color: #cbd5e1; margin-bottom: 2px;">${f.cause || "Active pressure"}</div>
+          <div style="display: flex; justify-content: space-between; color: #94a3b8; font-size: 10px;">
+            <span>Stage: <strong>${f.stage || "initial"}</strong></span>
+            ${f.due ? `<span>Due: <strong style="color: #fca5a5;">${f.due}</strong></span>` : ""}
+            <span>Known by: ${(f.known_by || []).join(", ") || "None"}</span>
+          </div>
+        `;
+        fList.appendChild(item);
+      }
+      frontSec.appendChild(fList);
+      this.root.appendChild(frontSec);
+    }
   }
 }
 
@@ -33085,10 +33639,11 @@ var LEDGER_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Ledger.*?<\/summary>(
 var YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
 var THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
 var SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary>[\s\S]*?<\/details>/gi;
+var DIRECTOR_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Director.*?<\/summary>[\s\S]*?<\/details>/gi;
 var DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"[\s\S]*?\}\s*/gi;
 var PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
 function extractProse(rawContent) {
-  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(LEDGER_DETAILS_RE, "").replace(DIRECTOR_JSON_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
+  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(DIRECTOR_DETAILS_RE, "").replace(LEDGER_DETAILS_RE, "").replace(DIRECTOR_JSON_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
   return cleaned;
 }
 function extractParagraphs(prose) {
@@ -34408,6 +34963,7 @@ class MenuBar {
   panelBody;
   phoneBadge = null;
   charactersTab;
+  bplotsTab;
   wardrobeTab;
   statsTab;
   inventoryTab;
@@ -34441,6 +34997,7 @@ class MenuBar {
         this.closeTab();
     });
     this.charactersTab = new CharactersTab;
+    this.bplotsTab = new BPlotsTab;
     this.wardrobeTab = new WardrobeTab(options.onAction);
     this.statsTab = new StatsTab;
     this.inventoryTab = new InventoryTab(options.onAction);
@@ -34451,6 +35008,7 @@ class MenuBar {
     this.diagnosticsTab = new DiagnosticsTab;
     const barItems = [
       { id: "characters", icon: "\uD83D\uDC65", label: "Cast" },
+      { id: "bplots", icon: "\uD83D\uDCE1", label: "B-Plots" },
       { id: "wardrobe", icon: "\uD83D\uDC57", label: "Wardrobe" },
       { id: "stats", icon: "\uD83D\uDCCA", label: "Stats" },
       { id: "inventory", icon: "\uD83C\uDF92", label: "Inventory" },
@@ -34525,6 +35083,10 @@ class MenuBar {
       case "characters":
         this.charactersTab.render(this.currentLedger, this.currentManifest);
         this.panelBody.appendChild(this.charactersTab.root);
+        break;
+      case "bplots":
+        this.bplotsTab.render(this.currentLedger);
+        this.panelBody.appendChild(this.bplotsTab.root);
         break;
       case "wardrobe":
         this.wardrobeTab.render(this.currentLedger);

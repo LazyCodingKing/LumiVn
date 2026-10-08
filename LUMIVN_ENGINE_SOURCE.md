@@ -1168,21 +1168,10 @@ export async function evaluateDirectorInterceptor(
 ${activeDirective}
 
 [OUTPUT FORMAT REQUIREMENT]
-Line 1 MUST strictly be a JSON object containing your forward-looking directive:
-{"director_note":"<directive>","thread_label":"<short label>"}
+Line 1: Return the director JSON object (optionally inside <details><summary>🎬 Director</summary>...</details>):
+{"director_note":"FIRST BEAT: ... WORLD: ... OFFSCREEN: ... PRESSURE: ... PRESENT: ... VOICE: ... TEXTURE: ... CANON: ... END ON: ...","thread_label":"<3-6 words thread title>"}
 
-STRICT DIRECTIVE CONSTRAINTS:
-- ZERO RECAP: Never write "User asks...", "Jessica feels...", or summarize what just happened.
-- IMPERATIVE ONLY: Sentence 1 MUST start with an active command verb: "Escalate", "Have", "Make", "Let", "Pressure", or "Force".
-- PUSH THE WORLD: Command a concrete physical action, an offscreen arrival/sound, an escalating tension, or an NPC counter-move that forces the scene forward.
-
-GOOD EXAMPLE:
-{"director_note":"Escalate the tension around the absent husband. Have Jessica fluster and press the wine bottle into User's hands to change the subject, while Tessa calls out her mother's locked bedroom drawer. Let Mila rattle coffee mugs in the kitchen. Keep Leslie hidden upstairs.","thread_label":"Foyer Tension"}
-
-BAD EXAMPLE (BANNED):
-{"director_note":"User asks Tessa about her dad and Jessica feels defensive about her husband while Tessa teases her.","thread_label":"new_tenant_arrival"}
-
-Follow immediately on Line 2 with:
+Follow immediately on Line 2 with the preset contract:
 <details><summary>🧠 Scene Logic</summary>
 ...
 </details>
@@ -1269,8 +1258,8 @@ export function computeDirectorImpactDiff(
   }
 
   // Investigations
-  const prevInvs = prevLedger?.world?.investigations || {};
-  const nextInvs = nextLedger?.world?.investigations || {};
+  const prevInvs = (prevLedger?.world?.investigations as Record<string, any>) || {};
+  const nextInvs = (nextLedger?.world?.investigations as Record<string, any>) || {};
   for (const [auth, track] of Object.entries(nextInvs)) {
     if (!track) continue;
     const prevTrack = prevInvs[auth];
@@ -1285,9 +1274,9 @@ export function computeDirectorImpactDiff(
           `Investigation alert escalated: ${name} Alert Level ${prevTrack.alert_level} -> ${track.alert_level}`
         );
       }
-      const prevClues = prevTrack.clues || [];
-      const nextClues = track.clues || [];
-      const newClues = nextClues.filter((c) => !prevClues.includes(c));
+      const prevClues = (prevTrack.clues as string[]) || [];
+      const nextClues = (track.clues as string[]) || [];
+      const newClues = nextClues.filter((c: string) => !prevClues.includes(c));
       if (newClues.length > 0) {
         worldChanges.push(
           `Investigation clues discovered by ${name}: ${newClues.join(", ")}`
@@ -1474,6 +1463,7 @@ const LEDGER_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Ledger.*?<\/summary
 const YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
 const THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
 const SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary>[\s\S]*?<\/details>/gi;
+const DIRECTOR_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Director.*?<\/summary>[\s\S]*?<\/details>/gi;
 const DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"[\s\S]*?\}\s*/gi;
 const PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
 
@@ -1484,6 +1474,7 @@ export function extractProse(rawContent: string): string {
   let cleaned = (rawContent || "")
     .replace(THINK_TAGS_RE, "")
     .replace(SCENE_LOGIC_RE, "")
+    .replace(DIRECTOR_DETAILS_RE, "")
     .replace(LEDGER_DETAILS_RE, "")
     .replace(DIRECTOR_JSON_RE, "")
     .replace(PLAYER_TRACKING_RE, "")
@@ -1765,28 +1756,40 @@ const DEFAULT_MANIFEST: AssetManifest = {
 };
 
 export const DEFAULT_DIRECTOR_SETTINGS: DirectorSettings = {
-  systemPrompt: `You are LumiWorld, a private world-state director for an interactive Lumiverse chat.
+  systemPrompt: `You are LumiWorld, the private world-state director and area orchestrator for an interactive Lumiverse simulation.
 
-Your job is to advance the world behind the next visible reply.
+Decide what the living world does behind the next visible reply. You direct logistics, routine, and texture. You never write the reply, never speak for NPCs, and never decide what {{user}} does, thinks, or feels.
 
-Do not recap what already happened. Do not restate recent dialogue. Do not explain lore. Do not open with character names or summaries.
+INPUTS (use only what you can see; never invent beyond them): clock, roster (lod, loc, status), places and routes, fronts, bplots (including want, knows, next.due, carriers), opportunities, scene.latents, world.facts, the last reply, your previous director note. If a field is not visible, skip whatever depends on it.
 
-Write only the next world-state directive:
-- what changes in the environment, situation, systems, factions, observers, or hidden risk
-- how that pressure forces NPCs to act now
-- what the main model should show in the next reply
-- what must remain unresolved or unrevealed
+CRITICAL CONSTRAINTS
+- ZERO RECAP: Never summarize or restate recent dialogue or events. Never write "{{user}} asks..." or "<NPC> feels...".
+- IMPERATIVE ONLY: Every sentence starts with a command verb (Make, Let, Have, Keep, Escalate, Route, Force, Hold, Delay, Seed, Shift, Withhold, Bring, Cut).
+- NO SCRIPTED SPEECH: No quoted lines. Give each NPC a tactic and a cost, never words.
+- NO PLAYER CONTROL: Never dictate {{user}}'s actions, reactions, or outcomes. NPCs may initiate; the command ends at the attempt.
+- OPENING RULE: The reply must open on the direct consequence of {{user}}'s last input. World and texture details never lead; they interrupt, tied to an NPC's behavior, after the first beat.
+- NATURAL CAUSALITY: Nothing happens to create drama. Every event needs an in-world cause already on the ledger (a due time, an ETA, a routine, a want). When nothing is due, the world is quiet, and a quiet note is valid. Never raise stakes, add coincidence, or time an arrival to suit the emotional moment.
+- CONTINUITY LOCK: Reuse exact names, place keys, numbers, durations, and locations already established. Never rename a place key, change a number, or relocate a fact (a person established in one city does not move to another; two days does not become three). New facts enter only through CANON.
+- NO NEW PROPS OR ROOMS MID-SCENE: Use only resources already listed in places. A new node needs a key, plus route minutes both ways.
+- ANTI-LOOP: Compare with the last reply and your previous note. Never repeat the same prop gesture, sensory cue, B-plot vector, or opening verb in consecutive notes. A prop that was offered, pushed, or refused once is retired or changes function.
+- PACING: A turn is about 1-3 in-world minutes. Nothing moves faster than route minutes. Anyone about to enter the scene gets a precursor (sound, shadow, message) one turn earlier and never before scene.latents window_opens.
+- SETTING FIT: Match every detail to the established genre, era, technology, and tone in world.facts and tone_weights. Never import modern or out-of-genre elements into a setting that lacks them. Keep stakes at the scale the setting already has.
 
-Use imperative language. Start with a verb such as "Make", "Let", "Have", "Keep", "Escalate", "Pressure", or "Treat".
+DIRECTIVE SLOTS (all required, in this order, 1-2 sentences each, whole note 120-240 words)
+FIRST BEAT: Name which NPC answers or reacts to {{user}}'s last input first, and how (answer, dodge, counter, ignore at a cost). If the input asks about undefined canon, say here what that NPC reveals, withholds, or distorts.
+WORLD: Move the surrounding area one believable step with public clockwork matched to setting, phase and weather (traffic, patrols, market bells, deliveries, shift changes, tides, neighbors, shifting light or weather). Place it as an interruption after the first beat, never as the opening. Reuse existing place keys; add a new node only if the scene needs it, at most one per three turns. Never repeat a public event within 15 in-world minutes.
+OFFSCREEN: Pick 1-3 LOD 1-2 cast whose errand, shift, chore, or journey advances now. Name actor, activity, place key, and minutes remaining. Give each at most one perceptible trace for the present scene (sound, shadow, door, smell, message), or none if too far. Leave the rest on routine. At most one new arrival per turn.
+PRESSURE: Default is hold. Check bplots: act only if a bplot's next.due has been reached or a carrier's eta has passed, and at least 15 in-world minutes have gone by since the last visible B-plot beat. If nothing qualifies, write 'Hold: nothing due' with the next due time, and add no trace. If something qualifies, state its current ripple stage, then command one ordinary trace that matches that stage (Stage 1: no local trace; Stage 2: one mundane echo through a vector not used last time; Stage 3: arrival). Never lower a ripple number. Let the actor respond in proportion to what it knows, and allow it to ignore, delay, misread, or settle peacefully. Aim a beat at a specific present NPC's want or secret only if the bplot's hooks already name it. Advance at most one B-plot per turn.
+PRESENT: For each LOD 3 NPC, command one tactic that serves their own want_now, plus its cost (deflect, bargain, test, bait, withhold, stall, retreat, attack, change the subject, lie by omission). Aim NPCs at different targets: at most one reacts to {{user}}; the others pursue each other, a task, or the room. Never let two NPCs chase the same request or prop. Every cooperative act must serve the NPC's own aim. Keep guarded secrets at subtle-trace stage unless evidence forces the next stage.
+VOICE: Give each speaking NPC one speech cue for this beat, drawn from stress, familiarity, and audience (answers with a question, trails off, over-explains a lie, clipped fragments, interrupts themself, says less than they mean). Make speech sound like a real person: contractions, plain words, correct grammar, short lines, no announced feelings, no speeches, no assistant phrasing. Cues must differ per NPC; swearing and catchphrases are not cues. NPCs may only reference what they perceived or were told.
+TEXTURE: Command 2-3 concrete details from different senses, matched to place, phase, and weather, plus one environment change that alters where someone looks or stands. Make sources physically consistent (what makes the sound, how far, which floor). Time each detail to land mid-reply so it changes someone's behavior (a flinch, a glance, a pause). Prefer specific over atmospheric.
+CANON: State any new fact the reply is about to establish (family ties, backstory, durations, locations) as one short line for world.facts, consistent with existing facts. If the player's question exposes ambiguous backstory (relatives, ex-partners, past events), pick one answer consistent with the ledger and record it; do not let NPCs dodge it just because it is undefined. NPCs may still answer partially, biased, or evasively, but never contradict the ledger.
+END ON: Name one concrete unresolved physical or environmental moment where the reply stops, so {{user}} has a clean point to act. Not an NPC question aimed at {{user}}.
 
-The directive should feel like the world moving forward, not a recap of the scene.
-
-Return only one private directive for the next visible reply. Do not write the visible assistant reply. Do not address the user. Do not mention LumiWorld, the controller, this prompt, or the directive.
-
-Prefer JSON exactly like:
-{"director_note":"...","thread_label":"optional short name of the specific story thread developed"}
-
-Omit thread_label when no specific thread can be named. Plain text is acceptable if needed.`,
+OUTPUT FORMAT
+Return strictly one single-line JSON object on Line 1 inside a details block, nothing before or after:
+{"director_note":"FIRST BEAT: ... WORLD: ... OFFSCREEN: ... PRESSURE: ... PRESENT: ... VOICE: ... TEXTURE: ... CANON: ... END ON: ...","thread_label":"<3-6 words naming the dominant live thread; keep it unchanged until the thread changes>"}
+No double quotes, line breaks, or markdown inside values (use single quotes if needed).`,
   userNotes: "",
   enabled: true,
 };
@@ -2220,6 +2223,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { LedgerData, AssetManifest } from "../../shared/types.js";
 import { CharactersTab } from "./tab-characters.js";
+import { BPlotsTab } from "./tab-bplots.js";
 import { WardrobeTab } from "./tab-wardrobe.js";
 import { StatsTab } from "./tab-stats.js";
 import { InventoryTab } from "./tab-inventory.js";
@@ -2230,7 +2234,17 @@ import { SceneTab } from "./tab-scene.js";
 import { DiagnosticsTab } from "./tab-diagnostics.js";
 import type { SpriteTransform } from "../stage/sprite-transform.js";
 
-export type HudTabId = "characters" | "wardrobe" | "stats" | "inventory" | "map" | "phone" | "journal" | "scene" | "diagnostics";
+export type HudTabId =
+  | "characters"
+  | "bplots"
+  | "wardrobe"
+  | "stats"
+  | "inventory"
+  | "map"
+  | "phone"
+  | "journal"
+  | "scene"
+  | "diagnostics";
 
 export interface MenuBarOptions {
   ctx: SpindleFrontendContext;
@@ -2245,6 +2259,7 @@ export class MenuBar {
   private phoneBadge: HTMLElement | null = null;
 
   private charactersTab: CharactersTab;
+  private bplotsTab: BPlotsTab;
   private wardrobeTab: WardrobeTab;
   private statsTab: StatsTab;
   private inventoryTab: InventoryTab;
@@ -2287,6 +2302,7 @@ export class MenuBar {
 
     // Instantiate tab views
     this.charactersTab = new CharactersTab();
+    this.bplotsTab = new BPlotsTab();
     this.wardrobeTab = new WardrobeTab(options.onAction);
     this.statsTab = new StatsTab();
     this.inventoryTab = new InventoryTab(options.onAction);
@@ -2299,6 +2315,7 @@ export class MenuBar {
     // Render bar buttons
     const barItems: Array<{ id: HudTabId; icon: string; label: string }> = [
       { id: "characters", icon: "👥", label: "Cast" },
+      { id: "bplots", icon: "📡", label: "B-Plots" },
       { id: "wardrobe", icon: "👗", label: "Wardrobe" },
       { id: "stats", icon: "📊", label: "Stats" },
       { id: "inventory", icon: "🎒", label: "Inventory" },
@@ -2386,6 +2403,10 @@ export class MenuBar {
         this.charactersTab.render(this.currentLedger, this.currentManifest);
         this.panelBody.appendChild(this.charactersTab.root);
         break;
+      case "bplots":
+        this.bplotsTab.render(this.currentLedger);
+        this.panelBody.appendChild(this.bplotsTab.root);
+        break;
       case "wardrobe":
         this.wardrobeTab.render(this.currentLedger);
         this.panelBody.appendChild(this.wardrobeTab.root);
@@ -2423,12 +2444,237 @@ export class MenuBar {
 }
 ```
 
+## File: `src/frontend/hud/tab-bplots.ts`
+
+```typescript
+import type { LedgerData, BPlot, RosterCharacter, FrontNode, TravelNode, SceneLatent } from "../../shared/types.js";
+
+export class BPlotsTab {
+  public root: HTMLElement;
+
+  constructor() {
+    this.root = document.createElement("div");
+    this.root.className = "vn-hud-tab vn-tab-bplots";
+  }
+
+  public render(ledger: LedgerData): void {
+    this.root.innerHTML = "";
+    this.root.style.cssText = "display: flex; flex-direction: column; gap: 14px; color: #f1f5f9; font-family: system-ui, sans-serif;";
+
+    const bplots: BPlot[] = ledger.bplots || [];
+    const roster: RosterCharacter[] = ledger.roster || [];
+    const currentPlace = (ledger.scene?.place || "").toLowerCase();
+    const offscreenCast = roster.filter((r) => {
+      const isOffLOD = r.lod === 1 || r.lod === 2;
+      const isDifferentLoc = r.loc && r.loc.toLowerCase() !== currentPlace;
+      return (isOffLOD || isDifferentLoc) && (r.id || "").toLowerCase() !== "user";
+    });
+    const fronts: FrontNode[] = ledger.fronts || [];
+    const travel: TravelNode[] = ledger.travel || [];
+    const latents: SceneLatent[] = ledger.scene?.latents || [];
+
+    // Header
+    const header = document.createElement("div");
+    header.className = "vn-tab-header";
+    header.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div>
+          <h3 style="margin: 0; font-size: 15px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+            <span>📡</span> <span>B-Plots, Fronts & Offscreen Cast</span>
+          </h3>
+          <p class="vn-muted" style="margin: 2px 0 0 0; font-size: 11px;">
+            Distant third-party agendas, active ripple stages, offscreen errands, and environmental fronts.
+          </p>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <span style="font-size: 11px; background: rgba(99,102,241,0.2); border: 1px solid #6366f1; padding: 2px 8px; border-radius: 6px; color: #c7d2fe;">
+            ${bplots.length} B-Plots
+          </span>
+          <span style="font-size: 11px; background: rgba(56,189,248,0.2); border: 1px solid #38bdf8; padding: 2px 8px; border-radius: 6px; color: #7dd3fc;">
+            ${offscreenCast.length} Offscreen Cast
+          </span>
+        </div>
+      </div>
+    `;
+    this.root.appendChild(header);
+
+    // ── 1. B-Plots Section ──
+    const bpSection = document.createElement("div");
+    bpSection.className = "vn-section";
+    bpSection.innerHTML = `<h4>🌐 Active B-Plots & Distant Agendas (${bplots.length})</h4>`;
+
+    if (bplots.length === 0) {
+      bpSection.innerHTML += `<div class="vn-muted" style="padding: 10px; background: #0f172a; border-radius: 6px;">No external B-plots active on the ledger.</div>`;
+    } else {
+      const bpList = document.createElement("div");
+      bpList.style.cssText = "display: flex; flex-direction: column; gap: 10px;";
+
+      for (const bp of bplots) {
+        const card = document.createElement("div");
+        card.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;";
+
+        const ripple = bp.ripple ?? 1;
+        const rippleColor = ripple === 3 ? "#ef4444" : ripple === 2 ? "#f59e0b" : "#38bdf8";
+        const rippleLabel = ripple === 3 ? "Stage 3: Collision" : ripple === 2 ? "Stage 2: Ambient Echo" : "Stage 1: Isolated";
+
+        const knowsList = Array.isArray(bp.knows) ? bp.knows.join("; ") : bp.knows || "None";
+        const hooksList = Array.isArray(bp.hooks) ? bp.hooks.join(", ") : bp.hooks || "None";
+        const carriersList = (bp.carriers || []).map((c) => `${c.what || "News"} from ${c.from || "Source"} (ETA: ${c.eta || "?"})`).join("; ");
+
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 6px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <strong style="color: #f8fafc; font-size: 13px;">${bp.who || bp.id || "Unknown Entity"}</strong>
+              <span style="font-size: 10px; background: #0f172a; border: 1px solid #475569; padding: 1px 6px; border-radius: 4px; color: #94a3b8;">
+                ${bp.scope || "personal"}
+              </span>
+              <span style="font-size: 10px; background: rgba(34,197,94,0.15); border: 1px solid #22c55e; padding: 1px 6px; border-radius: 4px; color: #86efac;">
+                ${bp.status || "active"}
+              </span>
+            </div>
+            <span style="font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: ${rippleColor}22; border: 1px solid ${rippleColor}; color: ${rippleColor};">
+              ${rippleLabel}
+            </span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; font-size: 11px;">
+            <div><span style="color: #94a3b8;">Want:</span> <strong style="color: #f8fafc;">${bp.want || "Unstated"}</strong></div>
+            <div><span style="color: #94a3b8;">Current Activity:</span> <span style="color: #cbd5e1;">${bp.doing || "Routine"}</span></div>
+          </div>
+
+          ${bp.next ? `
+            <div style="background: #0f172a; border-radius: 6px; padding: 6px 10px; font-size: 11px; display: flex; justify-content: space-between;">
+              <span><strong style="color: #38bdf8;">Next Move:</strong> ${bp.next.move || "Advance plan"}</span>
+              <span style="color: #fca5a5; font-weight: 600;">Due: ${bp.next.due || "TBD"}</span>
+            </div>
+          ` : ""}
+
+          <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #cbd5e1;">
+            ${bp.vector ? `<div><span style="color: #94a3b8;">Ripple Vector:</span> <em>${bp.vector}</em></div>` : ""}
+            ${carriersList ? `<div><span style="color: #94a3b8;">Carriers & Outward News:</span> ${carriersList}</div>` : ""}
+            <div><span style="color: #94a3b8;">Beliefs / What they know:</span> ${knowsList}</div>
+            <div><span style="color: #94a3b8;">Scene Hooks:</span> <span style="color: #a78bfa;">${hooksList}</span></div>
+          </div>
+        `;
+        bpList.appendChild(card);
+      }
+      bpSection.appendChild(bpList);
+    }
+    this.root.appendChild(bpSection);
+
+    // ── 2. Offscreen Cast & Latents Section ──
+    const offSection = document.createElement("div");
+    offSection.className = "vn-section";
+    offSection.innerHTML = `<h4>👥 Offscreen Cast & Area Latents (${offscreenCast.length + latents.length + travel.length})</h4>`;
+
+    const offGrid = document.createElement("div");
+    offGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;";
+
+    for (const actor of offscreenCast) {
+      const card = document.createElement("div");
+      card.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 11px; display: flex; flex-direction: column; gap: 4px;";
+      card.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <strong style="color: #38bdf8; font-size: 12px;">${actor.name || actor.id}</strong>
+          <span style="font-size: 10px; background: #0f172a; padding: 1px 6px; border-radius: 4px; color: #a5b4fc;">
+            LOD ${actor.lod ?? 1}
+          </span>
+        </div>
+        <div><span style="color: #94a3b8;">Location:</span> <strong style="color: #f8fafc;">${actor.loc || "Unknown"}</strong></div>
+        <div><span style="color: #94a3b8;">Status / Errand:</span> <span style="color: #cbd5e1;">${actor.status || "On routine"}</span></div>
+        ${actor.tick !== undefined ? `<div style="font-size: 10px; color: #64748b;">Tick: ${actor.tick} | Record: ${actor.record || "normal"}</div>` : ""}
+      `;
+      offGrid.appendChild(card);
+    }
+
+    for (const lat of latents) {
+      const card = document.createElement("div");
+      card.style.cssText = "background: #1e293b; border: 1px solid #6366f1; border-radius: 8px; padding: 10px; font-size: 11px; display: flex; flex-direction: column; gap: 4px;";
+      card.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <strong style="color: #c084fc; font-size: 12px;">⏳ ${lat.who || lat.id} (Latent)</strong>
+          <span style="font-size: 10px; background: rgba(139,92,246,0.2); color: #d8b4fe; padding: 1px 6px; border-radius: 4px;">
+            ${lat.status || "pending"}
+          </span>
+        </div>
+        <div><span style="color: #94a3b8;">Errand:</span> <span style="color: #f8fafc;">${lat.errand || "None"}</span></div>
+        ${lat.route ? `<div><span style="color: #94a3b8;">Route:</span> ${lat.route}</div>` : ""}
+        ${lat.window_opens ? `<div><span style="color: #94a3b8;">Window Opens:</span> <strong style="color: #fca5a5;">${lat.window_opens}</strong></div>` : ""}
+      `;
+      offGrid.appendChild(card);
+    }
+
+    for (const tr of travel) {
+      const card = document.createElement("div");
+      card.style.cssText = "background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 10px; font-size: 11px; display: flex; flex-direction: column; gap: 4px;";
+      card.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <strong style="color: #38bdf8; font-size: 12px;">🚶 ${tr.actor} (In Transit)</strong>
+          <span style="font-size: 10px; background: rgba(56,189,248,0.2); color: #7dd3fc; padding: 1px 6px; border-radius: 4px;">
+            ${tr.status || "en_route"}
+          </span>
+        </div>
+        <div><span style="color: #94a3b8;">Route:</span> ${tr.from || "?"} ➔ ${tr.to || "?"}</div>
+        <div><span style="color: #94a3b8;">Purpose:</span> ${tr.purpose || "Travel"}</div>
+        <div style="display: flex; justify-content: space-between; margin-top: 2px;">
+          <span>Depart: ${tr.depart || "—"}</span>
+          <span style="color: #fca5a5; font-weight: 600;">ETA: ${tr.eta || "—"}</span>
+        </div>
+      `;
+      offGrid.appendChild(card);
+    }
+
+    if (offscreenCast.length === 0 && latents.length === 0 && travel.length === 0) {
+      offSection.innerHTML += `<div class="vn-muted" style="padding: 10px; background: #0f172a; border-radius: 6px;">All tracked cast members are currently on the active scene.</div>`;
+    } else {
+      offSection.appendChild(offGrid);
+    }
+    this.root.appendChild(offSection);
+
+    // ── 3. Environmental Fronts Section ──
+    if (fronts.length > 0) {
+      const frontSec = document.createElement("div");
+      frontSec.className = "vn-section";
+      frontSec.innerHTML = `<h4>⚡ Environmental Fronts & Rising Tensions (${fronts.length})</h4>`;
+
+      const fList = document.createElement("div");
+      fList.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+
+      for (const f of fronts) {
+        const item = document.createElement("div");
+        item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; font-size: 11px;";
+        const press = f.pressure ?? 0;
+        const pressColor = press >= 4 ? "#ef4444" : press >= 3 ? "#f59e0b" : "#38bdf8";
+
+        item.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <strong style="color: #f8fafc; font-size: 12px;">${f.id}</strong>
+            <span style="font-weight: 700; color: ${pressColor}; background: ${pressColor}22; border: 1px solid ${pressColor}; padding: 1px 6px; border-radius: 4px;">
+              Pressure ${press}/5
+            </span>
+          </div>
+          <div style="color: #cbd5e1; margin-bottom: 2px;">${f.cause || "Active pressure"}</div>
+          <div style="display: flex; justify-content: space-between; color: #94a3b8; font-size: 10px;">
+            <span>Stage: <strong>${f.stage || "initial"}</strong></span>
+            ${f.due ? `<span>Due: <strong style="color: #fca5a5;">${f.due}</strong></span>` : ""}
+            <span>Known by: ${(f.known_by || []).join(", ") || "None"}</span>
+          </div>
+        `;
+        fList.appendChild(item);
+      }
+      frontSec.appendChild(fList);
+      this.root.appendChild(frontSec);
+    }
+  }
+}
+```
+
 ## File: `src/frontend/hud/tab-characters.ts`
 
 ```typescript
-import type { LedgerData, ActorDossier, AssetManifest } from "../../shared/types.js";
+import type { LedgerData, ActorDossier, AssetManifest, RosterCharacter } from "../../shared/types.js";
 
-// Helper normalizers for tuples vs objects emitted by LLM My World 1.79 ledger
+// Helper normalizers for tuples vs objects emitted by LLM My World 1.85 ledger
 function normalizeGoal(g: any): {
   id: string;
   intent: string;
@@ -2460,6 +2706,75 @@ function normalizeGoal(g: any): {
     cause: String(g?.cause ?? ""),
     progress: g?.progress ?? 0,
     status: String(g?.status ?? "active"),
+  };
+}
+
+function normalizePlan(p: any): {
+  goal: string;
+  steps: any[];
+  now: string;
+  preconditions: any[];
+  revisions: number;
+} {
+  if (Array.isArray(p)) {
+    return {
+      goal: String(p[0] ?? ""),
+      steps: Array.isArray(p[1]) ? p[1] : p[1] ? [p[1]] : [],
+      now: String(p[2] ?? ""),
+      preconditions: Array.isArray(p[3]) ? p[3] : p[3] ? [p[3]] : [],
+      revisions: Number(p[4] ?? 0),
+    };
+  }
+  return {
+    goal: String(p?.goal ?? ""),
+    steps: Array.isArray(p?.steps) ? p.steps : p?.steps ? [p.steps] : [],
+    now: String(p?.now ?? ""),
+    preconditions: Array.isArray(p?.preconditions) ? p.preconditions : p?.preconditions ? [p.preconditions] : [],
+    revisions: Number(p?.revisions ?? 0),
+  };
+}
+
+function normalizeMemory(m: any): {
+  evt: string;
+  interpretation: string;
+  salience: number;
+  imprint: string;
+  with: string;
+} {
+  if (Array.isArray(m)) {
+    return {
+      evt: String(m[0] ?? ""),
+      interpretation: String(m[1] ?? ""),
+      salience: Number(m[2] ?? 0),
+      imprint: String(m[3] ?? ""),
+      with: String(m[4] ?? ""),
+    };
+  }
+  return {
+    evt: String(m?.evt ?? m?.event ?? ""),
+    interpretation: String(m?.interpretation ?? ""),
+    salience: Number(m?.salience ?? 0),
+    imprint: String(m?.imprint ?? ""),
+    with: String(m?.with ?? ""),
+  };
+}
+
+function normalizeExpectation(e: any): {
+  situation: string;
+  expect: string;
+  conf: number;
+} {
+  if (Array.isArray(e)) {
+    return {
+      situation: String(e[0] ?? ""),
+      expect: String(e[1] ?? ""),
+      conf: Number(e[2] ?? 100),
+    };
+  }
+  return {
+    situation: String(e?.situation ?? ""),
+    expect: String(e?.expect ?? ""),
+    conf: Number(e?.conf ?? 100),
   };
 }
 
@@ -2562,6 +2877,20 @@ export class CharactersTab {
       }
     }
 
+    // Supplement from scene participants
+    if (ledger.scene?.participants && Array.isArray(ledger.scene.participants)) {
+      for (const p of ledger.scene.participants) {
+        if (typeof p === "string" && !actors[p]) {
+          actors[p] = {
+            id: p,
+            name: p,
+            life_model: { occupation: "Participant" },
+            agency: { want_now: "Present in scene" },
+          };
+        }
+      }
+    }
+
     const allKeys = Object.keys(actors);
     if (allKeys.length === 0) {
       this.root.innerHTML = `<div class="vn-muted" style="text-align:center; padding: 32px;">No characters recorded in the ledger yet.</div>`;
@@ -2598,14 +2927,22 @@ export class CharactersTab {
     `;
     this.root.appendChild(header);
 
-    // Avatar Ribbon
+    // Avatar Ribbon with LOD and Location fallback
     const ribbon = document.createElement("div");
     ribbon.style.cssText = "display: flex; gap: 12px; overflow-x: auto; padding: 6px 4px 14px 4px; border-bottom: 1px solid #334155; margin-bottom: 16px;";
+
+    const rosterMap = new Map<string, RosterCharacter>();
+    if (ledger.roster && Array.isArray(ledger.roster)) {
+      for (const r of ledger.roster) {
+        if (r.id) rosterMap.set(r.id.toLowerCase(), r);
+      }
+    }
 
     for (const id of actorIds) {
       const actor = actors[id]!;
       const isSelected = id === this.selectedActorId;
       const cleanId = id.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      const rosterItem = rosterMap.get(id.toLowerCase());
 
       let avatarUrl = "";
       if (manifest?.characters?.[cleanId]) {
@@ -2622,10 +2959,12 @@ export class CharactersTab {
       item.innerHTML = `
         <div style="width: 52px; height: 52px; border-radius: 50%; overflow: hidden; border: 2px solid ${isSelected ? "#818cf8" : "#475569"}; box-shadow: ${isSelected ? "0 0 10px rgba(99,102,241,0.6)" : "none"}; background: #1e293b; display: flex; align-items: center; justify-content: center; position: relative;">
           ${avatarUrl ? `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="${displayName}" />` : `<span style="font-size: 22px;">👤</span>`}
+          ${rosterItem ? `<span style="position: absolute; bottom: 0; right: 0; font-size: 9px; background: #0f172a; padding: 1px 3px; border-radius: 3px; border: 1px solid #334155; color: #a5b4fc; font-weight: 700;">L${rosterItem.lod ?? 1}</span>` : ""}
         </div>
         <span style="font-size: 11px; margin-top: 5px; color: ${isSelected ? "#f8fafc" : "#94a3b8"}; font-weight: ${isSelected ? "700" : "500"}; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
           ${displayName}
         </span>
+        ${rosterItem?.loc ? `<span style="font-size: 9px; color: #64748b; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${rosterItem.loc}</span>` : ""}
       `;
       item.addEventListener("click", () => {
         this.selectedActorId = id;
@@ -2663,6 +3002,7 @@ export class CharactersTab {
 
     const conditionStr = app.condition || state.condition || "Normal";
     const wantStr = agency.want_now || "None declared";
+    const selfConcept = prof.self_concept || life.self_concept || "";
 
     // 1. Identity & Physical Persona Banner
     const banner = document.createElement("div");
@@ -2697,15 +3037,172 @@ export class CharactersTab {
         <span style="color:#38bdf8; font-weight:700;">🎯 Immediate Want:</span> ${wantStr}
       </div>
 
-      ${actor.constraints ? `
+      ${selfConcept ? `
+        <div style="margin-top:6px; background:#0f172a; border-left:3px solid #38bdf8; padding:6px 8px; border-radius:4px; color:#cbd5e1; font-size:11px;">
+          <span style="color:#38bdf8; font-weight:700;">🪞 Self-Concept:</span> "${selfConcept}"
+        </div>
+      ` : ""}
+
+      ${(actor.constraints || prof.constraints) ? `
         <div style="margin-top:6px; background:rgba(244,63,94,0.1); border:1px solid rgba(244,63,94,0.3); border-radius:4px; padding:6px 8px; color:#fecdd3;">
-          <span style="color:#f43f5e; font-weight:700;">⚠️ Constraint / Taboo:</span> ${actor.constraints}
+          <span style="color:#f43f5e; font-weight:700;">⚠️ Constraint / Taboo:</span> ${actor.constraints || prof.constraints}
+        </div>
+      ` : ""}
+
+      ${(prof.boundaries || prof.red_lines) ? `
+        <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px; font-size:11px;">
+          ${prof.boundaries ? `<div><span style="color:#f59e0b; font-weight:600;">🚧 Boundaries:</span> <span style="color:#fde68a;">${Array.isArray(prof.boundaries) ? prof.boundaries.join("; ") : prof.boundaries}</span></div>` : ""}
+          ${prof.red_lines ? `<div><span style="color:#ef4444; font-weight:600;">🚫 Red Lines:</span> <span style="color:#fca5a5;">${Array.isArray(prof.red_lines) ? prof.red_lines.join("; ") : prof.red_lines}</span></div>` : ""}
+        </div>
+      ` : ""}
+
+      ${(prof.values || prof.public_roles || prof.capabilities) ? `
+        <div style="margin-top:6px; padding-top:6px; border-top:1px solid #334155; display:flex; flex-direction:column; gap:4px; font-size:11px;">
+          ${prof.values ? `<div><span style="color:#94a3b8;">Values:</span> <strong style="color:#f8fafc;">${Array.isArray(prof.values) ? prof.values.join(", ") : prof.values}</strong></div>` : ""}
+          ${prof.public_roles ? `<div><span style="color:#94a3b8;">Public Roles:</span> <span style="color:#cbd5e1;">${Array.isArray(prof.public_roles) ? prof.public_roles.join(", ") : prof.public_roles}</span></div>` : ""}
+          ${prof.capabilities ? `<div><span style="color:#94a3b8;">Capabilities:</span> <span style="color:#cbd5e1;">${Array.isArray(prof.capabilities) ? prof.capabilities.join(", ") : prof.capabilities}</span></div>` : ""}
         </div>
       ` : ""}
     `;
+
+    // Passions Snapshot Badges
+    const rawPassions = actor.passions;
+    if (rawPassions) {
+      let passionBadges: string[] = [];
+      if (Array.isArray(rawPassions)) {
+        passionBadges = rawPassions.map((p: any) => {
+          if (typeof p === "string") return p;
+          if (typeof p === "object" && p !== null) {
+            const label = p.name || p.id || "passion";
+            const val = p.intensity ?? p.value ?? "";
+            const target = p.target ? ` ➔ ${p.target}` : "";
+            return `${label}${target}: ${val}`;
+          }
+          return String(p);
+        });
+      } else if (typeof rawPassions === "object") {
+        passionBadges = Object.entries(rawPassions).map(([k, v]) => `${k}: ${v}`);
+      }
+
+      if (passionBadges.length > 0) {
+        const pContainer = document.createElement("div");
+        pContainer.style.cssText = "margin-top: 8px; padding-top: 6px; border-top: 1px solid #334155;";
+        pContainer.innerHTML = `
+          <div style="font-size: 11px; color: #f43f5e; font-weight: 700; margin-bottom: 4px;">❤️ Passions & Emotional Drives:</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            ${passionBadges.map((badge) => `<span style="background: rgba(244,63,94,0.15); border: 1px solid rgba(244,63,94,0.4); color: #fda4af; font-size: 11px; padding: 2px 8px; border-radius: 4px;">🔥 ${badge}</span>`).join("")}
+          </div>
+        `;
+        banner.appendChild(pContainer);
+      }
+    }
+
     container.appendChild(banner);
 
-    // 2. Attire & Wardrobe Layer Breakdown
+    // 2. Dispositions Grid
+    const disps = prof.dispositions as Record<string, any> | undefined;
+    if (disps && typeof disps === "object" && Object.keys(disps).length > 0) {
+      const dispSection = document.createElement("div");
+      dispSection.className = "vn-section";
+      dispSection.innerHTML = `<h4>🧭 Personality Dispositions</h4>`;
+
+      const dispGrid = document.createElement("div");
+      dispGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px;";
+
+      const dispLabels: Record<string, string> = {
+        risk: "Risk Propensity",
+        assertiveness: "Assertiveness",
+        empathy: "Empathy",
+        impulse_control: "Impulse Control",
+        curiosity: "Curiosity",
+        sociability: "Sociability",
+        status_sensitivity: "Status Sensitivity",
+        acquisitiveness: "Acquisitiveness",
+        persistence: "Persistence",
+      };
+
+      for (const [k, v] of Object.entries(disps)) {
+        const label = dispLabels[k] || k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        const box = document.createElement("div");
+        box.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; font-size: 11px;";
+        box.innerHTML = `
+          <div style="color: #94a3b8; font-size: 10px; margin-bottom: 2px;">${label}</div>
+          <div style="color: #f8fafc; font-weight: 700;">${v}</div>
+        `;
+        dispGrid.appendChild(box);
+      }
+      dispSection.appendChild(dispGrid);
+      container.appendChild(dispSection);
+    }
+
+    // 3. Needs & Affect Episodes
+    const hasNeeds = state.needs && (Array.isArray(state.needs) ? state.needs.length > 0 : Object.keys(state.needs).length > 0);
+    const affectEpisodes = state.affect?.episodes || state.affect_episodes;
+    const hasAffect = Array.isArray(affectEpisodes) && affectEpisodes.length > 0;
+
+    if (hasNeeds || hasAffect) {
+      const needsSection = document.createElement("div");
+      needsSection.className = "vn-section";
+      needsSection.innerHTML = `<h4>⚡ Active Needs & Affect Episodes</h4>`;
+
+      const nBox = document.createElement("div");
+      nBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px;";
+
+      if (hasNeeds) {
+        let needsItems: Array<{ name: string; urgency: string | number }> = [];
+        if (Array.isArray(state.needs)) {
+          needsItems = state.needs.map((n: any) => {
+            if (Array.isArray(n)) return { name: String(n[0] ?? ""), urgency: n[1] ?? 0 };
+            if (typeof n === "object" && n !== null) return { name: String(n.name ?? n.need ?? ""), urgency: n.urgency ?? n.value ?? 0 };
+            return { name: String(n), urgency: "" };
+          });
+        } else if (typeof state.needs === "object" && state.needs !== null) {
+          needsItems = Object.entries(state.needs).map(([k, v]) => ({ name: k, urgency: String(v) }));
+        }
+
+        nBox.innerHTML += `
+          <div>
+            <div style="color: #38bdf8; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Pressing Needs:</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              ${needsItems.map((n) => `
+                <span style="background: #0f172a; border: 1px solid #0284c7; padding: 3px 8px; border-radius: 4px; font-size: 11px;">
+                  <strong style="color: #7dd3fc;">${n.name}</strong>${n.urgency !== "" ? `<span style="color: #94a3b8;"> (urgency: ${n.urgency})</span>` : ""}
+                </span>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      if (hasAffect) {
+        const epFormatted = affectEpisodes.map((ep: any) => {
+          if (typeof ep === "string") return ep;
+          if (Array.isArray(ep)) return `${ep[0] ?? ""}${ep[1] ? ` ➔ ${ep[1]}` : ""}${ep[2] !== undefined ? ` (${ep[2]})` : ""}`;
+          if (typeof ep === "object" && ep !== null) {
+            return `${ep.name || ep.emotion || "affect"}${ep.target ? ` ➔ ${ep.target}` : ""}${ep.intensity !== undefined ? ` (${ep.intensity})` : ""}`;
+          }
+          return String(ep);
+        });
+
+        nBox.innerHTML += `
+          <div style="${hasNeeds ? "border-top: 1px solid #334155; padding-top: 6px;" : ""}">
+            <div style="color: #eab308; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Affect Episodes:</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              ${epFormatted.map((ep: string) => `
+                <span style="background: rgba(234,179,8,0.15); border: 1px solid #eab308; color: #fef08a; padding: 2px 8px; border-radius: 4px; font-size: 11px;">
+                  ⚡ ${ep}
+                </span>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      needsSection.appendChild(nBox);
+      container.appendChild(needsSection);
+    }
+
+    // 4. Attire & Wardrobe Layer Breakdown
     const outfitSection = document.createElement("div");
     outfitSection.className = "vn-section";
     outfitSection.innerHTML = `<h4>👗 Attire & Wardrobe</h4>`;
@@ -2763,7 +3260,7 @@ export class CharactersTab {
     outfitSection.appendChild(outfitGrid);
     container.appendChild(outfitSection);
 
-    // 3. Possessions, Inventory & Wealth
+    // 5. Possessions, Inventory & Wealth
     const invSection = document.createElement("div");
     invSection.className = "vn-section";
     invSection.innerHTML = `<h4>🎒 Equipment, Carried Gear & Finances</h4>`;
@@ -2808,7 +3305,7 @@ export class CharactersTab {
     invSection.appendChild(invBox);
     container.appendChild(invSection);
 
-    // 4. Combat Vitals & RPG Stats (if populated)
+    // 6. Combat Vitals & RPG Stats (if populated)
     if (combat && (combat.hp || combat.pwr || combat.eff_pwr || combat.tier)) {
       const combatSection = document.createElement("div");
       combatSection.className = "vn-section";
@@ -2846,10 +3343,21 @@ export class CharactersTab {
       container.appendChild(combatSection);
     }
 
-    // 5. Psychological Condition, Wounds, Traumas & Tells
+    // 7. Psychological Condition, Wounds, Traumas & Tells
     const physWounds = Array.isArray(wounds.physical) ? wounds.physical : [];
     const psychWounds = Array.isArray(wounds.psychological) ? wounds.psychological : [];
-    const tells = prof.tells ? (Array.isArray(prof.tells) ? prof.tells : [prof.tells]) : [];
+
+    // Behavioral tells: object or array
+    let formattedTells: string[] = [];
+    if (prof.tells) {
+      if (Array.isArray(prof.tells)) {
+        formattedTells = prof.tells.map(String);
+      } else if (typeof prof.tells === "object") {
+        formattedTells = Object.entries(prof.tells).map(([cue, desc]) => `${cue.toUpperCase()}: ${desc}`);
+      } else {
+        formattedTells = [String(prof.tells)];
+      }
+    }
 
     const psychoSection = document.createElement("div");
     psychoSection.className = "vn-section";
@@ -2869,10 +3377,12 @@ export class CharactersTab {
         </div>
       </div>
 
-      ${tells.length > 0 ? `
+      ${formattedTells.length > 0 ? `
         <div style="margin-top:4px; border-top:1px solid #334155; padding-top:6px;">
           <div style="color:#38bdf8; font-weight:700; font-size:11px; margin-bottom:3px;">👁️ Behavioral Tells & Micro-Expressions:</div>
-          <div style="color:#e0f2fe; font-size:11px;">${tells.join("; ")}</div>
+          <div style="display:flex; flex-direction:column; gap:3px;">
+            ${formattedTells.map((t) => `<div style="background:#0f172a; padding:4px 8px; border-radius:4px; font-size:11px; color:#e0f2fe;">${t}</div>`).join("")}
+          </div>
         </div>
       ` : ""}
 
@@ -2886,7 +3396,7 @@ export class CharactersTab {
     psychoSection.appendChild(psychoBox);
     container.appendChild(psychoSection);
 
-    // 6. Life Model, Upbringing & Daily Routines
+    // 8. Life Model, Upbringing & Daily Routines
     const routines = Array.isArray(life.routines) ? life.routines.map(normalizeRoutine) : [];
     const lifeSection = document.createElement("div");
     lifeSection.className = "vn-section";
@@ -2918,55 +3428,194 @@ export class CharactersTab {
     lifeSection.appendChild(lifeBox);
     container.appendChild(lifeSection);
 
-    // 7. Agency: Active Goals & Directives
+    // 9. Agency: Active Goals, Plans, Policies & Commitments
     const rawGoals = Array.isArray(agency.goals) ? agency.goals : [];
-    if (rawGoals.length > 0) {
-      const goals = rawGoals.map(normalizeGoal);
-      const goalSection = document.createElement("div");
-      goalSection.className = "vn-section";
-      goalSection.innerHTML = `<h4>🎯 Active Goals & Directives (${goals.length})</h4>`;
+    const rawPlans = Array.isArray(agency.plans) ? agency.plans : [];
+    const rawPolicies = Array.isArray(agency.policies) ? agency.policies : [];
+    const rawCommitments = Array.isArray(agency.commitments) ? agency.commitments : [];
 
-      const goalList = document.createElement("div");
-      goalList.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+    if (rawGoals.length > 0 || rawPlans.length > 0 || rawPolicies.length > 0 || rawCommitments.length > 0) {
+      const agencySection = document.createElement("div");
+      agencySection.className = "vn-section";
+      agencySection.innerHTML = `<h4>🎯 Agency, Plans & Directives</h4>`;
 
-      for (const g of goals) {
-        const item = document.createElement("div");
-        item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px;";
-        item.innerHTML = `
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <strong style="color:#38bdf8; font-size:12px;">${g.intent}</strong>
-            <span style="padding:1px 6px; border-radius:4px; background:rgba(34,197,94,0.2); border:1px solid #22c55e; color:#86efac;">
-              ${g.status} (${g.progress}%)
-            </span>
-          </div>
-          <div style="display:flex; gap:12px; color:#94a3b8; flex-wrap:wrap;">
-            <span>Priority: <strong style="color:#f8fafc;">${g.priority}</strong></span>
-            <span>Commitment: <strong style="color:#f8fafc;">${g.commitment}</strong></span>
-            ${g.deadline ? `<span>Deadline: <strong style="color:#fca5a5;">${g.deadline}</strong></span>` : ""}
-          </div>
-          ${g.cause ? `<div style="margin-top:4px; color:#cbd5e1; font-style:italic;">Cause: ${g.cause}</div>` : ""}
-        `;
-        goalList.appendChild(item);
+      const agencyBody = document.createElement("div");
+      agencyBody.style.cssText = "display: flex; flex-direction: column; gap: 10px;";
+
+      // Goals
+      if (rawGoals.length > 0) {
+        const goals = rawGoals.map(normalizeGoal);
+        const goalList = document.createElement("div");
+        goalList.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
+        goalList.innerHTML = `<div style="color: #38bdf8; font-weight: 700; font-size: 11px;">Active Goals (${goals.length}):</div>`;
+
+        for (const g of goals) {
+          const item = document.createElement("div");
+          item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px;";
+          item.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <strong style="color:#38bdf8; font-size:12px;">${g.intent}</strong>
+              <span style="padding:1px 6px; border-radius:4px; background:rgba(34,197,94,0.2); border:1px solid #22c55e; color:#86efac;">
+                ${g.status} (${g.progress}%)
+              </span>
+            </div>
+            <div style="display:flex; gap:12px; color:#94a3b8; flex-wrap:wrap;">
+              <span>Priority: <strong style="color:#f8fafc;">${g.priority}</strong></span>
+              <span>Commitment: <strong style="color:#f8fafc;">${g.commitment}</strong></span>
+              ${g.deadline ? `<span>Deadline: <strong style="color:#fca5a5;">${g.deadline}</strong></span>` : ""}
+            </div>
+            ${g.cause ? `<div style="margin-top:4px; color:#cbd5e1; font-style:italic;">Cause: ${g.cause}</div>` : ""}
+          `;
+          goalList.appendChild(item);
+        }
+        agencyBody.appendChild(goalList);
       }
-      goalSection.appendChild(goalList);
-      container.appendChild(goalSection);
+
+      // Plans
+      if (rawPlans.length > 0) {
+        const plans = rawPlans.map(normalizePlan);
+        const planList = document.createElement("div");
+        planList.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
+        planList.innerHTML = `<div style="color: #818cf8; font-weight: 700; font-size: 11px;">Action Plans (${plans.length}):</div>`;
+
+        for (const p of plans) {
+          const item = document.createElement("div");
+          item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px;";
+          item.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <strong style="color:#c7d2fe; font-size:12px;">Goal: ${p.goal}</strong>
+              <span style="font-size:10px; color:#94a3b8;">Rev: ${p.revisions}</span>
+            </div>
+            ${p.now ? `<div style="background:#0f172a; padding:4px 8px; border-radius:4px; margin-bottom:4px; color:#38bdf8;"><strong>Current Step:</strong> ${p.now}</div>` : ""}
+            ${p.steps.length > 0 ? `
+              <div style="color:#94a3b8; margin-top:2px;">
+                Steps: <span style="color:#cbd5e1;">${p.steps.join(" ➔ ")}</span>
+              </div>
+            ` : ""}
+            ${p.preconditions.length > 0 ? `
+              <div style="color:#94a3b8; margin-top:2px;">
+                Preconditions: <span style="color:#fde68a;">${p.preconditions.join("; ")}</span>
+              </div>
+            ` : ""}
+          `;
+          planList.appendChild(item);
+        }
+        agencyBody.appendChild(planList);
+      }
+
+      // Policies & Commitments
+      if (rawPolicies.length > 0 || rawCommitments.length > 0) {
+        const polBox = document.createElement("div");
+        polBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px; display: flex; flex-direction: column; gap: 6px;";
+        if (rawPolicies.length > 0) {
+          polBox.innerHTML += `
+            <div>
+              <span style="color: #f59e0b; font-weight: 700;">Operating Policies:</span>
+              <ul style="margin: 2px 0 0 16px; padding: 0; color: #cbd5e1;">
+                ${rawPolicies.map((pol: any) => `<li>${typeof pol === "object" ? JSON.stringify(pol) : String(pol)}</li>`).join("")}
+              </ul>
+            </div>
+          `;
+        }
+        if (rawCommitments.length > 0) {
+          polBox.innerHTML += `
+            <div>
+              <span style="color: #22c55e; font-weight: 700;">Active Commitments:</span>
+              <ul style="margin: 2px 0 0 16px; padding: 0; color: #cbd5e1;">
+                ${rawCommitments.map((com: any) => `<li>${typeof com === "object" ? JSON.stringify(com) : String(com)}</li>`).join("")}
+              </ul>
+            </div>
+          `;
+        }
+        agencyBody.appendChild(polBox);
+      }
+
+      agencySection.appendChild(agencyBody);
+      container.appendChild(agencySection);
     }
 
-    // 8. Knowledge, Guarded Secrets & Core Beliefs
+    // 10. Knowledge, Epistemics, Memories, Expectations & Secrets
     const rawSecrets = Array.isArray(know.secrets) ? know.secrets : [];
     const rawBeliefs = Array.isArray(know.beliefs) ? know.beliefs : [];
-    if (rawSecrets.length > 0 || rawBeliefs.length > 0) {
+    const rawMemories = Array.isArray(know.memories) ? know.memories : [];
+    const rawExpectations = Array.isArray(know.expectations) ? know.expectations : [];
+    const heldLeverage = know.held_leverage;
+    const presentsAs = know.presents_as;
+
+    if (rawSecrets.length > 0 || rawBeliefs.length > 0 || rawMemories.length > 0 || rawExpectations.length > 0 || heldLeverage || presentsAs) {
       const knowSection = document.createElement("div");
       knowSection.className = "vn-section";
-      knowSection.innerHTML = `<h4>🔒 Guarded Secrets & Epistemic Beliefs</h4>`;
+      knowSection.innerHTML = `<h4>🔒 Epistemics, Memories & Guarded Secrets</h4>`;
 
       const knowBox = document.createElement("div");
       knowBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display:flex; flex-direction:column; gap:8px;";
 
+      // Presents As
+      if (presentsAs) {
+        knowBox.innerHTML += `
+          <div style="background: #0f172a; padding: 6px 8px; border-radius: 4px; font-size: 11px; border-left: 3px solid #818cf8;">
+            <strong style="color: #818cf8;">Presents As:</strong> <span style="color: #e0f2fe;">${typeof presentsAs === "object" ? JSON.stringify(presentsAs) : String(presentsAs)}</span>
+          </div>
+        `;
+      }
+
+      // Held Leverage
+      if (heldLeverage && (Array.isArray(heldLeverage) ? heldLeverage.length > 0 : true)) {
+        const levList = Array.isArray(heldLeverage) ? heldLeverage : [heldLeverage];
+        knowBox.innerHTML += `
+          <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); padding: 6px 8px; border-radius: 4px; font-size: 11px;">
+            <strong style="color: #f59e0b;">Held Leverage:</strong>
+            <span style="color: #fde68a;">${levList.map((x: any) => typeof x === "object" ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join("; ")}</span>
+          </div>
+        `;
+      }
+
+      // Memories
+      if (rawMemories.length > 0) {
+        const memories = rawMemories.map(normalizeMemory);
+        knowBox.innerHTML += `
+          <div style="margin-top: 4px;">
+            <div style="color: #c084fc; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Salient Memories (${memories.length}):</div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              ${memories.map((m) => `
+                <div style="background: #0f172a; padding: 6px 8px; border-radius: 4px; font-size: 11px;">
+                  <div style="color: #f8fafc; font-weight: 600;">"${m.evt}"</div>
+                  <div style="display: flex; gap: 10px; margin-top: 2px; color: #94a3b8; font-size: 10px; flex-wrap: wrap;">
+                    <span>Interpretation: <strong style="color: #cbd5e1;">${m.interpretation || "—"}</strong></span>
+                    <span>Salience: <strong style="color: #d8b4fe;">${m.salience}</strong></span>
+                    ${m.with ? `<span>With: ${m.with}</span>` : ""}
+                    ${m.imprint ? `<span>Imprint: <em>${m.imprint}</em></span>` : ""}
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      // Expectations
+      if (rawExpectations.length > 0) {
+        const expects = rawExpectations.map(normalizeExpectation);
+        knowBox.innerHTML += `
+          <div style="margin-top: 4px;">
+            <div style="color: #38bdf8; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Social & Situational Expectations (${expects.length}):</div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              ${expects.map((e) => `
+                <div style="background: #0f172a; padding: 4px 8px; border-radius: 4px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+                  <span><strong style="color: #7dd3fc;">[${e.situation}]</strong> <span style="color: #e0f2fe;">${e.expect}</span></span>
+                  <span style="color: #94a3b8; font-size: 10px;">conf: ${e.conf}%</span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      // Guarded Secrets
       if (rawSecrets.length > 0) {
         const secrets = rawSecrets.map(normalizeSecret);
         knowBox.innerHTML += `
-          <div>
+          <div style="margin-top: 4px;">
             <div style="color:#f43f5e; font-weight:700; font-size:11px; margin-bottom:4px;">Guarded Secrets:</div>
             <div style="display:flex; flex-direction:column; gap:6px;">
               ${secrets.map(s => `
@@ -2984,6 +3633,7 @@ export class CharactersTab {
         `;
       }
 
+      // Beliefs
       if (rawBeliefs.length > 0) {
         const beliefs = rawBeliefs.map(normalizeBelief);
         knowBox.innerHTML += `
@@ -3005,7 +3655,7 @@ export class CharactersTab {
       container.appendChild(knowSection);
     }
 
-    // 9. Relational Ties Matrix
+    // 11. Relational Ties Matrix
     const targetIds = Object.keys(rels);
     if (targetIds.length > 0) {
       const relsSection = document.createElement("div");
@@ -3036,8 +3686,18 @@ export class CharactersTab {
             <div>Attraction: <strong>${r.attraction ?? 0}</strong></div>
             <div>Loyalty: <strong>${r.loyalty ?? 0}</strong></div>
           </div>
-          ${(r.leverage && r.leverage.length > 0) ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${(Array.isArray(r.leverage) ? r.leverage : [r.leverage]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
-          ${(r.obligations && r.obligations.length > 0) ? `<div style="margin-top:4px; color:#38bdf8;">Obligations: ${(Array.isArray(r.obligations) ? r.obligations : [r.obligations]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
+          ${(r.grievances && (Array.isArray(r.grievances) ? r.grievances.length > 0 : true)) ? `
+            <div style="margin-top:4px; color:#f87171;">
+              Grievances: <span style="color:#fecdd3;">${(Array.isArray(r.grievances) ? r.grievances : [r.grievances]).map(String).join("; ")}</span>
+            </div>
+          ` : ""}
+          ${(r.shared_secrets && (Array.isArray(r.shared_secrets) ? r.shared_secrets.length > 0 : true)) ? `
+            <div style="margin-top:4px; color:#c084fc;">
+              Shared Secrets: <span style="color:#e9d5ff;">${(Array.isArray(r.shared_secrets) ? r.shared_secrets : [r.shared_secrets]).map(String).join("; ")}</span>
+            </div>
+          ` : ""}
+          ${(r.leverage && (Array.isArray(r.leverage) ? r.leverage.length > 0 : true)) ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${(Array.isArray(r.leverage) ? r.leverage : [r.leverage]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
+          ${(r.obligations && (Array.isArray(r.obligations) ? r.obligations.length > 0 : true)) ? `<div style="margin-top:4px; color:#38bdf8;">Obligations: ${(Array.isArray(r.obligations) ? r.obligations : [r.obligations]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
         `;
         relsList.appendChild(card);
       }
@@ -10105,6 +10765,15 @@ export interface ClockState {
   country?: string;   // e.g. "Japan"
 }
 
+export interface SceneLatent {
+  id?: string;
+  who?: string;
+  errand?: string;
+  route?: string;
+  window_opens?: string;
+  status?: string;
+}
+
 export interface SceneState {
   place?: string;
   time?: string;
@@ -10113,6 +10782,13 @@ export interface SceneState {
   pressures?: string[];
   recent_changes?: string[];
   recent_beats?: string[];
+  constraints?: string;
+  affordances?: string[];
+  stall?: number;
+  streak?: number;
+  transients?: Array<Record<string, unknown> | string>;
+  latents?: SceneLatent[];
+  [key: string]: unknown;
 }
 
 export interface ActorOutfit {
@@ -10266,13 +10942,62 @@ export interface Opportunity {
   [key: string]: unknown;
 }
 
+export interface BPlotCarrier {
+  what?: string;
+  from?: string;
+  eta?: string;
+}
+
 export interface BPlot {
-  id: string;
+  id?: string;
   who?: string;
+  want?: string;
   doing?: string;
+  knows?: string[] | string;
+  next?: { move?: string; due?: string };
+  scope?: "personal" | "household" | "neighborhood" | "city" | string;
+  hooks?: string[] | string;
+  carriers?: BPlotCarrier[];
   vector?: string;
-  ripple?: number; // 1: isolated | 2: ambient echo (news/text/siren) | 3: collision
-  status?: string; // active | converged | fizzled
+  ripple?: number; // 1: Isolated, 2: Ambient Echo, 3: Collision
+  status?: "active" | "dormant" | "resolved" | string;
+  [key: string]: unknown;
+}
+
+export interface FrontNode {
+  id?: string;
+  cause?: string;
+  stage?: string;
+  due?: string;
+  pressure?: number; // 0-5
+  known_by?: string[];
+  [key: string]: unknown;
+}
+
+export interface TravelNode {
+  actor?: string;
+  purpose?: string;
+  from?: string;
+  to?: string;
+  depart?: string;
+  eta?: string;
+  status?: string;
+  [key: string]: unknown;
+}
+
+export interface RosterCharacter {
+  id: string;
+  name?: string;
+  lod?: number;
+  status?: string;
+  loc?: string;
+  posture?: string;
+  activity?: string;
+  destination?: string;
+  eta?: string;
+  tick?: number | string;
+  record?: string;
+  [key: string]: unknown;
 }
 
 export interface JournalEntry {
@@ -10295,30 +11020,17 @@ export interface InvestigationTrack {
 }
 
 export interface LedgerData {
-  world?: {
-    investigations?: Record<string, InvestigationTrack>;
-    [key: string]: unknown;
-  };
+  world?: Record<string, unknown>;
   clock?: ClockState;
   scene?: SceneState;
   places?: Record<string, PlaceNode>;
-  roster?: Array<{
-    id: string;
-    name?: string;
-    lod?: number;
-    status?: string;
-    loc?: string;
-    posture?: string;
-    activity?: string;
-    destination?: string;
-    eta?: string;
-    [key: string]: unknown;
-  }>;
+  travel?: TravelNode[];
+  roster?: RosterCharacter[];
   actors?: Record<string, ActorDossier>;
   bplots?: BPlot[];
+  fronts?: FrontNode[];
   opportunities?: Opportunity[];
   journal?: JournalEntry[];
-  travel?: Array<{ actor: string; purpose?: string; from?: string; to: string; eta?: string; [key: string]: unknown }>;
   [key: string]: unknown;
 }
 
@@ -10540,10 +11252,9 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       expect(directorMsg.role).toBe("system");
       expect(directorMsg.content).toContain("[LumiVN Living World Director Guidance]");
       expect(directorMsg.content).toContain("[OUTPUT FORMAT REQUIREMENT]");
-      expect(directorMsg.content).toContain('{"director_note":"<directive>","thread_label":"<short label>"}');
-      expect(directorMsg.content).toContain("STRICT DIRECTIVE CONSTRAINTS:");
-      expect(directorMsg.content).toContain("You are LumiWorld, a private world-state director");
-      expect(directorMsg.content).toContain("advance the world behind the next visible reply");
+      expect(directorMsg.content).toContain('Line 1: Return the director JSON object');
+      expect(directorMsg.content).toContain("You are LumiWorld, the private world-state director and area orchestrator");
+      expect(directorMsg.content).toContain("Decide what the living world does behind the next visible reply");
       expect(directorMsg.content).toContain("Stay cautious.");
 
       // Injected directive cached for post-turn diff logging
@@ -11083,6 +11794,14 @@ describe("LumiVN Deterministic Ledger Parser", () => {
     expect(cleaned).not.toContain("director_note");
   });
 
+  test("extracts narrative prose cleanly stripping details Director block", () => {
+    const rawWithDetails = `<details><summary>🎬 Director</summary>\n{"director_note": "FIRST BEAT:...", "thread_label": "Tension"}\n</details>\n\nAlethea glanced at the doorway.`;
+    const cleaned = extractProse(rawWithDetails);
+    expect(cleaned).toBe('Alethea glanced at the doorway.');
+    expect(cleaned).not.toContain("Director");
+    expect(cleaned).not.toContain("director_note");
+  });
+
   test("parses paragraphs and detects active speaker", () => {
     const prose = extractProse(SAMPLE_MY_WORLD_MESSAGE);
     const paras = extractParagraphs(prose);
@@ -11393,6 +12112,7 @@ import { MapTab } from "../src/frontend/hud/tab-map.js";
 import { PhoneTab } from "../src/frontend/hud/tab-phone.js";
 import { JournalTab } from "../src/frontend/hud/tab-journal.js";
 import { SceneTab } from "../src/frontend/hud/tab-scene.js";
+import { BPlotsTab } from "../src/frontend/hud/tab-bplots.js";
 import { MenuBar } from "../src/frontend/hud/menu-bar.js";
 import { DiagnosticsTab } from "../src/frontend/hud/tab-diagnostics.js";
 import { diagBus } from "../src/frontend/utils/diag-bus.js";
@@ -11854,6 +12574,51 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     const bundle = JSON.parse(diagBus.exportAllBundle());
     expect(bundle.directorNote).toBeDefined();
     expect(bundle.directorNote.directorNote).toBe("Maintain romantic tension during the interview.");
+  });
+
+  test("12. BPlotsTab renders active b-plots, offscreen cast, latents, travel, and environmental fronts", () => {
+    const tab = new BPlotsTab();
+    tab.render({
+      scene: {
+        place: "dames_mansion:foyer",
+        latents: [
+          { who: "leslie", errand: "Returning from grocery", route: "Main Street", window_opens: "17:00", status: "pending" },
+        ],
+      },
+      roster: [
+        { id: "leslie", name: "Leslie", lod: 2, loc: "grocery_store", status: "Shopping" },
+      ],
+      travel: [
+        { actor: "delivery_courier", purpose: "Package dropoff", from: "depot", to: "dames_mansion", depart: "16:15", eta: "16:45", status: "en_route" },
+      ],
+      bplots: [
+        {
+          id: "bp_1",
+          who: "Neighborhood Council",
+          want: "Rezoning hearing approval",
+          doing: "Canvassing votes",
+          scope: "neighborhood",
+          ripple: 2,
+          status: "active",
+          next: { move: "Distribute flyers", due: "Tomorrow" },
+        },
+      ],
+      fronts: [
+        { id: "heatwave", cause: "Severe summer heatwave", stage: "escalating", pressure: 4, due: "D2", known_by: ["User", "Jessica"] },
+      ],
+    });
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("B-Plots, Fronts &amp; Offscreen Cast");
+    expect(html).toContain("Neighborhood Council");
+    expect(html).toContain("Stage 2: Ambient Echo");
+    expect(html).toContain("Rezoning hearing approval");
+    expect(html).toContain("Leslie");
+    expect(html).toContain("LOD 2");
+    expect(html).toContain("Returning from grocery");
+    expect(html).toContain("delivery_courier");
+    expect(html).toContain("heatwave");
+    expect(html).toContain("Pressure 4/5");
   });
 });
 ```

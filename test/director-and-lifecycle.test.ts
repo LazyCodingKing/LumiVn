@@ -128,10 +128,9 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       expect(directorMsg.role).toBe("system");
       expect(directorMsg.content).toContain("[LumiVN Living World Director Guidance]");
       expect(directorMsg.content).toContain("[OUTPUT FORMAT REQUIREMENT]");
-      expect(directorMsg.content).toContain('{"director_note":"<directive>","thread_label":"<short label>"}');
-      expect(directorMsg.content).toContain("STRICT DIRECTIVE CONSTRAINTS:");
-      expect(directorMsg.content).toContain("You are LumiWorld, a private world-state director");
-      expect(directorMsg.content).toContain("advance the world behind the next visible reply");
+      expect(directorMsg.content).toContain('Line 1: Return the director JSON object');
+      expect(directorMsg.content).toContain("You are LumiWorld, the private world-state director and area orchestrator");
+      expect(directorMsg.content).toContain("Decide what the living world does behind the next visible reply");
       expect(directorMsg.content).toContain("Stay cautious.");
 
       // Injected directive cached for post-turn diff logging

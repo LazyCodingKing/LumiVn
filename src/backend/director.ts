@@ -112,21 +112,10 @@ export async function evaluateDirectorInterceptor(
 ${activeDirective}
 
 [OUTPUT FORMAT REQUIREMENT]
-Line 1 MUST strictly be a JSON object containing your forward-looking directive:
-{"director_note":"<directive>","thread_label":"<short label>"}
+Line 1: Return the director JSON object (optionally inside <details><summary>🎬 Director</summary>...</details>):
+{"director_note":"FIRST BEAT: ... WORLD: ... OFFSCREEN: ... PRESSURE: ... PRESENT: ... VOICE: ... TEXTURE: ... CANON: ... END ON: ...","thread_label":"<3-6 words thread title>"}
 
-STRICT DIRECTIVE CONSTRAINTS:
-- ZERO RECAP: Never write "User asks...", "Jessica feels...", or summarize what just happened.
-- IMPERATIVE ONLY: Sentence 1 MUST start with an active command verb: "Escalate", "Have", "Make", "Let", "Pressure", or "Force".
-- PUSH THE WORLD: Command a concrete physical action, an offscreen arrival/sound, an escalating tension, or an NPC counter-move that forces the scene forward.
-
-GOOD EXAMPLE:
-{"director_note":"Escalate the tension around the absent husband. Have Jessica fluster and press the wine bottle into User's hands to change the subject, while Tessa calls out her mother's locked bedroom drawer. Let Mila rattle coffee mugs in the kitchen. Keep Leslie hidden upstairs.","thread_label":"Foyer Tension"}
-
-BAD EXAMPLE (BANNED):
-{"director_note":"User asks Tessa about her dad and Jessica feels defensive about her husband while Tessa teases her.","thread_label":"new_tenant_arrival"}
-
-Follow immediately on Line 2 with:
+Follow immediately on Line 2 with the preset contract:
 <details><summary>🧠 Scene Logic</summary>
 ...
 </details>
@@ -213,8 +202,8 @@ export function computeDirectorImpactDiff(
   }
 
   // Investigations
-  const prevInvs = prevLedger?.world?.investigations || {};
-  const nextInvs = nextLedger?.world?.investigations || {};
+  const prevInvs = (prevLedger?.world?.investigations as Record<string, any>) || {};
+  const nextInvs = (nextLedger?.world?.investigations as Record<string, any>) || {};
   for (const [auth, track] of Object.entries(nextInvs)) {
     if (!track) continue;
     const prevTrack = prevInvs[auth];
@@ -229,9 +218,9 @@ export function computeDirectorImpactDiff(
           `Investigation alert escalated: ${name} Alert Level ${prevTrack.alert_level} -> ${track.alert_level}`
         );
       }
-      const prevClues = prevTrack.clues || [];
-      const nextClues = track.clues || [];
-      const newClues = nextClues.filter((c) => !prevClues.includes(c));
+      const prevClues = (prevTrack.clues as string[]) || [];
+      const nextClues = (track.clues as string[]) || [];
+      const newClues = nextClues.filter((c: string) => !prevClues.includes(c));
       if (newClues.length > 0) {
         worldChanges.push(
           `Investigation clues discovered by ${name}: ${newClues.join(", ")}`

@@ -8,6 +8,15 @@ export interface ClockState {
   country?: string;   // e.g. "Japan"
 }
 
+export interface SceneLatent {
+  id?: string;
+  who?: string;
+  errand?: string;
+  route?: string;
+  window_opens?: string;
+  status?: string;
+}
+
 export interface SceneState {
   place?: string;
   time?: string;
@@ -16,6 +25,13 @@ export interface SceneState {
   pressures?: string[];
   recent_changes?: string[];
   recent_beats?: string[];
+  constraints?: string;
+  affordances?: string[];
+  stall?: number;
+  streak?: number;
+  transients?: Array<Record<string, unknown> | string>;
+  latents?: SceneLatent[];
+  [key: string]: unknown;
 }
 
 export interface ActorOutfit {
@@ -169,13 +185,62 @@ export interface Opportunity {
   [key: string]: unknown;
 }
 
+export interface BPlotCarrier {
+  what?: string;
+  from?: string;
+  eta?: string;
+}
+
 export interface BPlot {
-  id: string;
+  id?: string;
   who?: string;
+  want?: string;
   doing?: string;
+  knows?: string[] | string;
+  next?: { move?: string; due?: string };
+  scope?: "personal" | "household" | "neighborhood" | "city" | string;
+  hooks?: string[] | string;
+  carriers?: BPlotCarrier[];
   vector?: string;
-  ripple?: number; // 1: isolated | 2: ambient echo (news/text/siren) | 3: collision
-  status?: string; // active | converged | fizzled
+  ripple?: number; // 1: Isolated, 2: Ambient Echo, 3: Collision
+  status?: "active" | "dormant" | "resolved" | string;
+  [key: string]: unknown;
+}
+
+export interface FrontNode {
+  id?: string;
+  cause?: string;
+  stage?: string;
+  due?: string;
+  pressure?: number; // 0-5
+  known_by?: string[];
+  [key: string]: unknown;
+}
+
+export interface TravelNode {
+  actor?: string;
+  purpose?: string;
+  from?: string;
+  to?: string;
+  depart?: string;
+  eta?: string;
+  status?: string;
+  [key: string]: unknown;
+}
+
+export interface RosterCharacter {
+  id: string;
+  name?: string;
+  lod?: number;
+  status?: string;
+  loc?: string;
+  posture?: string;
+  activity?: string;
+  destination?: string;
+  eta?: string;
+  tick?: number | string;
+  record?: string;
+  [key: string]: unknown;
 }
 
 export interface JournalEntry {
@@ -198,30 +263,17 @@ export interface InvestigationTrack {
 }
 
 export interface LedgerData {
-  world?: {
-    investigations?: Record<string, InvestigationTrack>;
-    [key: string]: unknown;
-  };
+  world?: Record<string, unknown>;
   clock?: ClockState;
   scene?: SceneState;
   places?: Record<string, PlaceNode>;
-  roster?: Array<{
-    id: string;
-    name?: string;
-    lod?: number;
-    status?: string;
-    loc?: string;
-    posture?: string;
-    activity?: string;
-    destination?: string;
-    eta?: string;
-    [key: string]: unknown;
-  }>;
+  travel?: TravelNode[];
+  roster?: RosterCharacter[];
   actors?: Record<string, ActorDossier>;
   bplots?: BPlot[];
+  fronts?: FrontNode[];
   opportunities?: Opportunity[];
   journal?: JournalEntry[];
-  travel?: Array<{ actor: string; purpose?: string; from?: string; to: string; eta?: string; [key: string]: unknown }>;
   [key: string]: unknown;
 }
 

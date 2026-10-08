@@ -1,6 +1,6 @@
-import type { LedgerData, ActorDossier, AssetManifest } from "../../shared/types.js";
+import type { LedgerData, ActorDossier, AssetManifest, RosterCharacter } from "../../shared/types.js";
 
-// Helper normalizers for tuples vs objects emitted by LLM My World 1.79 ledger
+// Helper normalizers for tuples vs objects emitted by LLM My World 1.85 ledger
 function normalizeGoal(g: any): {
   id: string;
   intent: string;
@@ -32,6 +32,75 @@ function normalizeGoal(g: any): {
     cause: String(g?.cause ?? ""),
     progress: g?.progress ?? 0,
     status: String(g?.status ?? "active"),
+  };
+}
+
+function normalizePlan(p: any): {
+  goal: string;
+  steps: any[];
+  now: string;
+  preconditions: any[];
+  revisions: number;
+} {
+  if (Array.isArray(p)) {
+    return {
+      goal: String(p[0] ?? ""),
+      steps: Array.isArray(p[1]) ? p[1] : p[1] ? [p[1]] : [],
+      now: String(p[2] ?? ""),
+      preconditions: Array.isArray(p[3]) ? p[3] : p[3] ? [p[3]] : [],
+      revisions: Number(p[4] ?? 0),
+    };
+  }
+  return {
+    goal: String(p?.goal ?? ""),
+    steps: Array.isArray(p?.steps) ? p.steps : p?.steps ? [p.steps] : [],
+    now: String(p?.now ?? ""),
+    preconditions: Array.isArray(p?.preconditions) ? p.preconditions : p?.preconditions ? [p.preconditions] : [],
+    revisions: Number(p?.revisions ?? 0),
+  };
+}
+
+function normalizeMemory(m: any): {
+  evt: string;
+  interpretation: string;
+  salience: number;
+  imprint: string;
+  with: string;
+} {
+  if (Array.isArray(m)) {
+    return {
+      evt: String(m[0] ?? ""),
+      interpretation: String(m[1] ?? ""),
+      salience: Number(m[2] ?? 0),
+      imprint: String(m[3] ?? ""),
+      with: String(m[4] ?? ""),
+    };
+  }
+  return {
+    evt: String(m?.evt ?? m?.event ?? ""),
+    interpretation: String(m?.interpretation ?? ""),
+    salience: Number(m?.salience ?? 0),
+    imprint: String(m?.imprint ?? ""),
+    with: String(m?.with ?? ""),
+  };
+}
+
+function normalizeExpectation(e: any): {
+  situation: string;
+  expect: string;
+  conf: number;
+} {
+  if (Array.isArray(e)) {
+    return {
+      situation: String(e[0] ?? ""),
+      expect: String(e[1] ?? ""),
+      conf: Number(e[2] ?? 100),
+    };
+  }
+  return {
+    situation: String(e?.situation ?? ""),
+    expect: String(e?.expect ?? ""),
+    conf: Number(e?.conf ?? 100),
   };
 }
 
@@ -134,6 +203,20 @@ export class CharactersTab {
       }
     }
 
+    // Supplement from scene participants
+    if (ledger.scene?.participants && Array.isArray(ledger.scene.participants)) {
+      for (const p of ledger.scene.participants) {
+        if (typeof p === "string" && !actors[p]) {
+          actors[p] = {
+            id: p,
+            name: p,
+            life_model: { occupation: "Participant" },
+            agency: { want_now: "Present in scene" },
+          };
+        }
+      }
+    }
+
     const allKeys = Object.keys(actors);
     if (allKeys.length === 0) {
       this.root.innerHTML = `<div class="vn-muted" style="text-align:center; padding: 32px;">No characters recorded in the ledger yet.</div>`;
@@ -170,14 +253,22 @@ export class CharactersTab {
     `;
     this.root.appendChild(header);
 
-    // Avatar Ribbon
+    // Avatar Ribbon with LOD and Location fallback
     const ribbon = document.createElement("div");
     ribbon.style.cssText = "display: flex; gap: 12px; overflow-x: auto; padding: 6px 4px 14px 4px; border-bottom: 1px solid #334155; margin-bottom: 16px;";
+
+    const rosterMap = new Map<string, RosterCharacter>();
+    if (ledger.roster && Array.isArray(ledger.roster)) {
+      for (const r of ledger.roster) {
+        if (r.id) rosterMap.set(r.id.toLowerCase(), r);
+      }
+    }
 
     for (const id of actorIds) {
       const actor = actors[id]!;
       const isSelected = id === this.selectedActorId;
       const cleanId = id.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      const rosterItem = rosterMap.get(id.toLowerCase());
 
       let avatarUrl = "";
       if (manifest?.characters?.[cleanId]) {
@@ -194,10 +285,12 @@ export class CharactersTab {
       item.innerHTML = `
         <div style="width: 52px; height: 52px; border-radius: 50%; overflow: hidden; border: 2px solid ${isSelected ? "#818cf8" : "#475569"}; box-shadow: ${isSelected ? "0 0 10px rgba(99,102,241,0.6)" : "none"}; background: #1e293b; display: flex; align-items: center; justify-content: center; position: relative;">
           ${avatarUrl ? `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="${displayName}" />` : `<span style="font-size: 22px;">👤</span>`}
+          ${rosterItem ? `<span style="position: absolute; bottom: 0; right: 0; font-size: 9px; background: #0f172a; padding: 1px 3px; border-radius: 3px; border: 1px solid #334155; color: #a5b4fc; font-weight: 700;">L${rosterItem.lod ?? 1}</span>` : ""}
         </div>
         <span style="font-size: 11px; margin-top: 5px; color: ${isSelected ? "#f8fafc" : "#94a3b8"}; font-weight: ${isSelected ? "700" : "500"}; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
           ${displayName}
         </span>
+        ${rosterItem?.loc ? `<span style="font-size: 9px; color: #64748b; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${rosterItem.loc}</span>` : ""}
       `;
       item.addEventListener("click", () => {
         this.selectedActorId = id;
@@ -235,6 +328,7 @@ export class CharactersTab {
 
     const conditionStr = app.condition || state.condition || "Normal";
     const wantStr = agency.want_now || "None declared";
+    const selfConcept = prof.self_concept || life.self_concept || "";
 
     // 1. Identity & Physical Persona Banner
     const banner = document.createElement("div");
@@ -269,15 +363,172 @@ export class CharactersTab {
         <span style="color:#38bdf8; font-weight:700;">🎯 Immediate Want:</span> ${wantStr}
       </div>
 
-      ${actor.constraints ? `
+      ${selfConcept ? `
+        <div style="margin-top:6px; background:#0f172a; border-left:3px solid #38bdf8; padding:6px 8px; border-radius:4px; color:#cbd5e1; font-size:11px;">
+          <span style="color:#38bdf8; font-weight:700;">🪞 Self-Concept:</span> "${selfConcept}"
+        </div>
+      ` : ""}
+
+      ${(actor.constraints || prof.constraints) ? `
         <div style="margin-top:6px; background:rgba(244,63,94,0.1); border:1px solid rgba(244,63,94,0.3); border-radius:4px; padding:6px 8px; color:#fecdd3;">
-          <span style="color:#f43f5e; font-weight:700;">⚠️ Constraint / Taboo:</span> ${actor.constraints}
+          <span style="color:#f43f5e; font-weight:700;">⚠️ Constraint / Taboo:</span> ${actor.constraints || prof.constraints}
+        </div>
+      ` : ""}
+
+      ${(prof.boundaries || prof.red_lines) ? `
+        <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px; font-size:11px;">
+          ${prof.boundaries ? `<div><span style="color:#f59e0b; font-weight:600;">🚧 Boundaries:</span> <span style="color:#fde68a;">${Array.isArray(prof.boundaries) ? prof.boundaries.join("; ") : prof.boundaries}</span></div>` : ""}
+          ${prof.red_lines ? `<div><span style="color:#ef4444; font-weight:600;">🚫 Red Lines:</span> <span style="color:#fca5a5;">${Array.isArray(prof.red_lines) ? prof.red_lines.join("; ") : prof.red_lines}</span></div>` : ""}
+        </div>
+      ` : ""}
+
+      ${(prof.values || prof.public_roles || prof.capabilities) ? `
+        <div style="margin-top:6px; padding-top:6px; border-top:1px solid #334155; display:flex; flex-direction:column; gap:4px; font-size:11px;">
+          ${prof.values ? `<div><span style="color:#94a3b8;">Values:</span> <strong style="color:#f8fafc;">${Array.isArray(prof.values) ? prof.values.join(", ") : prof.values}</strong></div>` : ""}
+          ${prof.public_roles ? `<div><span style="color:#94a3b8;">Public Roles:</span> <span style="color:#cbd5e1;">${Array.isArray(prof.public_roles) ? prof.public_roles.join(", ") : prof.public_roles}</span></div>` : ""}
+          ${prof.capabilities ? `<div><span style="color:#94a3b8;">Capabilities:</span> <span style="color:#cbd5e1;">${Array.isArray(prof.capabilities) ? prof.capabilities.join(", ") : prof.capabilities}</span></div>` : ""}
         </div>
       ` : ""}
     `;
+
+    // Passions Snapshot Badges
+    const rawPassions = actor.passions;
+    if (rawPassions) {
+      let passionBadges: string[] = [];
+      if (Array.isArray(rawPassions)) {
+        passionBadges = rawPassions.map((p: any) => {
+          if (typeof p === "string") return p;
+          if (typeof p === "object" && p !== null) {
+            const label = p.name || p.id || "passion";
+            const val = p.intensity ?? p.value ?? "";
+            const target = p.target ? ` ➔ ${p.target}` : "";
+            return `${label}${target}: ${val}`;
+          }
+          return String(p);
+        });
+      } else if (typeof rawPassions === "object") {
+        passionBadges = Object.entries(rawPassions).map(([k, v]) => `${k}: ${v}`);
+      }
+
+      if (passionBadges.length > 0) {
+        const pContainer = document.createElement("div");
+        pContainer.style.cssText = "margin-top: 8px; padding-top: 6px; border-top: 1px solid #334155;";
+        pContainer.innerHTML = `
+          <div style="font-size: 11px; color: #f43f5e; font-weight: 700; margin-bottom: 4px;">❤️ Passions & Emotional Drives:</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            ${passionBadges.map((badge) => `<span style="background: rgba(244,63,94,0.15); border: 1px solid rgba(244,63,94,0.4); color: #fda4af; font-size: 11px; padding: 2px 8px; border-radius: 4px;">🔥 ${badge}</span>`).join("")}
+          </div>
+        `;
+        banner.appendChild(pContainer);
+      }
+    }
+
     container.appendChild(banner);
 
-    // 2. Attire & Wardrobe Layer Breakdown
+    // 2. Dispositions Grid
+    const disps = prof.dispositions as Record<string, any> | undefined;
+    if (disps && typeof disps === "object" && Object.keys(disps).length > 0) {
+      const dispSection = document.createElement("div");
+      dispSection.className = "vn-section";
+      dispSection.innerHTML = `<h4>🧭 Personality Dispositions</h4>`;
+
+      const dispGrid = document.createElement("div");
+      dispGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px;";
+
+      const dispLabels: Record<string, string> = {
+        risk: "Risk Propensity",
+        assertiveness: "Assertiveness",
+        empathy: "Empathy",
+        impulse_control: "Impulse Control",
+        curiosity: "Curiosity",
+        sociability: "Sociability",
+        status_sensitivity: "Status Sensitivity",
+        acquisitiveness: "Acquisitiveness",
+        persistence: "Persistence",
+      };
+
+      for (const [k, v] of Object.entries(disps)) {
+        const label = dispLabels[k] || k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        const box = document.createElement("div");
+        box.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; font-size: 11px;";
+        box.innerHTML = `
+          <div style="color: #94a3b8; font-size: 10px; margin-bottom: 2px;">${label}</div>
+          <div style="color: #f8fafc; font-weight: 700;">${v}</div>
+        `;
+        dispGrid.appendChild(box);
+      }
+      dispSection.appendChild(dispGrid);
+      container.appendChild(dispSection);
+    }
+
+    // 3. Needs & Affect Episodes
+    const hasNeeds = state.needs && (Array.isArray(state.needs) ? state.needs.length > 0 : Object.keys(state.needs).length > 0);
+    const affectEpisodes = state.affect?.episodes || state.affect_episodes;
+    const hasAffect = Array.isArray(affectEpisodes) && affectEpisodes.length > 0;
+
+    if (hasNeeds || hasAffect) {
+      const needsSection = document.createElement("div");
+      needsSection.className = "vn-section";
+      needsSection.innerHTML = `<h4>⚡ Active Needs & Affect Episodes</h4>`;
+
+      const nBox = document.createElement("div");
+      nBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px;";
+
+      if (hasNeeds) {
+        let needsItems: Array<{ name: string; urgency: string | number }> = [];
+        if (Array.isArray(state.needs)) {
+          needsItems = state.needs.map((n: any) => {
+            if (Array.isArray(n)) return { name: String(n[0] ?? ""), urgency: n[1] ?? 0 };
+            if (typeof n === "object" && n !== null) return { name: String(n.name ?? n.need ?? ""), urgency: n.urgency ?? n.value ?? 0 };
+            return { name: String(n), urgency: "" };
+          });
+        } else if (typeof state.needs === "object" && state.needs !== null) {
+          needsItems = Object.entries(state.needs).map(([k, v]) => ({ name: k, urgency: String(v) }));
+        }
+
+        nBox.innerHTML += `
+          <div>
+            <div style="color: #38bdf8; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Pressing Needs:</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              ${needsItems.map((n) => `
+                <span style="background: #0f172a; border: 1px solid #0284c7; padding: 3px 8px; border-radius: 4px; font-size: 11px;">
+                  <strong style="color: #7dd3fc;">${n.name}</strong>${n.urgency !== "" ? `<span style="color: #94a3b8;"> (urgency: ${n.urgency})</span>` : ""}
+                </span>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      if (hasAffect) {
+        const epFormatted = affectEpisodes.map((ep: any) => {
+          if (typeof ep === "string") return ep;
+          if (Array.isArray(ep)) return `${ep[0] ?? ""}${ep[1] ? ` ➔ ${ep[1]}` : ""}${ep[2] !== undefined ? ` (${ep[2]})` : ""}`;
+          if (typeof ep === "object" && ep !== null) {
+            return `${ep.name || ep.emotion || "affect"}${ep.target ? ` ➔ ${ep.target}` : ""}${ep.intensity !== undefined ? ` (${ep.intensity})` : ""}`;
+          }
+          return String(ep);
+        });
+
+        nBox.innerHTML += `
+          <div style="${hasNeeds ? "border-top: 1px solid #334155; padding-top: 6px;" : ""}">
+            <div style="color: #eab308; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Affect Episodes:</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              ${epFormatted.map((ep: string) => `
+                <span style="background: rgba(234,179,8,0.15); border: 1px solid #eab308; color: #fef08a; padding: 2px 8px; border-radius: 4px; font-size: 11px;">
+                  ⚡ ${ep}
+                </span>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      needsSection.appendChild(nBox);
+      container.appendChild(needsSection);
+    }
+
+    // 4. Attire & Wardrobe Layer Breakdown
     const outfitSection = document.createElement("div");
     outfitSection.className = "vn-section";
     outfitSection.innerHTML = `<h4>👗 Attire & Wardrobe</h4>`;
@@ -335,7 +586,7 @@ export class CharactersTab {
     outfitSection.appendChild(outfitGrid);
     container.appendChild(outfitSection);
 
-    // 3. Possessions, Inventory & Wealth
+    // 5. Possessions, Inventory & Wealth
     const invSection = document.createElement("div");
     invSection.className = "vn-section";
     invSection.innerHTML = `<h4>🎒 Equipment, Carried Gear & Finances</h4>`;
@@ -380,7 +631,7 @@ export class CharactersTab {
     invSection.appendChild(invBox);
     container.appendChild(invSection);
 
-    // 4. Combat Vitals & RPG Stats (if populated)
+    // 6. Combat Vitals & RPG Stats (if populated)
     if (combat && (combat.hp || combat.pwr || combat.eff_pwr || combat.tier)) {
       const combatSection = document.createElement("div");
       combatSection.className = "vn-section";
@@ -418,10 +669,21 @@ export class CharactersTab {
       container.appendChild(combatSection);
     }
 
-    // 5. Psychological Condition, Wounds, Traumas & Tells
+    // 7. Psychological Condition, Wounds, Traumas & Tells
     const physWounds = Array.isArray(wounds.physical) ? wounds.physical : [];
     const psychWounds = Array.isArray(wounds.psychological) ? wounds.psychological : [];
-    const tells = prof.tells ? (Array.isArray(prof.tells) ? prof.tells : [prof.tells]) : [];
+
+    // Behavioral tells: object or array
+    let formattedTells: string[] = [];
+    if (prof.tells) {
+      if (Array.isArray(prof.tells)) {
+        formattedTells = prof.tells.map(String);
+      } else if (typeof prof.tells === "object") {
+        formattedTells = Object.entries(prof.tells).map(([cue, desc]) => `${cue.toUpperCase()}: ${desc}`);
+      } else {
+        formattedTells = [String(prof.tells)];
+      }
+    }
 
     const psychoSection = document.createElement("div");
     psychoSection.className = "vn-section";
@@ -441,10 +703,12 @@ export class CharactersTab {
         </div>
       </div>
 
-      ${tells.length > 0 ? `
+      ${formattedTells.length > 0 ? `
         <div style="margin-top:4px; border-top:1px solid #334155; padding-top:6px;">
           <div style="color:#38bdf8; font-weight:700; font-size:11px; margin-bottom:3px;">👁️ Behavioral Tells & Micro-Expressions:</div>
-          <div style="color:#e0f2fe; font-size:11px;">${tells.join("; ")}</div>
+          <div style="display:flex; flex-direction:column; gap:3px;">
+            ${formattedTells.map((t) => `<div style="background:#0f172a; padding:4px 8px; border-radius:4px; font-size:11px; color:#e0f2fe;">${t}</div>`).join("")}
+          </div>
         </div>
       ` : ""}
 
@@ -458,7 +722,7 @@ export class CharactersTab {
     psychoSection.appendChild(psychoBox);
     container.appendChild(psychoSection);
 
-    // 6. Life Model, Upbringing & Daily Routines
+    // 8. Life Model, Upbringing & Daily Routines
     const routines = Array.isArray(life.routines) ? life.routines.map(normalizeRoutine) : [];
     const lifeSection = document.createElement("div");
     lifeSection.className = "vn-section";
@@ -490,55 +754,194 @@ export class CharactersTab {
     lifeSection.appendChild(lifeBox);
     container.appendChild(lifeSection);
 
-    // 7. Agency: Active Goals & Directives
+    // 9. Agency: Active Goals, Plans, Policies & Commitments
     const rawGoals = Array.isArray(agency.goals) ? agency.goals : [];
-    if (rawGoals.length > 0) {
-      const goals = rawGoals.map(normalizeGoal);
-      const goalSection = document.createElement("div");
-      goalSection.className = "vn-section";
-      goalSection.innerHTML = `<h4>🎯 Active Goals & Directives (${goals.length})</h4>`;
+    const rawPlans = Array.isArray(agency.plans) ? agency.plans : [];
+    const rawPolicies = Array.isArray(agency.policies) ? agency.policies : [];
+    const rawCommitments = Array.isArray(agency.commitments) ? agency.commitments : [];
 
-      const goalList = document.createElement("div");
-      goalList.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+    if (rawGoals.length > 0 || rawPlans.length > 0 || rawPolicies.length > 0 || rawCommitments.length > 0) {
+      const agencySection = document.createElement("div");
+      agencySection.className = "vn-section";
+      agencySection.innerHTML = `<h4>🎯 Agency, Plans & Directives</h4>`;
 
-      for (const g of goals) {
-        const item = document.createElement("div");
-        item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px;";
-        item.innerHTML = `
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <strong style="color:#38bdf8; font-size:12px;">${g.intent}</strong>
-            <span style="padding:1px 6px; border-radius:4px; background:rgba(34,197,94,0.2); border:1px solid #22c55e; color:#86efac;">
-              ${g.status} (${g.progress}%)
-            </span>
-          </div>
-          <div style="display:flex; gap:12px; color:#94a3b8; flex-wrap:wrap;">
-            <span>Priority: <strong style="color:#f8fafc;">${g.priority}</strong></span>
-            <span>Commitment: <strong style="color:#f8fafc;">${g.commitment}</strong></span>
-            ${g.deadline ? `<span>Deadline: <strong style="color:#fca5a5;">${g.deadline}</strong></span>` : ""}
-          </div>
-          ${g.cause ? `<div style="margin-top:4px; color:#cbd5e1; font-style:italic;">Cause: ${g.cause}</div>` : ""}
-        `;
-        goalList.appendChild(item);
+      const agencyBody = document.createElement("div");
+      agencyBody.style.cssText = "display: flex; flex-direction: column; gap: 10px;";
+
+      // Goals
+      if (rawGoals.length > 0) {
+        const goals = rawGoals.map(normalizeGoal);
+        const goalList = document.createElement("div");
+        goalList.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
+        goalList.innerHTML = `<div style="color: #38bdf8; font-weight: 700; font-size: 11px;">Active Goals (${goals.length}):</div>`;
+
+        for (const g of goals) {
+          const item = document.createElement("div");
+          item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px;";
+          item.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <strong style="color:#38bdf8; font-size:12px;">${g.intent}</strong>
+              <span style="padding:1px 6px; border-radius:4px; background:rgba(34,197,94,0.2); border:1px solid #22c55e; color:#86efac;">
+                ${g.status} (${g.progress}%)
+              </span>
+            </div>
+            <div style="display:flex; gap:12px; color:#94a3b8; flex-wrap:wrap;">
+              <span>Priority: <strong style="color:#f8fafc;">${g.priority}</strong></span>
+              <span>Commitment: <strong style="color:#f8fafc;">${g.commitment}</strong></span>
+              ${g.deadline ? `<span>Deadline: <strong style="color:#fca5a5;">${g.deadline}</strong></span>` : ""}
+            </div>
+            ${g.cause ? `<div style="margin-top:4px; color:#cbd5e1; font-style:italic;">Cause: ${g.cause}</div>` : ""}
+          `;
+          goalList.appendChild(item);
+        }
+        agencyBody.appendChild(goalList);
       }
-      goalSection.appendChild(goalList);
-      container.appendChild(goalSection);
+
+      // Plans
+      if (rawPlans.length > 0) {
+        const plans = rawPlans.map(normalizePlan);
+        const planList = document.createElement("div");
+        planList.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
+        planList.innerHTML = `<div style="color: #818cf8; font-weight: 700; font-size: 11px;">Action Plans (${plans.length}):</div>`;
+
+        for (const p of plans) {
+          const item = document.createElement("div");
+          item.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px;";
+          item.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <strong style="color:#c7d2fe; font-size:12px;">Goal: ${p.goal}</strong>
+              <span style="font-size:10px; color:#94a3b8;">Rev: ${p.revisions}</span>
+            </div>
+            ${p.now ? `<div style="background:#0f172a; padding:4px 8px; border-radius:4px; margin-bottom:4px; color:#38bdf8;"><strong>Current Step:</strong> ${p.now}</div>` : ""}
+            ${p.steps.length > 0 ? `
+              <div style="color:#94a3b8; margin-top:2px;">
+                Steps: <span style="color:#cbd5e1;">${p.steps.join(" ➔ ")}</span>
+              </div>
+            ` : ""}
+            ${p.preconditions.length > 0 ? `
+              <div style="color:#94a3b8; margin-top:2px;">
+                Preconditions: <span style="color:#fde68a;">${p.preconditions.join("; ")}</span>
+              </div>
+            ` : ""}
+          `;
+          planList.appendChild(item);
+        }
+        agencyBody.appendChild(planList);
+      }
+
+      // Policies & Commitments
+      if (rawPolicies.length > 0 || rawCommitments.length > 0) {
+        const polBox = document.createElement("div");
+        polBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; font-size: 11px; display: flex; flex-direction: column; gap: 6px;";
+        if (rawPolicies.length > 0) {
+          polBox.innerHTML += `
+            <div>
+              <span style="color: #f59e0b; font-weight: 700;">Operating Policies:</span>
+              <ul style="margin: 2px 0 0 16px; padding: 0; color: #cbd5e1;">
+                ${rawPolicies.map((pol: any) => `<li>${typeof pol === "object" ? JSON.stringify(pol) : String(pol)}</li>`).join("")}
+              </ul>
+            </div>
+          `;
+        }
+        if (rawCommitments.length > 0) {
+          polBox.innerHTML += `
+            <div>
+              <span style="color: #22c55e; font-weight: 700;">Active Commitments:</span>
+              <ul style="margin: 2px 0 0 16px; padding: 0; color: #cbd5e1;">
+                ${rawCommitments.map((com: any) => `<li>${typeof com === "object" ? JSON.stringify(com) : String(com)}</li>`).join("")}
+              </ul>
+            </div>
+          `;
+        }
+        agencyBody.appendChild(polBox);
+      }
+
+      agencySection.appendChild(agencyBody);
+      container.appendChild(agencySection);
     }
 
-    // 8. Knowledge, Guarded Secrets & Core Beliefs
+    // 10. Knowledge, Epistemics, Memories, Expectations & Secrets
     const rawSecrets = Array.isArray(know.secrets) ? know.secrets : [];
     const rawBeliefs = Array.isArray(know.beliefs) ? know.beliefs : [];
-    if (rawSecrets.length > 0 || rawBeliefs.length > 0) {
+    const rawMemories = Array.isArray(know.memories) ? know.memories : [];
+    const rawExpectations = Array.isArray(know.expectations) ? know.expectations : [];
+    const heldLeverage = know.held_leverage;
+    const presentsAs = know.presents_as;
+
+    if (rawSecrets.length > 0 || rawBeliefs.length > 0 || rawMemories.length > 0 || rawExpectations.length > 0 || heldLeverage || presentsAs) {
       const knowSection = document.createElement("div");
       knowSection.className = "vn-section";
-      knowSection.innerHTML = `<h4>🔒 Guarded Secrets & Epistemic Beliefs</h4>`;
+      knowSection.innerHTML = `<h4>🔒 Epistemics, Memories & Guarded Secrets</h4>`;
 
       const knowBox = document.createElement("div");
       knowBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; display:flex; flex-direction:column; gap:8px;";
 
+      // Presents As
+      if (presentsAs) {
+        knowBox.innerHTML += `
+          <div style="background: #0f172a; padding: 6px 8px; border-radius: 4px; font-size: 11px; border-left: 3px solid #818cf8;">
+            <strong style="color: #818cf8;">Presents As:</strong> <span style="color: #e0f2fe;">${typeof presentsAs === "object" ? JSON.stringify(presentsAs) : String(presentsAs)}</span>
+          </div>
+        `;
+      }
+
+      // Held Leverage
+      if (heldLeverage && (Array.isArray(heldLeverage) ? heldLeverage.length > 0 : true)) {
+        const levList = Array.isArray(heldLeverage) ? heldLeverage : [heldLeverage];
+        knowBox.innerHTML += `
+          <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); padding: 6px 8px; border-radius: 4px; font-size: 11px;">
+            <strong style="color: #f59e0b;">Held Leverage:</strong>
+            <span style="color: #fde68a;">${levList.map((x: any) => typeof x === "object" ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join("; ")}</span>
+          </div>
+        `;
+      }
+
+      // Memories
+      if (rawMemories.length > 0) {
+        const memories = rawMemories.map(normalizeMemory);
+        knowBox.innerHTML += `
+          <div style="margin-top: 4px;">
+            <div style="color: #c084fc; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Salient Memories (${memories.length}):</div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              ${memories.map((m) => `
+                <div style="background: #0f172a; padding: 6px 8px; border-radius: 4px; font-size: 11px;">
+                  <div style="color: #f8fafc; font-weight: 600;">"${m.evt}"</div>
+                  <div style="display: flex; gap: 10px; margin-top: 2px; color: #94a3b8; font-size: 10px; flex-wrap: wrap;">
+                    <span>Interpretation: <strong style="color: #cbd5e1;">${m.interpretation || "—"}</strong></span>
+                    <span>Salience: <strong style="color: #d8b4fe;">${m.salience}</strong></span>
+                    ${m.with ? `<span>With: ${m.with}</span>` : ""}
+                    ${m.imprint ? `<span>Imprint: <em>${m.imprint}</em></span>` : ""}
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      // Expectations
+      if (rawExpectations.length > 0) {
+        const expects = rawExpectations.map(normalizeExpectation);
+        knowBox.innerHTML += `
+          <div style="margin-top: 4px;">
+            <div style="color: #38bdf8; font-weight: 700; font-size: 11px; margin-bottom: 4px;">Social & Situational Expectations (${expects.length}):</div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              ${expects.map((e) => `
+                <div style="background: #0f172a; padding: 4px 8px; border-radius: 4px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+                  <span><strong style="color: #7dd3fc;">[${e.situation}]</strong> <span style="color: #e0f2fe;">${e.expect}</span></span>
+                  <span style="color: #94a3b8; font-size: 10px;">conf: ${e.conf}%</span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      // Guarded Secrets
       if (rawSecrets.length > 0) {
         const secrets = rawSecrets.map(normalizeSecret);
         knowBox.innerHTML += `
-          <div>
+          <div style="margin-top: 4px;">
             <div style="color:#f43f5e; font-weight:700; font-size:11px; margin-bottom:4px;">Guarded Secrets:</div>
             <div style="display:flex; flex-direction:column; gap:6px;">
               ${secrets.map(s => `
@@ -556,6 +959,7 @@ export class CharactersTab {
         `;
       }
 
+      // Beliefs
       if (rawBeliefs.length > 0) {
         const beliefs = rawBeliefs.map(normalizeBelief);
         knowBox.innerHTML += `
@@ -577,7 +981,7 @@ export class CharactersTab {
       container.appendChild(knowSection);
     }
 
-    // 9. Relational Ties Matrix
+    // 11. Relational Ties Matrix
     const targetIds = Object.keys(rels);
     if (targetIds.length > 0) {
       const relsSection = document.createElement("div");
@@ -608,8 +1012,18 @@ export class CharactersTab {
             <div>Attraction: <strong>${r.attraction ?? 0}</strong></div>
             <div>Loyalty: <strong>${r.loyalty ?? 0}</strong></div>
           </div>
-          ${(r.leverage && r.leverage.length > 0) ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${(Array.isArray(r.leverage) ? r.leverage : [r.leverage]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
-          ${(r.obligations && r.obligations.length > 0) ? `<div style="margin-top:4px; color:#38bdf8;">Obligations: ${(Array.isArray(r.obligations) ? r.obligations : [r.obligations]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
+          ${(r.grievances && (Array.isArray(r.grievances) ? r.grievances.length > 0 : true)) ? `
+            <div style="margin-top:4px; color:#f87171;">
+              Grievances: <span style="color:#fecdd3;">${(Array.isArray(r.grievances) ? r.grievances : [r.grievances]).map(String).join("; ")}</span>
+            </div>
+          ` : ""}
+          ${(r.shared_secrets && (Array.isArray(r.shared_secrets) ? r.shared_secrets.length > 0 : true)) ? `
+            <div style="margin-top:4px; color:#c084fc;">
+              Shared Secrets: <span style="color:#e9d5ff;">${(Array.isArray(r.shared_secrets) ? r.shared_secrets : [r.shared_secrets]).map(String).join("; ")}</span>
+            </div>
+          ` : ""}
+          ${(r.leverage && (Array.isArray(r.leverage) ? r.leverage.length > 0 : true)) ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${(Array.isArray(r.leverage) ? r.leverage : [r.leverage]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
+          ${(r.obligations && (Array.isArray(r.obligations) ? r.obligations.length > 0 : true)) ? `<div style="margin-top:4px; color:#38bdf8;">Obligations: ${(Array.isArray(r.obligations) ? r.obligations : [r.obligations]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
         `;
         relsList.appendChild(card);
       }
