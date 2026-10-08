@@ -3296,7 +3296,7 @@ var LEDGER_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Ledger.*?<\/summary>(
 var YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
 var THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
 var SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary>[\s\S]*?<\/details>/gi;
-var DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"\s*:\s*[\s\S]*?\}/gi;
+var DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"[\s\S]*?\}\s*/gi;
 var PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
 function extractProse(rawContent) {
   let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(LEDGER_DETAILS_RE, "").replace(DIRECTOR_JSON_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
@@ -3782,7 +3782,18 @@ async function evaluateDirectorInterceptor(messages, context, getChatState, getD
   }
   const systemGuard = `[LumiVN Living World Director Guidance]
 ${activeDirective}
-(CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON. You MUST generate the roleplay reply following the preset format: <details><summary>\uD83E\uDDE0 Scene Logic</summary>, followed by narrative prose, followed by <details><summary>\uD83D\uDCCA Ledger</summary>.)`;
+
+[OUTPUT FORMAT REQUIREMENT]
+1. Begin your reply on the very first line with the director JSON:
+{"director_note":"<your directive here>","thread_label":"<short thread name>"}
+2. Immediately continue with the preset output contract:
+<details><summary>\uD83E\uDDE0 Scene Logic</summary>
+...
+</details>
+(Prose text here)
+<details><summary>\uD83D\uDCCA Ledger</summary>
+...
+</details>`;
   const generationId = context?.generationId;
   if (onInjectedDirective) {
     if (generationId)

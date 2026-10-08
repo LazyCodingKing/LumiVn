@@ -127,7 +127,8 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       const directorMsg = interceptorRes.messages[0];
       expect(directorMsg.role).toBe("system");
       expect(directorMsg.content).toContain("[LumiVN Living World Director Guidance]");
-      expect(directorMsg.content).toContain("CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON.");
+      expect(directorMsg.content).toContain("[OUTPUT FORMAT REQUIREMENT]");
+      expect(directorMsg.content).toContain('{"director_note":"<your directive here>","thread_label":"<short thread name>"}');
       expect(directorMsg.content).toContain("You are LumiWorld, a private world-state director");
       expect(directorMsg.content).toContain("advance the world behind the next visible reply");
       expect(directorMsg.content).toContain("Stay cautious.");

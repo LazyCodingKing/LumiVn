@@ -1166,7 +1166,18 @@ export async function evaluateDirectorInterceptor(
 
   const systemGuard = `[LumiVN Living World Director Guidance]
 ${activeDirective}
-(CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON. You MUST generate the roleplay reply following the preset format: <details><summary>🧠 Scene Logic</summary>, followed by narrative prose, followed by <details><summary>📊 Ledger</summary>.)`;
+
+[OUTPUT FORMAT REQUIREMENT]
+1. Begin your reply on the very first line with the director JSON:
+{"director_note":"<your directive here>","thread_label":"<short thread name>"}
+2. Immediately continue with the preset output contract:
+<details><summary>🧠 Scene Logic</summary>
+...
+</details>
+(Prose text here)
+<details><summary>📊 Ledger</summary>
+...
+</details>`;
 
   // Cache injected directive
   const generationId = (context as any)?.generationId;
@@ -1451,7 +1462,7 @@ const LEDGER_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Ledger.*?<\/summary
 const YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
 const THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
 const SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary>[\s\S]*?<\/details>/gi;
-const DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"\s*:\s*[\s\S]*?\}/gi;
+const DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"[\s\S]*?\}\s*/gi;
 const PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
 
 /**
@@ -10516,7 +10527,8 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       const directorMsg = interceptorRes.messages[0];
       expect(directorMsg.role).toBe("system");
       expect(directorMsg.content).toContain("[LumiVN Living World Director Guidance]");
-      expect(directorMsg.content).toContain("CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON.");
+      expect(directorMsg.content).toContain("[OUTPUT FORMAT REQUIREMENT]");
+      expect(directorMsg.content).toContain('{"director_note":"<your directive here>","thread_label":"<short thread name>"}');
       expect(directorMsg.content).toContain("You are LumiWorld, a private world-state director");
       expect(directorMsg.content).toContain("advance the world behind the next visible reply");
       expect(directorMsg.content).toContain("Stay cautious.");

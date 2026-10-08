@@ -110,7 +110,18 @@ export async function evaluateDirectorInterceptor(
 
   const systemGuard = `[LumiVN Living World Director Guidance]
 ${activeDirective}
-(CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON. You MUST generate the roleplay reply following the preset format: <details><summary>🧠 Scene Logic</summary>, followed by narrative prose, followed by <details><summary>📊 Ledger</summary>.)`;
+
+[OUTPUT FORMAT REQUIREMENT]
+1. Begin your reply on the very first line with the director JSON:
+{"director_note":"<your directive here>","thread_label":"<short thread name>"}
+2. Immediately continue with the preset output contract:
+<details><summary>🧠 Scene Logic</summary>
+...
+</details>
+(Prose text here)
+<details><summary>📊 Ledger</summary>
+...
+</details>`;
 
   // Cache injected directive
   const generationId = (context as any)?.generationId;
