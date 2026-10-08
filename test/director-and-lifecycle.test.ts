@@ -2,15 +2,37 @@ import { describe, expect, test } from "bun:test";
 import {
   evaluateDirectorInterceptor,
   processBPlots,
+  computeDirectorImpactDiff,
+  resolveIdentityMacros,
+  formatDirectorDirective,
   DIRECTOR_DIRECTIVES,
-  extractChatId,
-  extractGenerationType,
 } from "../src/backend/director.js";
 import { MenuBar } from "../src/frontend/hud/menu-bar.js";
+import { registerDiagnosticsDrawer } from "../src/frontend/studio/diagnostics-drawer.js";
 import type { LlmMessageDTO, InterceptorResultDTO } from "lumiverse-spindle-types";
-import type { LedgerData } from "../src/shared/types.js";
+import type { LedgerData, DirectorSettings, DirectorLogEntry } from "../src/shared/types.js";
 
 describe("LumiVN Director & Lifecycle Systems", () => {
+  describe("Macros & Director Directive Formatting", () => {
+    test("resolveIdentityMacros substitutes {{user}} and {{char}} correctly", () => {
+      const template = "Guide {{user}} into interacting with {{char}} carefully.";
+      const resolved = resolveIdentityMacros(template, "Raja", "Tessa");
+      expect(resolved).toBe("Guide Raja into interacting with Tessa carefully.");
+    });
+
+    test("formatDirectorDirective combines system prompt and resolved scene notes", () => {
+      const settings: DirectorSettings = {
+        systemPrompt: "[LumiVN Living World Director]\n- Guard agency.",
+        userNotes: "Do not let {{user}} discover the key yet.",
+        enabled: true,
+      };
+      const formatted = formatDirectorDirective(settings, "Hero");
+      expect(formatted).toContain("[LumiVN Living World Director]");
+      expect(formatted).toContain("[Scene Notes & Guidance]");
+      expect(formatted).toContain("Do not let Hero discover the key yet.");
+    });
+  });
+
   describe("Pre-Turn Director Interceptor & Agency Guardrails", () => {
     test("guards against dry runs, missing chat IDs, and quiet generation types", async () => {
       const messages: LlmMessageDTO[] = [{ role: "user", content: "Hello there" }];
@@ -44,6 +66,21 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       expect(res4).toBe(messages);
     });
 
+    test("skips injection if Director is disabled in settings", async () => {
+      const messages: LlmMessageDTO[] = [{ role: "user", content: "Hello" }];
+      const res = await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_123", generationType: "normal" },
+        async () => ({ scene: { place: "room" } }),
+        async () => ({
+          systemPrompt: "System",
+          userNotes: "",
+          enabled: false,
+        })
+      );
+      expect(res).toBe(messages);
+    });
+
     test("skips injection if current chat state is not found", async () => {
       const messages: LlmMessageDTO[] = [{ role: "user", content: "Hello" }];
       const res = await evaluateDirectorInterceptor(
@@ -63,10 +100,22 @@ describe("LumiVN Director & Lifecycle Systems", () => {
         roster: [{ id: "npc_a", name: "Alice" }],
       };
 
+      let cachedKey: string | null = null;
+      let cachedDirective: string | null = null;
+
       const result = await evaluateDirectorInterceptor(
         messages,
-        { chatId: "chat_active", generationType: "normal" },
-        async () => fakeLedger
+        { chatId: "chat_active", generationId: "gen_99", generationType: "normal" },
+        async () => fakeLedger,
+        async () => ({
+          systemPrompt: DIRECTOR_DIRECTIVES,
+          userNotes: "Stay cautious.",
+          enabled: true,
+        }),
+        (key, dir) => {
+          cachedKey = key;
+          cachedDirective = dir;
+        }
       );
 
       expect(typeof result).toBe("object");
@@ -82,6 +131,11 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       expect(directorMsg.content).toContain("NPC AUTONOMY");
       expect(directorMsg.content).toContain("PERSISTENT SECRETS");
       expect(directorMsg.content).toContain("UNRESOLVED TENSION");
+      expect(directorMsg.content).toContain("Stay cautious.");
+
+      // Injected directive cached for post-turn diff logging
+      expect(cachedKey).toBe("chat_active");
+      expect(cachedDirective).toContain("Stay cautious.");
 
       // Original user message preserved
       expect(interceptorRes.messages[1].content).toBe("I take a step into the parlor.");
@@ -103,6 +157,86 @@ describe("LumiVN Director & Lifecycle Systems", () => {
         async () => ({})
       );
       expect(result).toBe(messages);
+    });
+  });
+
+  describe("Post-Turn State Diffing & Director Log Generation", () => {
+    test("accurately diffs world shifts, NPC intent, passions, relations, and mutations", () => {
+      const prevLedger: LedgerData = {
+        clock: { t: "D1 10:00" },
+        scene: { place: "hallway" },
+        bplots: [
+          { id: "bp_1", who: "Officer Jenny", ripple: 1, status: "active" },
+        ],
+        opportunities: [
+          { id: "opp_1", what: "Old Key", status: "lead" },
+        ],
+        actors: {
+          tessa: {
+            name: "Tessa",
+            agency: { want_now: "Explore the house" },
+            passions: { anger: 10, fear: 0 },
+            relations: { user: { trust: 50 } },
+          },
+        },
+        journal: [],
+      };
+
+      const nextLedger: LedgerData = {
+        clock: { t: "D1 10:15" },
+        scene: { place: "library" },
+        bplots: [
+          { id: "bp_1", who: "Officer Jenny", ripple: 2, status: "active" },
+          { id: "bp_2", who: "Mysterious Merchant", ripple: 1, status: "active" },
+        ],
+        opportunities: [
+          { id: "opp_1", what: "Old Key", status: "taken" },
+        ],
+        actors: {
+          tessa: {
+            name: "Tessa",
+            agency: { want_now: "Conceal embarrassment" },
+            passions: { anger: 25, arousal: 30 },
+            relations: { user: { trust: 65 } },
+          },
+        },
+        journal: [
+          {
+            id: "j_1",
+            action: "Looked around the library",
+            mutations: ["tessa.passions.arousal += 30", "user.inventory += 'Old Key'"],
+          },
+        ],
+      };
+
+      const diff = computeDirectorImpactDiff(
+        prevLedger,
+        nextLedger,
+        "[LumiVN Living World Director] Directives"
+      );
+
+      expect(diff).toBeDefined();
+      expect(diff.directive).toBe("[LumiVN Living World Director] Directives");
+
+      // World shifts
+      expect(diff.worldChanges).toContain("Clock advanced: D1 10:00 -> D1 10:15");
+      expect(diff.worldChanges).toContain("Scene location moved: hallway -> library");
+      expect(diff.worldChanges.some((w) => w.includes("B-Plot escalated: Officer Jenny ripple 1 -> 2"))).toBe(true);
+      expect(diff.worldChanges.some((w) => w.includes("New B-Plot: Mysterious Merchant"))).toBe(true);
+      expect(diff.worldChanges.some((w) => w.includes('Opportunity status changed: "Old Key" -> taken'))).toBe(true);
+
+      // NPC intent & changes
+      expect(diff.npcChanges.length).toBe(1);
+      const tessaDiff = diff.npcChanges[0];
+      expect(tessaDiff.actorId).toBe("tessa");
+      expect(tessaDiff.wantNow).toBe("Conceal embarrassment");
+      expect(tessaDiff.passionsMoved?.anger).toBe(25);
+      expect(tessaDiff.passionsMoved?.arousal).toBe(30);
+      expect(tessaDiff.relationsMoved?.user).toEqual({ trust: 65 });
+
+      // Journal mutations
+      expect(diff.mutations).toContain("tessa.passions.arousal += 30");
+      expect(diff.mutations).toContain("user.inventory += 'Old Key'");
     });
   });
 
@@ -190,6 +324,103 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       menuBar.setLedger({ clock: { t: "14:05" } }, false);
       expect(badge.style.display).toBe("none");
       expect(badge.classList.contains("vn-pulse")).toBe(false);
+    });
+  });
+
+  describe("Sidebar Diagnostics Drawer: Director Prompt Editor & Impact Console", () => {
+    test("renders Director Prompt editor controls and dispatches vn_save_director_settings", () => {
+      const sentMessages: any[] = [];
+      const mockCtx: any = {
+        ui: {
+          registerDrawerTab: (opts: any) => ({
+            id: opts.id,
+            root: document.createElement("div"),
+            destroy: () => {},
+          }),
+        },
+        sendToBackend: (msg: any) => sentMessages.push(msg),
+      };
+
+      const drawer = registerDiagnosticsDrawer(mockCtx, () => {});
+      expect(drawer).not.toBeNull();
+      const root = drawer!.tab.root;
+
+      // Editor elements exist
+      const systemTextarea = root.querySelector("#vn-director-system") as HTMLTextAreaElement;
+      const notesTextarea = root.querySelector("#vn-director-notes") as HTMLTextAreaElement;
+      const enabledCheckbox = root.querySelector("#vn-director-enabled") as HTMLInputElement;
+      const saveBtn = root.querySelector("#vn-director-save-btn") as HTMLButtonElement;
+
+      expect(systemTextarea).not.toBeNull();
+      expect(notesTextarea).not.toBeNull();
+      expect(enabledCheckbox).not.toBeNull();
+      expect(saveBtn).not.toBeNull();
+
+      // Test setDirectorSettings
+      drawer!.setDirectorSettings({
+        systemPrompt: "Custom directive",
+        userNotes: "Tessa secret notes",
+        enabled: true,
+      });
+
+      expect(systemTextarea.value).toBe("Custom directive");
+      expect(notesTextarea.value).toBe("Tessa secret notes");
+      expect(enabledCheckbox.checked).toBe(true);
+
+      // Click save button
+      saveBtn.click();
+      const saveMsg = sentMessages.find((m) => m.type === "vn_save_director_settings");
+      expect(saveMsg).toBeDefined();
+      expect(saveMsg.settings.systemPrompt).toBe("Custom directive");
+      expect(saveMsg.settings.userNotes).toBe("Tessa secret notes");
+      expect(saveMsg.settings.enabled).toBe(true);
+    });
+
+    test("renders Director Impact Console entries with visual tags", () => {
+      const mockCtx: any = {
+        ui: {
+          registerDrawerTab: (opts: any) => ({
+            id: opts.id,
+            root: document.createElement("div"),
+            destroy: () => {},
+          }),
+        },
+        sendToBackend: () => {},
+      };
+
+      const drawer = registerDiagnosticsDrawer(mockCtx, () => {});
+      const root = drawer!.tab.root;
+
+      const logEntry: DirectorLogEntry = {
+        timestamp: "12:34:56",
+        directive: "Stay in role and keep tension active",
+        worldChanges: ["Scene location moved: street -> dojo"],
+        npcChanges: [
+          {
+            actorId: "tessa",
+            name: "Tessa",
+            wantNow: "Hide the letter",
+            passionsMoved: { anger: 40 },
+          },
+        ],
+        mutations: ["user.stamina -= 10"],
+      };
+
+      drawer!.pushDirectorLog(logEntry);
+
+      const directorStream = root.querySelector("#vn-director-log-stream") as HTMLElement;
+      expect(directorStream).not.toBeNull();
+      expect(directorStream.textContent).toContain("TURN IMPACT");
+      expect(directorStream.textContent).toContain("[Directive]");
+      expect(directorStream.textContent).toContain("Stay in role and keep tension active");
+      expect(directorStream.textContent).toContain("[World Shifts]");
+      expect(directorStream.textContent).toContain("Scene location moved: street -> dojo");
+      expect(directorStream.textContent).toContain("[NPC Intent]");
+      expect(directorStream.textContent).toContain("Tessa");
+      expect(directorStream.textContent).toContain('want_now -> "Hide the letter"');
+      expect(directorStream.textContent).toContain("anger (40)");
+      expect(directorStream.textContent).toContain("[Mutations]");
+      expect(directorStream.textContent).toContain("user.stamina -= 10");
     });
   });
 });

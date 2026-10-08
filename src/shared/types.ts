@@ -252,3 +252,23 @@ export interface AssetManifest {
   cgs?: Record<string, string>; // event action/cg name -> url
 }
 
+export interface DirectorSettings {
+  systemPrompt: string;
+  userNotes: string;
+  enabled: boolean;
+}
+
+export interface DirectorLogEntry {
+  timestamp: string;
+  directive: string;
+  worldChanges: string[];
+  npcChanges: Array<{
+    actorId: string;
+    name: string;
+    wantNow?: string;
+    passionsMoved?: Record<string, number>;
+    relationsMoved?: Record<string, any>;
+  }>;
+  mutations: string[];
+}
+

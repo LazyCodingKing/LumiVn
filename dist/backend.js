@@ -3,6 +3,18 @@ var DEFAULT_MANIFEST = {
   places: {},
   characters: {}
 };
+var DEFAULT_DIRECTOR_SETTINGS = {
+  systemPrompt: [
+    "[LumiVN Living World Director]",
+    "- PLAYER AGENCY GUARD: Never write dialogue, physical reactions, or internal choices for the player character.",
+    "- NPC AUTONOMY: Present NPCs must act on their own active want_now before accommodating {{user}}.",
+    "- PERSISTENT SECRETS: NPCs must conceal guarded secrets until direct witnessed evidence forces exposure.",
+    "- UNRESOLVED TENSION: Keep current scene friction active; do not rush to polite consensus."
+  ].join(`
+`),
+  userNotes: "",
+  enabled: true
+};
 
 class StorageManager {
   spindle;
@@ -85,6 +97,49 @@ class StorageManager {
       return await this.spindle.storage.exists(path);
     } catch {
       return false;
+    }
+  }
+  async getDirectorSettings() {
+    try {
+      const exists = await this.spindle.storage.exists("director_settings.json");
+      if (exists) {
+        const raw = await this.spindle.storage.read("director_settings.json");
+        return { ...DEFAULT_DIRECTOR_SETTINGS, ...JSON.parse(raw) };
+      }
+    } catch (e) {
+      console.warn("[LumiVN] Failed to read director_settings.json, using defaults:", e);
+    }
+    return { ...DEFAULT_DIRECTOR_SETTINGS };
+  }
+  async saveDirectorSettings(settings) {
+    try {
+      await this.spindle.storage.write("director_settings.json", JSON.stringify(settings, null, 2));
+    } catch (e) {
+      console.error("[LumiVN] Failed to save director_settings.json:", e);
+    }
+  }
+  async getDirectorLogs(chatId) {
+    try {
+      const path = `chats/${chatId}/director_logs.json`;
+      const exists = await this.spindle.storage.exists(path);
+      if (exists) {
+        const raw = await this.spindle.storage.read(path);
+        return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.warn(`[LumiVN] Failed to read director logs for ${chatId}:`, e);
+    }
+    return [];
+  }
+  async saveDirectorLogs(chatId, logs) {
+    try {
+      const dir = `chats/${chatId}`;
+      if (!await this.spindle.storage.exists(dir)) {
+        await this.spindle.storage.mkdir(dir);
+      }
+      await this.spindle.storage.write(`${dir}/director_logs.json`, JSON.stringify(logs, null, 2));
+    } catch (e) {
+      console.error(`[LumiVN] Failed to save director logs for ${chatId}:`, e);
     }
   }
 }
@@ -3622,14 +3677,7 @@ class AssetResolver {
 }
 
 // src/backend/director.ts
-var DIRECTOR_DIRECTIVES = [
-  "[LumiVN Living World Director]",
-  "- PLAYER AGENCY GUARD: Never write dialogue, physical reactions, or internal choices for the player character.",
-  "- NPC AUTONOMY: Present NPCs must act on their own active want_now before accommodating {{user}}.",
-  "- PERSISTENT SECRETS: NPCs must conceal guarded secrets until direct witnessed evidence forces exposure.",
-  "- UNRESOLVED TENSION: Keep current scene friction active; do not rush to polite consensus."
-].join(`
-`);
+var DIRECTOR_DIRECTIVES = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
 function extractChatId(context) {
   if (!context || typeof context !== "object")
     return null;
@@ -3647,25 +3695,145 @@ function extractGenerationType(context) {
   }
   return null;
 }
-async function evaluateDirectorInterceptor(messages, context, getChatState) {
+function resolveIdentityMacros(template, userName = "User", charName = "Character") {
+  if (!template)
+    return "";
+  return template.replace(/\{\{user\}\}/gi, userName).replace(/\{\{char\}\}/gi, charName);
+}
+function formatDirectorDirective(settings, userName, charName) {
+  let activeDirective = (settings.systemPrompt || "").trim();
+  if (settings.userNotes && settings.userNotes.trim()) {
+    const resolvedNotes = resolveIdentityMacros(settings.userNotes.trim(), userName, charName);
+    activeDirective = activeDirective ? `${activeDirective}
+
+[Scene Notes & Guidance]
+${resolvedNotes}` : resolvedNotes;
+  }
+  return activeDirective;
+}
+async function evaluateDirectorInterceptor(messages, context, getChatState, getDirectorSettings, onInjectedDirective) {
   const chatId = extractChatId(context);
   const genType = extractGenerationType(context);
   const isDry = Boolean(context?.dryRun || context?.isDryRun);
   if (!chatId || isDry || genType === "quiet")
     return messages;
+  const settings = getDirectorSettings ? await getDirectorSettings() : DEFAULT_DIRECTOR_SETTINGS;
+  if (!settings || !settings.enabled)
+    return messages;
   const currentState = await getChatState(chatId);
   if (!currentState)
     return messages;
-  if (messages.some((m) => typeof m.content === "string" && m.content.includes("[LumiVN Living World Director]"))) {
+  const activeDirective = formatDirectorDirective(settings);
+  if (!activeDirective)
     return messages;
+  if (messages.some((m) => typeof m.content === "string" && m.content.includes(activeDirective))) {
+    return messages;
+  }
+  const generationId = context?.generationId;
+  if (onInjectedDirective) {
+    if (generationId)
+      onInjectedDirective(`${chatId}:${generationId}`, activeDirective);
+    onInjectedDirective(chatId, activeDirective);
   }
   const directorBlock = {
     role: "system",
-    content: DIRECTOR_DIRECTIVES
+    content: activeDirective
   };
   return {
     messages: [directorBlock, ...messages],
     breakdown: [{ messageIndex: 0, name: "LumiVN Director" }]
+  };
+}
+function computeDirectorImpactDiff(prevLedger, nextLedger, directive) {
+  const worldChanges = [];
+  const npcChanges = [];
+  const mutations = [];
+  const prevTime = prevLedger?.clock?.t;
+  const nextTime = nextLedger?.clock?.t;
+  if (nextTime && nextTime !== prevTime) {
+    worldChanges.push(`Clock advanced: ${prevTime || "start"} -> ${nextTime}`);
+  }
+  const prevPlace = prevLedger?.scene?.place;
+  const nextPlace = nextLedger?.scene?.place;
+  if (nextPlace && nextPlace !== prevPlace) {
+    worldChanges.push(`Scene location moved: ${prevPlace || "initial"} -> ${nextPlace}`);
+  }
+  const prevBPlots = prevLedger?.bplots || [];
+  const nextBPlots = nextLedger?.bplots || [];
+  for (const nextBp of nextBPlots) {
+    const prevBp = prevBPlots.find((b) => b.id === nextBp.id);
+    if (!prevBp) {
+      worldChanges.push(`New B-Plot: ${nextBp.who || nextBp.id} (${nextBp.doing || "active"}) [ripple ${nextBp.ripple ?? 1}]`);
+    } else if (prevBp.ripple !== nextBp.ripple) {
+      worldChanges.push(`B-Plot escalated: ${nextBp.who || nextBp.id} ripple ${prevBp.ripple} -> ${nextBp.ripple}`);
+    } else if (prevBp.status !== nextBp.status) {
+      worldChanges.push(`B-Plot status shift: ${nextBp.who || nextBp.id} -> ${nextBp.status}`);
+    }
+  }
+  const prevOpps = prevLedger?.opportunities || [];
+  const nextOpps = nextLedger?.opportunities || [];
+  for (const nextOpp of nextOpps) {
+    const prevOpp = prevOpps.find((o) => o.id === nextOpp.id);
+    if (!prevOpp) {
+      worldChanges.push(`New Opportunity: "${nextOpp.what || nextOpp.id}" (${nextOpp.status || "lead"})`);
+    } else if (prevOpp.status !== nextOpp.status) {
+      worldChanges.push(`Opportunity status changed: "${nextOpp.what || nextOpp.id}" -> ${nextOpp.status}`);
+    }
+  }
+  const nextActors = nextLedger?.actors || {};
+  const prevActors = prevLedger?.actors || {};
+  for (const [actorId, actor] of Object.entries(nextActors)) {
+    if (!actor)
+      continue;
+    const prevActor = prevActors[actorId];
+    const name = actor.name || actorId;
+    const prevWantNow = prevActor?.agency?.want_now || prevActor?.state?.want_now;
+    const nextWantNow = actor.agency?.want_now || actor.state?.want_now;
+    const wantChanged = Boolean(nextWantNow && nextWantNow !== prevWantNow);
+    const prevGoals = prevActor?.agency?.goals;
+    const nextGoals = actor.agency?.goals;
+    const goalsChanged = Boolean(nextGoals && JSON.stringify(nextGoals) !== JSON.stringify(prevGoals));
+    const passionsMoved = {};
+    const nextPassions = actor.passions || {};
+    const prevPassions = prevActor?.passions || {};
+    for (const [pKey, pVal] of Object.entries(nextPassions)) {
+      if (typeof pVal === "number" && pVal !== prevPassions[pKey]) {
+        passionsMoved[pKey] = pVal;
+      }
+    }
+    const relationsMoved = {};
+    const nextRelations = actor.relations || {};
+    const prevRelations = prevActor?.relations || {};
+    for (const [target, relData] of Object.entries(nextRelations)) {
+      if (JSON.stringify(relData) !== JSON.stringify(prevRelations[target])) {
+        relationsMoved[target] = relData;
+      }
+    }
+    if (wantChanged || goalsChanged || Object.keys(passionsMoved).length > 0 || Object.keys(relationsMoved).length > 0) {
+      npcChanges.push({
+        actorId,
+        name,
+        wantNow: nextWantNow || (goalsChanged ? `Goals: ${JSON.stringify(nextGoals)}` : undefined),
+        passionsMoved: Object.keys(passionsMoved).length > 0 ? passionsMoved : undefined,
+        relationsMoved: Object.keys(relationsMoved).length > 0 ? relationsMoved : undefined
+      });
+    }
+  }
+  if (nextLedger?.journal && nextLedger.journal.length > 0) {
+    const latest = nextLedger.journal[nextLedger.journal.length - 1];
+    if (Array.isArray(latest?.mutations)) {
+      for (const m of latest.mutations) {
+        if (m)
+          mutations.push(String(m));
+      }
+    }
+  }
+  return {
+    timestamp: new Date().toLocaleTimeString(),
+    directive: directive || "Default living world constraints",
+    worldChanges,
+    npcChanges,
+    mutations
   };
 }
 function processBPlots(ledger) {
@@ -3710,8 +3878,10 @@ var isStageOpen = false;
 var activeVnChats = new Set;
 var activeGenerationIds = new Map;
 var pendingCommits = new Map;
+var injectedDirectives = new Map;
+var directorLogBuffers = new Map;
 async function handleInterceptor(messages, context) {
-  return evaluateDirectorInterceptor(messages, context, (cid) => storage.getChatState(cid));
+  return evaluateDirectorInterceptor(messages, context, (cid) => storage.getChatState(cid), () => storage.getDirectorSettings(), (key, directive) => injectedDirectives.set(key, directive));
 }
 if (typeof spindle.registerInterceptor === "function") {
   spindle.registerInterceptor(handleInterceptor, 150);
@@ -3809,6 +3979,7 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
       return;
     const rawLedger = extractLedgerRaw(targetMessage.content);
     let cumulativeLedger = await storage.getChatState(chatId);
+    const prevLedger = cumulativeLedger ? JSON.parse(JSON.stringify(cumulativeLedger)) : null;
     if (rawLedger) {
       const delta = parseLedgerYaml(rawLedger);
       cumulativeLedger = deepMergeLedger(cumulativeLedger, delta);
@@ -3836,6 +4007,25 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     await storage.saveChatState(chatId, cumulativeLedger);
     if (commitKey) {
       pendingCommits.delete(commitKey);
+    }
+    const activeDirective = effectiveGenId && injectedDirectives.get(`${chatId}:${effectiveGenId}`) || injectedDirectives.get(chatId) || (await storage.getDirectorSettings()).systemPrompt;
+    const directorEntry = computeDirectorImpactDiff(prevLedger, cumulativeLedger, activeDirective);
+    let logBuffer = directorLogBuffers.get(chatId);
+    if (!logBuffer) {
+      logBuffer = await storage.getDirectorLogs(chatId);
+    }
+    logBuffer.push(directorEntry);
+    if (logBuffer.length > 20) {
+      logBuffer = logBuffer.slice(logBuffer.length - 20);
+    }
+    directorLogBuffers.set(chatId, logBuffer);
+    await storage.saveDirectorLogs(chatId, logBuffer);
+    spindle.sendToFrontend({
+      type: "vn_director_log",
+      log: directorEntry
+    });
+    if (effectiveGenId) {
+      injectedDirectives.delete(`${chatId}:${effectiveGenId}`);
     }
     const prose = extractProse(targetMessage.content);
     const presentation = await resolver.buildPresentationState(chatId, targetMessage.id || "msg_latest", prose, cumulativeLedger, characterId);
@@ -3874,6 +4064,7 @@ spindle.on("GENERATION_STARTED", (payload) => {
   const previousGenId = activeGenerationIds.get(chatId);
   if (previousGenId && previousGenId !== generationId) {
     pendingCommits.delete(`${chatId}:${previousGenId}`);
+    injectedDirectives.delete(`${chatId}:${previousGenId}`);
     spindle.log.info(`[LumiVN] Discarded uncommitted state from superseded generation ${previousGenId} on chat ${chatId}`);
   }
   activeGenerationIds.set(chatId, generationId);
@@ -3884,6 +4075,7 @@ spindle.on("GENERATION_STOPPED", (payload) => {
     return;
   const commitKey = `${chatId}:${generationId}`;
   pendingCommits.delete(commitKey);
+  injectedDirectives.delete(commitKey);
   if (activeGenerationIds.get(chatId) === generationId) {
     activeGenerationIds.delete(chatId);
   }
@@ -3896,6 +4088,7 @@ spindle.on("GENERATION_ENDED", async (payload) => {
   if (error) {
     if (generationId) {
       pendingCommits.delete(`${chatId}:${generationId}`);
+      injectedDirectives.delete(`${chatId}:${generationId}`);
     }
     if (activeGenerationIds.get(chatId) === generationId) {
       activeGenerationIds.delete(chatId);
@@ -4015,6 +4208,43 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
       if (manifest) {
         await storage.saveManifest(manifest);
         spindle.sendToFrontend({ type: "vn_manifest", manifest });
+      }
+      break;
+    }
+    case "vn_get_director_settings": {
+      const settings = await storage.getDirectorSettings();
+      spindle.sendToFrontend({ type: "vn_director_settings", settings });
+      break;
+    }
+    case "vn_save_director_settings": {
+      const settings = payload.settings;
+      if (settings) {
+        await storage.saveDirectorSettings(settings);
+        if (typeof spindle.toast?.success === "function") {
+          spindle.toast.success("Director prompt saved");
+        }
+        spindle.sendToFrontend({ type: "vn_director_settings", settings });
+        spindle.sendToFrontend({
+          type: "vn_log",
+          message: "Director prompt and scene notes saved.",
+          level: "info"
+        });
+      }
+      break;
+    }
+    case "vn_get_director_logs": {
+      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
+      if (chatId) {
+        let logs = directorLogBuffers.get(chatId);
+        if (!logs) {
+          logs = await storage.getDirectorLogs(chatId);
+          directorLogBuffers.set(chatId, logs);
+        }
+        spindle.sendToFrontend({
+          type: "vn_director_logs",
+          chatId,
+          logs
+        });
       }
       break;
     }

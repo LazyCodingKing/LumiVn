@@ -1,9 +1,21 @@
 import type { SpindleAPI } from "lumiverse-spindle-types";
-import type { AssetManifest, LedgerData } from "../shared/types.js";
+import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry } from "../shared/types.js";
 
 const DEFAULT_MANIFEST: AssetManifest = {
   places: {},
   characters: {},
+};
+
+export const DEFAULT_DIRECTOR_SETTINGS: DirectorSettings = {
+  systemPrompt: [
+    "[LumiVN Living World Director]",
+    "- PLAYER AGENCY GUARD: Never write dialogue, physical reactions, or internal choices for the player character.",
+    "- NPC AUTONOMY: Present NPCs must act on their own active want_now before accommodating {{user}}.",
+    "- PERSISTENT SECRETS: NPCs must conceal guarded secrets until direct witnessed evidence forces exposure.",
+    "- UNRESOLVED TENSION: Keep current scene friction active; do not rush to polite consensus.",
+  ].join("\n"),
+  userNotes: "",
+  enabled: true,
 };
 
 export class StorageManager {
@@ -97,6 +109,53 @@ export class StorageManager {
       return await this.spindle.storage.exists(path);
     } catch {
       return false;
+    }
+  }
+
+  async getDirectorSettings(): Promise<DirectorSettings> {
+    try {
+      const exists = await this.spindle.storage.exists("director_settings.json");
+      if (exists) {
+        const raw = await this.spindle.storage.read("director_settings.json");
+        return { ...DEFAULT_DIRECTOR_SETTINGS, ...JSON.parse(raw) };
+      }
+    } catch (e) {
+      console.warn("[LumiVN] Failed to read director_settings.json, using defaults:", e);
+    }
+    return { ...DEFAULT_DIRECTOR_SETTINGS };
+  }
+
+  async saveDirectorSettings(settings: DirectorSettings): Promise<void> {
+    try {
+      await this.spindle.storage.write("director_settings.json", JSON.stringify(settings, null, 2));
+    } catch (e) {
+      console.error("[LumiVN] Failed to save director_settings.json:", e);
+    }
+  }
+
+  async getDirectorLogs(chatId: string): Promise<DirectorLogEntry[]> {
+    try {
+      const path = `chats/${chatId}/director_logs.json`;
+      const exists = await this.spindle.storage.exists(path);
+      if (exists) {
+        const raw = await this.spindle.storage.read(path);
+        return JSON.parse(raw) as DirectorLogEntry[];
+      }
+    } catch (e) {
+      console.warn(`[LumiVN] Failed to read director logs for ${chatId}:`, e);
+    }
+    return [];
+  }
+
+  async saveDirectorLogs(chatId: string, logs: DirectorLogEntry[]): Promise<void> {
+    try {
+      const dir = `chats/${chatId}`;
+      if (!(await this.spindle.storage.exists(dir))) {
+        await this.spindle.storage.mkdir(dir);
+      }
+      await this.spindle.storage.write(`${dir}/director_logs.json`, JSON.stringify(logs, null, 2));
+    } catch (e) {
+      console.error(`[LumiVN] Failed to save director logs for ${chatId}:`, e);
     }
   }
 }

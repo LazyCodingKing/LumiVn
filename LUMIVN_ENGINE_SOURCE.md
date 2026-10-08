@@ -78,8 +78,9 @@ import {
 import {
   evaluateDirectorInterceptor,
   processBPlots,
+  computeDirectorImpactDiff,
 } from "./backend/director.js";
-import type { AssetManifest, LedgerData } from "./shared/types.js";
+import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry } from "./shared/types.js";
 
 declare const spindle: SpindleAPI;
 
@@ -90,16 +91,24 @@ let lastActiveChatId: string | null = null;
 let isStageOpen = false;
 const activeVnChats = new Set<string>();
 
-// LumiWorld Two-Stage Commit Lifecycle
+// LumiWorld Two-Stage Commit Lifecycle & Injected Directives Tracking
 const activeGenerationIds = new Map<string, string>(); // chatId -> generationId
 const pendingCommits = new Map<string, LedgerData>(); // `${chatId}:${generationId}` -> LedgerData
+const injectedDirectives = new Map<string, string>(); // `${chatId}:${generationId}` -> directive
+const directorLogBuffers = new Map<string, DirectorLogEntry[]>(); // chatId -> DirectorLogEntry[]
 
 // ── Pre-Turn Director & Agency Guardrails ──
 async function handleInterceptor(
   messages: LlmMessageDTO[],
   context: unknown
 ): Promise<LlmMessageDTO[] | InterceptorResultDTO> {
-  return evaluateDirectorInterceptor(messages, context, (cid) => storage.getChatState(cid));
+  return evaluateDirectorInterceptor(
+    messages,
+    context,
+    (cid) => storage.getChatState(cid),
+    () => storage.getDirectorSettings(),
+    (key, directive) => injectedDirectives.set(key, directive)
+  );
 }
 
 if (typeof (spindle as any).registerInterceptor === "function") {
@@ -220,6 +229,9 @@ async function processChatTurn(
     // Extract Ledger YAML
     const rawLedger = extractLedgerRaw(targetMessage.content);
     let cumulativeLedger = await storage.getChatState(chatId);
+    const prevLedger: LedgerData | null = cumulativeLedger
+      ? JSON.parse(JSON.stringify(cumulativeLedger))
+      : null;
 
     if (rawLedger) {
       const delta = parseLedgerYaml(rawLedger);
@@ -255,6 +267,38 @@ async function processChatTurn(
 
     if (commitKey) {
       pendingCommits.delete(commitKey);
+    }
+
+    // Post-Turn State Diffing & Director Log Generation
+    const activeDirective =
+      (effectiveGenId && injectedDirectives.get(`${chatId}:${effectiveGenId}`)) ||
+      injectedDirectives.get(chatId) ||
+      (await storage.getDirectorSettings()).systemPrompt;
+
+    const directorEntry = computeDirectorImpactDiff(
+      prevLedger,
+      cumulativeLedger,
+      activeDirective
+    );
+
+    let logBuffer = directorLogBuffers.get(chatId);
+    if (!logBuffer) {
+      logBuffer = await storage.getDirectorLogs(chatId);
+    }
+    logBuffer.push(directorEntry);
+    if (logBuffer.length > 20) {
+      logBuffer = logBuffer.slice(logBuffer.length - 20);
+    }
+    directorLogBuffers.set(chatId, logBuffer);
+    await storage.saveDirectorLogs(chatId, logBuffer);
+
+    spindle.sendToFrontend({
+      type: "vn_director_log",
+      log: directorEntry,
+    });
+
+    if (effectiveGenId) {
+      injectedDirectives.delete(`${chatId}:${effectiveGenId}`);
     }
 
     const prose = extractProse(targetMessage.content);
@@ -312,6 +356,7 @@ spindle.on("GENERATION_STARTED", (payload: GenerationStartedPayloadDTO) => {
   const previousGenId = activeGenerationIds.get(chatId);
   if (previousGenId && previousGenId !== generationId) {
     pendingCommits.delete(`${chatId}:${previousGenId}`);
+    injectedDirectives.delete(`${chatId}:${previousGenId}`);
     spindle.log.info(`[LumiVN] Discarded uncommitted state from superseded generation ${previousGenId} on chat ${chatId}`);
   }
   activeGenerationIds.set(chatId, generationId);
@@ -323,6 +368,7 @@ spindle.on("GENERATION_STOPPED", (payload: GenerationStoppedPayloadDTO) => {
 
   const commitKey = `${chatId}:${generationId}`;
   pendingCommits.delete(commitKey);
+  injectedDirectives.delete(commitKey);
   if (activeGenerationIds.get(chatId) === generationId) {
     activeGenerationIds.delete(chatId);
   }
@@ -336,6 +382,7 @@ spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
   if (error) {
     if (generationId) {
       pendingCommits.delete(`${chatId}:${generationId}`);
+      injectedDirectives.delete(`${chatId}:${generationId}`);
     }
     if (activeGenerationIds.get(chatId) === generationId) {
       activeGenerationIds.delete(chatId);
@@ -469,6 +516,46 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
       if (manifest) {
         await storage.saveManifest(manifest);
         spindle.sendToFrontend({ type: "vn_manifest", manifest });
+      }
+      break;
+    }
+
+    case "vn_get_director_settings": {
+      const settings = await storage.getDirectorSettings();
+      spindle.sendToFrontend({ type: "vn_director_settings", settings });
+      break;
+    }
+
+    case "vn_save_director_settings": {
+      const settings = payload.settings as DirectorSettings;
+      if (settings) {
+        await storage.saveDirectorSettings(settings);
+        if (typeof (spindle as any).toast?.success === "function") {
+          (spindle as any).toast.success("Director prompt saved");
+        }
+        spindle.sendToFrontend({ type: "vn_director_settings", settings });
+        spindle.sendToFrontend({
+          type: "vn_log",
+          message: "Director prompt and scene notes saved.",
+          level: "info",
+        });
+      }
+      break;
+    }
+
+    case "vn_get_director_logs": {
+      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
+      if (chatId) {
+        let logs = directorLogBuffers.get(chatId);
+        if (!logs) {
+          logs = await storage.getDirectorLogs(chatId);
+          directorLogBuffers.set(chatId, logs);
+        }
+        spindle.sendToFrontend({
+          type: "vn_director_logs",
+          chatId,
+          logs,
+        });
       }
       break;
     }
@@ -952,15 +1039,10 @@ export class AssetResolver {
 
 ```typescript
 import type { LlmMessageDTO, InterceptorResultDTO } from "lumiverse-spindle-types";
-import type { LedgerData, BPlot } from "../shared/types.js";
+import type { LedgerData, BPlot, DirectorSettings, DirectorLogEntry } from "../shared/types.js";
+import { DEFAULT_DIRECTOR_SETTINGS } from "./storage.js";
 
-export const DIRECTOR_DIRECTIVES = [
-  "[LumiVN Living World Director]",
-  "- PLAYER AGENCY GUARD: Never write dialogue, physical reactions, or internal choices for the player character.",
-  "- NPC AUTONOMY: Present NPCs must act on their own active want_now before accommodating {{user}}.",
-  "- PERSISTENT SECRETS: NPCs must conceal guarded secrets until direct witnessed evidence forces exposure.",
-  "- UNRESOLVED TENSION: Keep current scene friction active; do not rush to polite consensus.",
-].join("\n");
+export const DIRECTOR_DIRECTIVES = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
 
 export function extractChatId(context: unknown): string | null {
   if (!context || typeof context !== "object") return null;
@@ -978,10 +1060,34 @@ export function extractGenerationType(context: unknown): string | null {
   return null;
 }
 
+export function resolveIdentityMacros(template: string, userName = "User", charName = "Character"): string {
+  if (!template) return "";
+  return template
+    .replace(/\{\{user\}\}/gi, userName)
+    .replace(/\{\{char\}\}/gi, charName);
+}
+
+export function formatDirectorDirective(
+  settings: DirectorSettings,
+  userName?: string,
+  charName?: string
+): string {
+  let activeDirective = (settings.systemPrompt || "").trim();
+  if (settings.userNotes && settings.userNotes.trim()) {
+    const resolvedNotes = resolveIdentityMacros(settings.userNotes.trim(), userName, charName);
+    activeDirective = activeDirective
+      ? `${activeDirective}\n\n[Scene Notes & Guidance]\n${resolvedNotes}`
+      : resolvedNotes;
+  }
+  return activeDirective;
+}
+
 export async function evaluateDirectorInterceptor(
   messages: LlmMessageDTO[],
   context: unknown,
-  getChatState: (chatId: string) => Promise<LedgerData | null>
+  getChatState: (chatId: string) => Promise<LedgerData | null>,
+  getDirectorSettings?: () => Promise<DirectorSettings>,
+  onInjectedDirective?: (key: string, directive: string) => void
 ): Promise<LlmMessageDTO[] | InterceptorResultDTO> {
   const chatId = extractChatId(context);
   const genType = extractGenerationType(context);
@@ -990,19 +1096,35 @@ export async function evaluateDirectorInterceptor(
   // 1. Guard against quiet/background generations & dry runs
   if (!chatId || isDry || genType === "quiet") return messages;
 
+  const settings = getDirectorSettings
+    ? await getDirectorSettings()
+    : DEFAULT_DIRECTOR_SETTINGS;
+
+  if (!settings || !settings.enabled) return messages;
+
   // 2. Read latest chat state and roster
   const currentState = await getChatState(chatId);
   if (!currentState) return messages;
 
+  const activeDirective = formatDirectorDirective(settings);
+  if (!activeDirective) return messages;
+
   // Guard against duplicate injections
-  if (messages.some((m) => typeof m.content === "string" && m.content.includes("[LumiVN Living World Director]"))) {
+  if (messages.some((m) => typeof m.content === "string" && m.content.includes(activeDirective))) {
     return messages;
+  }
+
+  // Cache injected directive
+  const generationId = (context as any)?.generationId;
+  if (onInjectedDirective) {
+    if (generationId) onInjectedDirective(`${chatId}:${generationId}`, activeDirective);
+    onInjectedDirective(chatId, activeDirective);
   }
 
   // 3. Directorial Guidance Block
   const directorBlock: LlmMessageDTO = {
     role: "system",
-    content: DIRECTOR_DIRECTIVES,
+    content: activeDirective,
   };
 
   return {
@@ -1010,6 +1132,150 @@ export async function evaluateDirectorInterceptor(
     breakdown: [{ messageIndex: 0, name: "LumiVN Director" }],
   };
 }
+
+export function computeDirectorImpactDiff(
+  prevLedger: LedgerData | null,
+  nextLedger: LedgerData,
+  directive: string
+): DirectorLogEntry {
+  const worldChanges: string[] = [];
+  const npcChanges: Array<{
+    actorId: string;
+    name: string;
+    wantNow?: string;
+    passionsMoved?: Record<string, number>;
+    relationsMoved?: Record<string, any>;
+  }> = [];
+  const mutations: string[] = [];
+
+  // 1. World diff
+  const prevTime = prevLedger?.clock?.t;
+  const nextTime = nextLedger?.clock?.t;
+  if (nextTime && nextTime !== prevTime) {
+    worldChanges.push(`Clock advanced: ${prevTime || "start"} -> ${nextTime}`);
+  }
+
+  const prevPlace = prevLedger?.scene?.place;
+  const nextPlace = nextLedger?.scene?.place;
+  if (nextPlace && nextPlace !== prevPlace) {
+    worldChanges.push(`Scene location moved: ${prevPlace || "initial"} -> ${nextPlace}`);
+  }
+
+  // B-Plots
+  const prevBPlots = prevLedger?.bplots || [];
+  const nextBPlots = nextLedger?.bplots || [];
+  for (const nextBp of nextBPlots) {
+    const prevBp = prevBPlots.find((b) => b.id === nextBp.id);
+    if (!prevBp) {
+      worldChanges.push(
+        `New B-Plot: ${nextBp.who || nextBp.id} (${nextBp.doing || "active"}) [ripple ${nextBp.ripple ?? 1}]`
+      );
+    } else if (prevBp.ripple !== nextBp.ripple) {
+      worldChanges.push(
+        `B-Plot escalated: ${nextBp.who || nextBp.id} ripple ${prevBp.ripple} -> ${nextBp.ripple}`
+      );
+    } else if (prevBp.status !== nextBp.status) {
+      worldChanges.push(
+        `B-Plot status shift: ${nextBp.who || nextBp.id} -> ${nextBp.status}`
+      );
+    }
+  }
+
+  // Opportunities
+  const prevOpps = prevLedger?.opportunities || [];
+  const nextOpps = nextLedger?.opportunities || [];
+  for (const nextOpp of nextOpps) {
+    const prevOpp = prevOpps.find((o) => o.id === nextOpp.id);
+    if (!prevOpp) {
+      worldChanges.push(
+        `New Opportunity: "${nextOpp.what || nextOpp.id}" (${nextOpp.status || "lead"})`
+      );
+    } else if (prevOpp.status !== nextOpp.status) {
+      worldChanges.push(
+        `Opportunity status changed: "${nextOpp.what || nextOpp.id}" -> ${nextOpp.status}`
+      );
+    }
+  }
+
+  // 2. NPC Behavior & Plans
+  const nextActors = nextLedger?.actors || {};
+  const prevActors = prevLedger?.actors || {};
+  for (const [actorId, actor] of Object.entries(nextActors)) {
+    if (!actor) continue;
+    const prevActor = prevActors[actorId];
+    const name = actor.name || actorId;
+
+    const prevWantNow =
+      (prevActor?.agency as any)?.want_now || (prevActor?.state as any)?.want_now;
+    const nextWantNow =
+      (actor.agency as any)?.want_now || (actor.state as any)?.want_now;
+    const wantChanged = Boolean(nextWantNow && nextWantNow !== prevWantNow);
+
+    const prevGoals = (prevActor?.agency as any)?.goals;
+    const nextGoals = (actor.agency as any)?.goals;
+    const goalsChanged = Boolean(
+      nextGoals && JSON.stringify(nextGoals) !== JSON.stringify(prevGoals)
+    );
+
+    // Shifted passions
+    const passionsMoved: Record<string, number> = {};
+    const nextPassions = actor.passions || {};
+    const prevPassions = prevActor?.passions || {};
+    for (const [pKey, pVal] of Object.entries(nextPassions)) {
+      if (typeof pVal === "number" && pVal !== (prevPassions as any)[pKey]) {
+        passionsMoved[pKey] = pVal;
+      }
+    }
+
+    // Moved relations
+    const relationsMoved: Record<string, any> = {};
+    const nextRelations = actor.relations || {};
+    const prevRelations = prevActor?.relations || {};
+    for (const [target, relData] of Object.entries(nextRelations)) {
+      if (JSON.stringify(relData) !== JSON.stringify(prevRelations[target])) {
+        relationsMoved[target] = relData;
+      }
+    }
+
+    if (
+      wantChanged ||
+      goalsChanged ||
+      Object.keys(passionsMoved).length > 0 ||
+      Object.keys(relationsMoved).length > 0
+    ) {
+      npcChanges.push({
+        actorId,
+        name,
+        wantNow:
+          nextWantNow ||
+          (goalsChanged ? `Goals: ${JSON.stringify(nextGoals)}` : undefined),
+        passionsMoved:
+          Object.keys(passionsMoved).length > 0 ? passionsMoved : undefined,
+        relationsMoved:
+          Object.keys(relationsMoved).length > 0 ? relationsMoved : undefined,
+      });
+    }
+  }
+
+  // 3. Journal Mutations
+  if (nextLedger?.journal && nextLedger.journal.length > 0) {
+    const latest = nextLedger.journal[nextLedger.journal.length - 1];
+    if (Array.isArray(latest?.mutations)) {
+      for (const m of latest.mutations) {
+        if (m) mutations.push(String(m));
+      }
+    }
+  }
+
+  return {
+    timestamp: new Date().toLocaleTimeString(),
+    directive: directive || "Default living world constraints",
+    worldChanges,
+    npcChanges,
+    mutations,
+  };
+}
+
 
 export interface BPlotProcessResult {
   hasBPlotNotification: boolean;
@@ -1337,11 +1603,23 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
 
 ```typescript
 import type { SpindleAPI } from "lumiverse-spindle-types";
-import type { AssetManifest, LedgerData } from "../shared/types.js";
+import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry } from "../shared/types.js";
 
 const DEFAULT_MANIFEST: AssetManifest = {
   places: {},
   characters: {},
+};
+
+export const DEFAULT_DIRECTOR_SETTINGS: DirectorSettings = {
+  systemPrompt: [
+    "[LumiVN Living World Director]",
+    "- PLAYER AGENCY GUARD: Never write dialogue, physical reactions, or internal choices for the player character.",
+    "- NPC AUTONOMY: Present NPCs must act on their own active want_now before accommodating {{user}}.",
+    "- PERSISTENT SECRETS: NPCs must conceal guarded secrets until direct witnessed evidence forces exposure.",
+    "- UNRESOLVED TENSION: Keep current scene friction active; do not rush to polite consensus.",
+  ].join("\n"),
+  userNotes: "",
+  enabled: true,
 };
 
 export class StorageManager {
@@ -1437,6 +1715,53 @@ export class StorageManager {
       return false;
     }
   }
+
+  async getDirectorSettings(): Promise<DirectorSettings> {
+    try {
+      const exists = await this.spindle.storage.exists("director_settings.json");
+      if (exists) {
+        const raw = await this.spindle.storage.read("director_settings.json");
+        return { ...DEFAULT_DIRECTOR_SETTINGS, ...JSON.parse(raw) };
+      }
+    } catch (e) {
+      console.warn("[LumiVN] Failed to read director_settings.json, using defaults:", e);
+    }
+    return { ...DEFAULT_DIRECTOR_SETTINGS };
+  }
+
+  async saveDirectorSettings(settings: DirectorSettings): Promise<void> {
+    try {
+      await this.spindle.storage.write("director_settings.json", JSON.stringify(settings, null, 2));
+    } catch (e) {
+      console.error("[LumiVN] Failed to save director_settings.json:", e);
+    }
+  }
+
+  async getDirectorLogs(chatId: string): Promise<DirectorLogEntry[]> {
+    try {
+      const path = `chats/${chatId}/director_logs.json`;
+      const exists = await this.spindle.storage.exists(path);
+      if (exists) {
+        const raw = await this.spindle.storage.read(path);
+        return JSON.parse(raw) as DirectorLogEntry[];
+      }
+    } catch (e) {
+      console.warn(`[LumiVN] Failed to read director logs for ${chatId}:`, e);
+    }
+    return [];
+  }
+
+  async saveDirectorLogs(chatId: string, logs: DirectorLogEntry[]): Promise<void> {
+    try {
+      const dir = `chats/${chatId}`;
+      if (!(await this.spindle.storage.exists(dir))) {
+        await this.spindle.storage.mkdir(dir);
+      }
+      await this.spindle.storage.write(`${dir}/director_logs.json`, JSON.stringify(logs, null, 2));
+    } catch (e) {
+      console.error(`[LumiVN] Failed to save director logs for ${chatId}:`, e);
+    }
+  }
 }
 
 ```
@@ -1445,7 +1770,7 @@ export class StorageManager {
 
 ```typescript
 import type { SpindleFrontendContext, SpindleAppMountHandle } from "lumiverse-spindle-types";
-import type { VnPresentationState } from "./shared/types.js";
+import type { VnPresentationState, DirectorSettings, DirectorLogEntry } from "./shared/types.js";
 import { StageOverlay } from "./frontend/stage/overlay.js";
 import { registerAssetDrawer } from "./frontend/studio/asset-drawer.js";
 import {
@@ -1684,6 +2009,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       diagDrawer?.setLatestManifest?.(payload.manifest);
       overlay.setManifest(payload.manifest as any);
       diagBus.setManifest(payload.manifest as any);
+    } else if (payload?.type === "vn_director_settings" && payload.settings) {
+      diagDrawer?.setDirectorSettings?.(payload.settings as DirectorSettings);
+    } else if (payload?.type === "vn_director_log" && payload.log) {
+      diagDrawer?.pushDirectorLog?.(payload.log as DirectorLogEntry);
+    } else if (payload?.type === "vn_director_logs" && Array.isArray(payload.logs)) {
+      diagDrawer?.setDirectorLogs?.(payload.logs as DirectorLogEntry[]);
     } else if (payload?.type === "vn_error") {
       diagDrawer?.pushLog(String(payload.error), "error");
       diagBus.pushLog(String(payload.error), "error");
@@ -8662,6 +8993,7 @@ export function registerAssetDrawer(ctx: SpindleFrontendContext): SpindleDrawerT
 
 ```typescript
 import type { SpindleFrontendContext, SpindleDrawerTabHandle } from "lumiverse-spindle-types";
+import type { DirectorSettings, DirectorLogEntry } from "../../shared/types.js";
 
 export interface DiagnosticData {
   timestamp: string;
@@ -8679,6 +9011,18 @@ export interface DiagnosticsHandle {
   updateDiagnostic: (data: DiagnosticData) => void;
   setLatestLedger: (ledger: unknown) => void;
   setLatestManifest: (manifest: unknown) => void;
+  setDirectorSettings: (settings: DirectorSettings) => void;
+  pushDirectorLog: (log: DirectorLogEntry) => void;
+  setDirectorLogs: (logs: DirectorLogEntry[]) => void;
+}
+
+function escapeHtml(text: string): string {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 export function registerDiagnosticsDrawer(
@@ -8691,26 +9035,68 @@ export function registerDiagnosticsDrawer(
     id: "vn_diagnostics",
     title: "LumiVN Controls & Diagnostics",
     shortName: "VN Diag",
-    description: "Launch visual novel stage, inspect Ledger parsing, and copy engine logs",
-    keywords: ["vn", "diagnostics", "ledger", "visual novel", "stage", "logs"],
+    description: "Launch visual novel stage, edit Director instructions, and inspect Director impact logs",
+    keywords: ["vn", "diagnostics", "ledger", "director", "visual novel", "stage", "logs"],
     iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>`,
   });
 
   const root = tab.root;
   let rawLogHistory: string[] = [];
+  let rawDirectorLogs: DirectorLogEntry[] = [];
   let latestLedgerData: unknown = null;
   let latestManifestData: unknown = null;
+  let activeConsoleTab: "logs" | "director" = "logs";
 
   root.innerHTML = `
     <div style="padding: 16px; font-family: system-ui, -apple-system, sans-serif; color: #f1f5f9; height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box;">
+      <!-- Control Center -->
       <div style="background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.25)); border: 1px solid rgba(129,140,248,0.5); border-radius: 12px; padding: 14px; text-align: center;">
         <h3 style="margin: 0 0 4px 0; font-size: 15px; color: #fff;">LumiVN Control Center</h3>
         <p style="font-size: 11px; color: #94a3b8; margin: 0 0 10px 0;">Switch between standard chat and the visual novel stage.</p>
-        <button id="vn-launch-btn" style="width: 100%; padding: 9px 16px; background: #6366f1; border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; cursor: pointer;">
+        <button id="vn-launch-btn" style="width: 100%; padding: 9px 16px; background: #6366f1; border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; transition: background 0.2s;">
           ▶ Open Visual Novel Stage
         </button>
       </div>
 
+      <!-- Director Prompt Editor Card -->
+      <details class="vn-director-card" open style="background: rgba(15, 23, 42, 0.7); border: 1px solid #334155; border-radius: 10px; padding: 12px;">
+        <summary style="font-size: 13px; font-weight: 700; color: #a5b4fc; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none;">
+          <span>🎬 Director Instructions & Scene Notes</span>
+          <label id="vn-director-toggle-label" style="font-size: 11px; font-weight: 500; color: #cbd5e1; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" onclick="event.stopPropagation()">
+            <input type="checkbox" id="vn-director-enabled" checked style="accent-color: #6366f1; cursor: pointer;" />
+            Active
+          </label>
+        </summary>
+
+        <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label for="vn-director-system" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase;">
+                Director System Directives
+              </label>
+              <button id="vn-director-expand-btn" type="button" style="padding: 2px 7px; font-size: 10px; background: #1e293b; border: 1px solid #475569; border-radius: 4px; color: #cbd5e1; cursor: pointer;">
+                ⤢ Expand Editor
+              </button>
+            </div>
+            <textarea id="vn-director-system" rows="5" placeholder="System directives enforced before generation..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 8px; resize: vertical; line-height: 1.4;"></textarea>
+          </div>
+
+          <div>
+            <label for="vn-director-notes" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; display: block; margin-bottom: 4px;">
+              Scene Notes & Guidance (Macros: {{user}}, {{char}})
+            </label>
+            <textarea id="vn-director-notes" rows="3" placeholder="Optional turn guidance (e.g. keep current tension active, reveal hints of secret)..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 8px; resize: vertical; line-height: 1.4;"></textarea>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button id="vn-director-save-btn" type="button" style="padding: 6px 14px; font-size: 11px; font-weight: 700; background: #6366f1; border: none; border-radius: 6px; color: #fff; cursor: pointer; transition: background 0.2s;">
+              Save Directives
+            </button>
+          </div>
+        </div>
+      </details>
+
+      <!-- Turn Telemetry Card -->
       <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid #334155; border-radius: 10px; padding: 12px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <h4 style="margin: 0; font-size: 11px; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px;">Turn Telemetry</h4>
@@ -8746,20 +9132,35 @@ export function registerDiagnosticsDrawer(
         </div>
       </div>
 
-      <div style="flex: 1; display: flex; flex-direction: column; background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; min-height: 220px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-          <h4 style="margin: 0; font-size: 11px; color: #94a3b8; text-transform: uppercase;">Diagnostic Console</h4>
+      <!-- Engine & Director Impact Console -->
+      <div style="flex: 1; display: flex; flex-direction: column; background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; min-height: 250px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div style="display: flex; gap: 4px;">
+            <button id="vn-console-tab-logs" type="button" style="padding: 3px 8px; font-size: 10px; font-weight: 700; background: #334155; border: 1px solid #475569; border-radius: 4px; color: #fff; cursor: pointer;">
+              Engine Console
+            </button>
+            <button id="vn-console-tab-director" type="button" style="padding: 3px 8px; font-size: 10px; font-weight: 600; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #94a3b8; cursor: pointer;">
+              Director Impact
+            </button>
+          </div>
           <div style="display: flex; gap: 6px;">
             <button id="vn-copy-logs-btn" style="padding: 2px 8px; font-size: 10px; background: #334155; border: 1px solid #475569; border-radius: 4px; color: #f8fafc; font-weight: 600; cursor: pointer;">
-              📋 Copy Logs
+              📋 Copy
             </button>
             <button id="vn-clear-log-btn" style="padding: 2px 6px; font-size: 10px; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #94a3b8; cursor: pointer;">
               Clear
             </button>
           </div>
         </div>
+
+        <!-- Stream: Engine Logs -->
         <div id="vn-log-stream" style="flex: 1; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #cbd5e1; display: flex; flex-direction: column; gap: 4px; user-select: text;">
           <div style="color: #64748b;">[System] Diagnostic stream initialized.</div>
+        </div>
+
+        <!-- Stream: Director Impact Logs -->
+        <div id="vn-director-log-stream" style="flex: 1; overflow-y: auto; font-family: system-ui, -apple-system, sans-serif; font-size: 11px; color: #cbd5e1; display: none; flex-direction: column; gap: 8px; user-select: text;">
+          <div id="vn-director-empty-notice" style="color: #64748b; font-style: italic;">No Director impact turns recorded yet.</div>
         </div>
       </div>
     </div>
@@ -8768,16 +9169,100 @@ export function registerDiagnosticsDrawer(
   root.querySelector("#vn-launch-btn")?.addEventListener("click", onLaunchStage);
 
   const logStream = root.querySelector("#vn-log-stream") as HTMLElement;
+  const directorStream = root.querySelector("#vn-director-log-stream") as HTMLElement;
+  const directorEmptyNotice = root.querySelector("#vn-director-empty-notice") as HTMLElement;
+
+  const tabLogsBtn = root.querySelector("#vn-console-tab-logs") as HTMLButtonElement;
+  const tabDirectorBtn = root.querySelector("#vn-console-tab-director") as HTMLButtonElement;
+
+  const systemTextarea = root.querySelector("#vn-director-system") as HTMLTextAreaElement;
+  const notesTextarea = root.querySelector("#vn-director-notes") as HTMLTextAreaElement;
+  const enabledCheckbox = root.querySelector("#vn-director-enabled") as HTMLInputElement;
+  const saveBtn = root.querySelector("#vn-director-save-btn") as HTMLButtonElement;
+  const expandBtn = root.querySelector("#vn-director-expand-btn") as HTMLButtonElement;
+
   const copyAllDrawerBtn = root.querySelector("#vn-copy-all-drawer-btn") as HTMLButtonElement;
   const copyLogsBtn = root.querySelector("#vn-copy-logs-btn") as HTMLButtonElement;
   const copyStateBtn = root.querySelector("#vn-copy-state-btn") as HTMLButtonElement;
   const copyManifestBtn = root.querySelector("#vn-copy-manifest-btn") as HTMLButtonElement;
 
+  // ── Console Tab Switching ──
+  const setConsoleTab = (tabMode: "logs" | "director") => {
+    activeConsoleTab = tabMode;
+    if (tabMode === "logs") {
+      logStream.style.display = "flex";
+      directorStream.style.display = "none";
+      tabLogsBtn.style.background = "#334155";
+      tabLogsBtn.style.borderColor = "#475569";
+      tabLogsBtn.style.color = "#fff";
+      tabDirectorBtn.style.background = "#1e293b";
+      tabDirectorBtn.style.borderColor = "#334155";
+      tabDirectorBtn.style.color = "#94a3b8";
+    } else {
+      logStream.style.display = "none";
+      directorStream.style.display = "flex";
+      tabDirectorBtn.style.background = "#334155";
+      tabDirectorBtn.style.borderColor = "#475569";
+      tabDirectorBtn.style.color = "#fff";
+      tabLogsBtn.style.background = "#1e293b";
+      tabLogsBtn.style.borderColor = "#334155";
+      tabLogsBtn.style.color = "#94a3b8";
+    }
+  };
+
+  tabLogsBtn?.addEventListener("click", () => setConsoleTab("logs"));
+  tabDirectorBtn?.addEventListener("click", () => setConsoleTab("director"));
+
+  // ── Clear Logs ──
   root.querySelector("#vn-clear-log-btn")?.addEventListener("click", () => {
-    if (logStream) logStream.innerHTML = "";
-    rawLogHistory = [];
+    if (activeConsoleTab === "logs") {
+      if (logStream) logStream.innerHTML = "";
+      rawLogHistory = [];
+    } else {
+      if (directorStream) {
+        directorStream.innerHTML = "";
+        directorStream.appendChild(directorEmptyNotice);
+        directorEmptyNotice.style.display = "block";
+      }
+      rawDirectorLogs = [];
+    }
   });
 
+  // ── Director Prompt Editor Actions ──
+  expandBtn?.addEventListener("click", async () => {
+    const textEditor = (ctx as any).textEditor;
+    if (textEditor?.open) {
+      try {
+        const result = await textEditor.open({
+          title: "Edit Director Prompt",
+          value: systemTextarea.value,
+        });
+        if (result && !result.cancelled && typeof result.text === "string") {
+          systemTextarea.value = result.text;
+        }
+      } catch (e) {
+        pushLog(`Failed to open text editor: ${String(e)}`, "error");
+      }
+    } else {
+      pushLog("Spindle text editor API not available.", "warn");
+    }
+  });
+
+  saveBtn?.addEventListener("click", () => {
+    const settings: DirectorSettings = {
+      systemPrompt: systemTextarea.value,
+      userNotes: notesTextarea.value,
+      enabled: enabledCheckbox.checked,
+    };
+    ctx.sendToBackend({
+      type: "vn_save_director_settings",
+      settings,
+    });
+    saveBtn.textContent = "✓ Saved!";
+    setTimeout(() => (saveBtn.textContent = "Save Directives"), 1500);
+  });
+
+  // ── Copy Handlers ──
   copyAllDrawerBtn?.addEventListener("click", async () => {
     try {
       const bundle = {
@@ -8785,6 +9270,12 @@ export function registerDiagnosticsDrawer(
         ledger: latestLedgerData,
         manifest: latestManifestData,
         logs: rawLogHistory,
+        directorLogs: rawDirectorLogs,
+        directorSettings: {
+          systemPrompt: systemTextarea.value,
+          userNotes: notesTextarea.value,
+          enabled: enabledCheckbox.checked,
+        },
       };
       await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
       copyAllDrawerBtn.textContent = "✓ Copied!";
@@ -8817,9 +9308,13 @@ export function registerDiagnosticsDrawer(
 
   copyLogsBtn?.addEventListener("click", async () => {
     try {
-      await navigator.clipboard.writeText(rawLogHistory.join("\n"));
+      if (activeConsoleTab === "logs") {
+        await navigator.clipboard.writeText(rawLogHistory.join("\n"));
+      } else {
+        await navigator.clipboard.writeText(JSON.stringify(rawDirectorLogs, null, 2));
+      }
       copyLogsBtn.textContent = "✓ Copied!";
-      setTimeout(() => (copyLogsBtn.textContent = "📋 Copy Logs"), 1500);
+      setTimeout(() => (copyLogsBtn.textContent = "📋 Copy"), 1500);
     } catch (e) {
       pushLog(`Clipboard write failed: ${String(e)}`, "error");
     }
@@ -8872,10 +9367,144 @@ export function registerDiagnosticsDrawer(
     latestManifestData = manifest;
   };
 
-  // Request initial manifest from backend
-  ctx.sendToBackend({ type: "vn_get_manifest" });
+  const setDirectorSettings = (settings: DirectorSettings) => {
+    if (!settings) return;
+    if (systemTextarea) systemTextarea.value = settings.systemPrompt || "";
+    if (notesTextarea) notesTextarea.value = settings.userNotes || "";
+    if (enabledCheckbox) enabledCheckbox.checked = settings.enabled ?? true;
+  };
 
-  return { tab, pushLog, updateDiagnostic, setLatestLedger, setLatestManifest };
+  const renderDirectorLogCard = (entry: DirectorLogEntry): HTMLElement => {
+    const card = document.createElement("div");
+    card.style.cssText =
+      "background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 11px;";
+
+    const hasWorld = entry.worldChanges && entry.worldChanges.length > 0;
+    const hasNpc = entry.npcChanges && entry.npcChanges.length > 0;
+    const hasMut = entry.mutations && entry.mutations.length > 0;
+    const isQuiet = !hasWorld && !hasNpc && !hasMut;
+
+    let worldHtml = "";
+    if (hasWorld) {
+      worldHtml = `
+        <div style="color: #38bdf8;">
+          <span style="font-weight: 700; text-transform: uppercase; font-size: 10px;">[World Shifts]</span>
+          <ul style="margin: 2px 0 0 16px; padding: 0;">
+            ${entry.worldChanges.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}
+          </ul>
+        </div>
+      `;
+    }
+
+    let npcHtml = "";
+    if (hasNpc) {
+      npcHtml = `
+        <div style="color: #34d399;">
+          <span style="font-weight: 700; text-transform: uppercase; font-size: 10px;">[NPC Intent]</span>
+          <ul style="margin: 2px 0 0 16px; padding: 0;">
+            ${entry.npcChanges
+              .map((n) => {
+                const parts: string[] = [];
+                if (n.wantNow) parts.push(`want_now -> "${escapeHtml(n.wantNow)}"`);
+                if (n.passionsMoved && Object.keys(n.passionsMoved).length > 0) {
+                  parts.push(
+                    `passions: ${Object.entries(n.passionsMoved)
+                      .map(([k, v]) => `${k} (${v})`)
+                      .join(", ")}`
+                  );
+                }
+                if (n.relationsMoved && Object.keys(n.relationsMoved).length > 0) {
+                  parts.push(
+                    `relations: ${escapeHtml(JSON.stringify(n.relationsMoved))}`
+                  );
+                }
+                return `<li><strong>${escapeHtml(n.name)}:</strong> ${parts.join(" | ")}</li>`;
+              })
+              .join("")}
+          </ul>
+        </div>
+      `;
+    }
+
+    let mutHtml = "";
+    if (hasMut) {
+      mutHtml = `
+        <div style="color: #f43f5e;">
+          <span style="font-weight: 700; text-transform: uppercase; font-size: 10px;">[Mutations]</span>
+          <ul style="margin: 2px 0 0 16px; padding: 0;">
+            ${entry.mutations.map((m) => `<li>${escapeHtml(m)}</li>`).join("")}
+          </ul>
+        </div>
+      `;
+    }
+
+    let quietHtml = "";
+    if (isQuiet) {
+      quietHtml = `<div style="color: #64748b; font-style: italic; font-size: 10px;">No structural changes recorded this turn.</div>`;
+    }
+
+    card.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 4px; font-size: 10px;">
+        <span style="font-weight: 700; color: #818cf8;">⚡ TURN IMPACT</span>
+        <span style="color: #94a3b8;">${entry.timestamp || ""}</span>
+      </div>
+      <details style="cursor: pointer;">
+        <summary style="color: #a78bfa; font-weight: 600; font-size: 10px;">[Directive] Active Guidance</summary>
+        <div style="background: #020617; border: 1px solid #1e293b; border-radius: 4px; padding: 6px; margin-top: 4px; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: #cbd5e1; white-space: pre-wrap; word-break: break-word;">${escapeHtml(entry.directive)}</div>
+      </details>
+      ${worldHtml}
+      ${npcHtml}
+      ${mutHtml}
+      ${quietHtml}
+    `;
+
+    return card;
+  };
+
+  const pushDirectorLog = (log: DirectorLogEntry) => {
+    rawDirectorLogs.push(log);
+    if (rawDirectorLogs.length > 20) {
+      rawDirectorLogs.shift();
+    }
+    if (!directorStream) return;
+    if (directorEmptyNotice) directorEmptyNotice.style.display = "none";
+
+    const card = renderDirectorLogCard(log);
+    directorStream.appendChild(card);
+    directorStream.scrollTop = directorStream.scrollHeight;
+  };
+
+  const setDirectorLogs = (logs: DirectorLogEntry[]) => {
+    rawDirectorLogs = Array.isArray(logs) ? [...logs] : [];
+    if (!directorStream) return;
+    directorStream.innerHTML = "";
+    if (rawDirectorLogs.length === 0) {
+      directorStream.appendChild(directorEmptyNotice);
+      directorEmptyNotice.style.display = "block";
+      return;
+    }
+    if (directorEmptyNotice) directorEmptyNotice.style.display = "none";
+    for (const entry of rawDirectorLogs) {
+      directorStream.appendChild(renderDirectorLogCard(entry));
+    }
+    directorStream.scrollTop = directorStream.scrollHeight;
+  };
+
+  // ── Initial State Requests from Host ──
+  ctx.sendToBackend({ type: "vn_get_manifest" });
+  ctx.sendToBackend({ type: "vn_get_director_settings" });
+  ctx.sendToBackend({ type: "vn_get_director_logs" });
+
+  return {
+    tab,
+    pushLog,
+    updateDiagnostic,
+    setLatestLedger,
+    setLatestManifest,
+    setDirectorSettings,
+    pushDirectorLog,
+    setDirectorLogs,
+  };
 }
 
 ```
@@ -9428,6 +10057,26 @@ export interface AssetManifest {
   cgs?: Record<string, string>; // event action/cg name -> url
 }
 
+export interface DirectorSettings {
+  systemPrompt: string;
+  userNotes: string;
+  enabled: boolean;
+}
+
+export interface DirectorLogEntry {
+  timestamp: string;
+  directive: string;
+  worldChanges: string[];
+  npcChanges: Array<{
+    actorId: string;
+    name: string;
+    wantNow?: string;
+    passionsMoved?: Record<string, number>;
+    relationsMoved?: Record<string, any>;
+  }>;
+  mutations: string[];
+}
+
 
 ```
 
@@ -9438,15 +10087,37 @@ import { describe, expect, test } from "bun:test";
 import {
   evaluateDirectorInterceptor,
   processBPlots,
+  computeDirectorImpactDiff,
+  resolveIdentityMacros,
+  formatDirectorDirective,
   DIRECTOR_DIRECTIVES,
-  extractChatId,
-  extractGenerationType,
 } from "../src/backend/director.js";
 import { MenuBar } from "../src/frontend/hud/menu-bar.js";
+import { registerDiagnosticsDrawer } from "../src/frontend/studio/diagnostics-drawer.js";
 import type { LlmMessageDTO, InterceptorResultDTO } from "lumiverse-spindle-types";
-import type { LedgerData } from "../src/shared/types.js";
+import type { LedgerData, DirectorSettings, DirectorLogEntry } from "../src/shared/types.js";
 
 describe("LumiVN Director & Lifecycle Systems", () => {
+  describe("Macros & Director Directive Formatting", () => {
+    test("resolveIdentityMacros substitutes {{user}} and {{char}} correctly", () => {
+      const template = "Guide {{user}} into interacting with {{char}} carefully.";
+      const resolved = resolveIdentityMacros(template, "Raja", "Tessa");
+      expect(resolved).toBe("Guide Raja into interacting with Tessa carefully.");
+    });
+
+    test("formatDirectorDirective combines system prompt and resolved scene notes", () => {
+      const settings: DirectorSettings = {
+        systemPrompt: "[LumiVN Living World Director]\n- Guard agency.",
+        userNotes: "Do not let {{user}} discover the key yet.",
+        enabled: true,
+      };
+      const formatted = formatDirectorDirective(settings, "Hero");
+      expect(formatted).toContain("[LumiVN Living World Director]");
+      expect(formatted).toContain("[Scene Notes & Guidance]");
+      expect(formatted).toContain("Do not let Hero discover the key yet.");
+    });
+  });
+
   describe("Pre-Turn Director Interceptor & Agency Guardrails", () => {
     test("guards against dry runs, missing chat IDs, and quiet generation types", async () => {
       const messages: LlmMessageDTO[] = [{ role: "user", content: "Hello there" }];
@@ -9480,6 +10151,21 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       expect(res4).toBe(messages);
     });
 
+    test("skips injection if Director is disabled in settings", async () => {
+      const messages: LlmMessageDTO[] = [{ role: "user", content: "Hello" }];
+      const res = await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_123", generationType: "normal" },
+        async () => ({ scene: { place: "room" } }),
+        async () => ({
+          systemPrompt: "System",
+          userNotes: "",
+          enabled: false,
+        })
+      );
+      expect(res).toBe(messages);
+    });
+
     test("skips injection if current chat state is not found", async () => {
       const messages: LlmMessageDTO[] = [{ role: "user", content: "Hello" }];
       const res = await evaluateDirectorInterceptor(
@@ -9499,10 +10185,22 @@ describe("LumiVN Director & Lifecycle Systems", () => {
         roster: [{ id: "npc_a", name: "Alice" }],
       };
 
+      let cachedKey: string | null = null;
+      let cachedDirective: string | null = null;
+
       const result = await evaluateDirectorInterceptor(
         messages,
-        { chatId: "chat_active", generationType: "normal" },
-        async () => fakeLedger
+        { chatId: "chat_active", generationId: "gen_99", generationType: "normal" },
+        async () => fakeLedger,
+        async () => ({
+          systemPrompt: DIRECTOR_DIRECTIVES,
+          userNotes: "Stay cautious.",
+          enabled: true,
+        }),
+        (key, dir) => {
+          cachedKey = key;
+          cachedDirective = dir;
+        }
       );
 
       expect(typeof result).toBe("object");
@@ -9518,6 +10216,11 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       expect(directorMsg.content).toContain("NPC AUTONOMY");
       expect(directorMsg.content).toContain("PERSISTENT SECRETS");
       expect(directorMsg.content).toContain("UNRESOLVED TENSION");
+      expect(directorMsg.content).toContain("Stay cautious.");
+
+      // Injected directive cached for post-turn diff logging
+      expect(cachedKey).toBe("chat_active");
+      expect(cachedDirective).toContain("Stay cautious.");
 
       // Original user message preserved
       expect(interceptorRes.messages[1].content).toBe("I take a step into the parlor.");
@@ -9539,6 +10242,86 @@ describe("LumiVN Director & Lifecycle Systems", () => {
         async () => ({})
       );
       expect(result).toBe(messages);
+    });
+  });
+
+  describe("Post-Turn State Diffing & Director Log Generation", () => {
+    test("accurately diffs world shifts, NPC intent, passions, relations, and mutations", () => {
+      const prevLedger: LedgerData = {
+        clock: { t: "D1 10:00" },
+        scene: { place: "hallway" },
+        bplots: [
+          { id: "bp_1", who: "Officer Jenny", ripple: 1, status: "active" },
+        ],
+        opportunities: [
+          { id: "opp_1", what: "Old Key", status: "lead" },
+        ],
+        actors: {
+          tessa: {
+            name: "Tessa",
+            agency: { want_now: "Explore the house" },
+            passions: { anger: 10, fear: 0 },
+            relations: { user: { trust: 50 } },
+          },
+        },
+        journal: [],
+      };
+
+      const nextLedger: LedgerData = {
+        clock: { t: "D1 10:15" },
+        scene: { place: "library" },
+        bplots: [
+          { id: "bp_1", who: "Officer Jenny", ripple: 2, status: "active" },
+          { id: "bp_2", who: "Mysterious Merchant", ripple: 1, status: "active" },
+        ],
+        opportunities: [
+          { id: "opp_1", what: "Old Key", status: "taken" },
+        ],
+        actors: {
+          tessa: {
+            name: "Tessa",
+            agency: { want_now: "Conceal embarrassment" },
+            passions: { anger: 25, arousal: 30 },
+            relations: { user: { trust: 65 } },
+          },
+        },
+        journal: [
+          {
+            id: "j_1",
+            action: "Looked around the library",
+            mutations: ["tessa.passions.arousal += 30", "user.inventory += 'Old Key'"],
+          },
+        ],
+      };
+
+      const diff = computeDirectorImpactDiff(
+        prevLedger,
+        nextLedger,
+        "[LumiVN Living World Director] Directives"
+      );
+
+      expect(diff).toBeDefined();
+      expect(diff.directive).toBe("[LumiVN Living World Director] Directives");
+
+      // World shifts
+      expect(diff.worldChanges).toContain("Clock advanced: D1 10:00 -> D1 10:15");
+      expect(diff.worldChanges).toContain("Scene location moved: hallway -> library");
+      expect(diff.worldChanges.some((w) => w.includes("B-Plot escalated: Officer Jenny ripple 1 -> 2"))).toBe(true);
+      expect(diff.worldChanges.some((w) => w.includes("New B-Plot: Mysterious Merchant"))).toBe(true);
+      expect(diff.worldChanges.some((w) => w.includes('Opportunity status changed: "Old Key" -> taken'))).toBe(true);
+
+      // NPC intent & changes
+      expect(diff.npcChanges.length).toBe(1);
+      const tessaDiff = diff.npcChanges[0];
+      expect(tessaDiff.actorId).toBe("tessa");
+      expect(tessaDiff.wantNow).toBe("Conceal embarrassment");
+      expect(tessaDiff.passionsMoved?.anger).toBe(25);
+      expect(tessaDiff.passionsMoved?.arousal).toBe(30);
+      expect(tessaDiff.relationsMoved?.user).toEqual({ trust: 65 });
+
+      // Journal mutations
+      expect(diff.mutations).toContain("tessa.passions.arousal += 30");
+      expect(diff.mutations).toContain("user.inventory += 'Old Key'");
     });
   });
 
@@ -9626,6 +10409,103 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       menuBar.setLedger({ clock: { t: "14:05" } }, false);
       expect(badge.style.display).toBe("none");
       expect(badge.classList.contains("vn-pulse")).toBe(false);
+    });
+  });
+
+  describe("Sidebar Diagnostics Drawer: Director Prompt Editor & Impact Console", () => {
+    test("renders Director Prompt editor controls and dispatches vn_save_director_settings", () => {
+      const sentMessages: any[] = [];
+      const mockCtx: any = {
+        ui: {
+          registerDrawerTab: (opts: any) => ({
+            id: opts.id,
+            root: document.createElement("div"),
+            destroy: () => {},
+          }),
+        },
+        sendToBackend: (msg: any) => sentMessages.push(msg),
+      };
+
+      const drawer = registerDiagnosticsDrawer(mockCtx, () => {});
+      expect(drawer).not.toBeNull();
+      const root = drawer!.tab.root;
+
+      // Editor elements exist
+      const systemTextarea = root.querySelector("#vn-director-system") as HTMLTextAreaElement;
+      const notesTextarea = root.querySelector("#vn-director-notes") as HTMLTextAreaElement;
+      const enabledCheckbox = root.querySelector("#vn-director-enabled") as HTMLInputElement;
+      const saveBtn = root.querySelector("#vn-director-save-btn") as HTMLButtonElement;
+
+      expect(systemTextarea).not.toBeNull();
+      expect(notesTextarea).not.toBeNull();
+      expect(enabledCheckbox).not.toBeNull();
+      expect(saveBtn).not.toBeNull();
+
+      // Test setDirectorSettings
+      drawer!.setDirectorSettings({
+        systemPrompt: "Custom directive",
+        userNotes: "Tessa secret notes",
+        enabled: true,
+      });
+
+      expect(systemTextarea.value).toBe("Custom directive");
+      expect(notesTextarea.value).toBe("Tessa secret notes");
+      expect(enabledCheckbox.checked).toBe(true);
+
+      // Click save button
+      saveBtn.click();
+      const saveMsg = sentMessages.find((m) => m.type === "vn_save_director_settings");
+      expect(saveMsg).toBeDefined();
+      expect(saveMsg.settings.systemPrompt).toBe("Custom directive");
+      expect(saveMsg.settings.userNotes).toBe("Tessa secret notes");
+      expect(saveMsg.settings.enabled).toBe(true);
+    });
+
+    test("renders Director Impact Console entries with visual tags", () => {
+      const mockCtx: any = {
+        ui: {
+          registerDrawerTab: (opts: any) => ({
+            id: opts.id,
+            root: document.createElement("div"),
+            destroy: () => {},
+          }),
+        },
+        sendToBackend: () => {},
+      };
+
+      const drawer = registerDiagnosticsDrawer(mockCtx, () => {});
+      const root = drawer!.tab.root;
+
+      const logEntry: DirectorLogEntry = {
+        timestamp: "12:34:56",
+        directive: "Stay in role and keep tension active",
+        worldChanges: ["Scene location moved: street -> dojo"],
+        npcChanges: [
+          {
+            actorId: "tessa",
+            name: "Tessa",
+            wantNow: "Hide the letter",
+            passionsMoved: { anger: 40 },
+          },
+        ],
+        mutations: ["user.stamina -= 10"],
+      };
+
+      drawer!.pushDirectorLog(logEntry);
+
+      const directorStream = root.querySelector("#vn-director-log-stream") as HTMLElement;
+      expect(directorStream).not.toBeNull();
+      expect(directorStream.textContent).toContain("TURN IMPACT");
+      expect(directorStream.textContent).toContain("[Directive]");
+      expect(directorStream.textContent).toContain("Stay in role and keep tension active");
+      expect(directorStream.textContent).toContain("[World Shifts]");
+      expect(directorStream.textContent).toContain("Scene location moved: street -> dojo");
+      expect(directorStream.textContent).toContain("[NPC Intent]");
+      expect(directorStream.textContent).toContain("Tessa");
+      expect(directorStream.textContent).toContain('want_now -> "Hide the letter"');
+      expect(directorStream.textContent).toContain("anger (40)");
+      expect(directorStream.textContent).toContain("[Mutations]");
+      expect(directorStream.textContent).toContain("user.stamina -= 10");
     });
   });
 });

@@ -20,8 +20,9 @@ import {
 import {
   evaluateDirectorInterceptor,
   processBPlots,
+  computeDirectorImpactDiff,
 } from "./backend/director.js";
-import type { AssetManifest, LedgerData } from "./shared/types.js";
+import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry } from "./shared/types.js";
 
 declare const spindle: SpindleAPI;
 
@@ -32,16 +33,24 @@ let lastActiveChatId: string | null = null;
 let isStageOpen = false;
 const activeVnChats = new Set<string>();
 
-// LumiWorld Two-Stage Commit Lifecycle
+// LumiWorld Two-Stage Commit Lifecycle & Injected Directives Tracking
 const activeGenerationIds = new Map<string, string>(); // chatId -> generationId
 const pendingCommits = new Map<string, LedgerData>(); // `${chatId}:${generationId}` -> LedgerData
+const injectedDirectives = new Map<string, string>(); // `${chatId}:${generationId}` -> directive
+const directorLogBuffers = new Map<string, DirectorLogEntry[]>(); // chatId -> DirectorLogEntry[]
 
 // ── Pre-Turn Director & Agency Guardrails ──
 async function handleInterceptor(
   messages: LlmMessageDTO[],
   context: unknown
 ): Promise<LlmMessageDTO[] | InterceptorResultDTO> {
-  return evaluateDirectorInterceptor(messages, context, (cid) => storage.getChatState(cid));
+  return evaluateDirectorInterceptor(
+    messages,
+    context,
+    (cid) => storage.getChatState(cid),
+    () => storage.getDirectorSettings(),
+    (key, directive) => injectedDirectives.set(key, directive)
+  );
 }
 
 if (typeof (spindle as any).registerInterceptor === "function") {
@@ -162,6 +171,9 @@ async function processChatTurn(
     // Extract Ledger YAML
     const rawLedger = extractLedgerRaw(targetMessage.content);
     let cumulativeLedger = await storage.getChatState(chatId);
+    const prevLedger: LedgerData | null = cumulativeLedger
+      ? JSON.parse(JSON.stringify(cumulativeLedger))
+      : null;
 
     if (rawLedger) {
       const delta = parseLedgerYaml(rawLedger);
@@ -197,6 +209,38 @@ async function processChatTurn(
 
     if (commitKey) {
       pendingCommits.delete(commitKey);
+    }
+
+    // Post-Turn State Diffing & Director Log Generation
+    const activeDirective =
+      (effectiveGenId && injectedDirectives.get(`${chatId}:${effectiveGenId}`)) ||
+      injectedDirectives.get(chatId) ||
+      (await storage.getDirectorSettings()).systemPrompt;
+
+    const directorEntry = computeDirectorImpactDiff(
+      prevLedger,
+      cumulativeLedger,
+      activeDirective
+    );
+
+    let logBuffer = directorLogBuffers.get(chatId);
+    if (!logBuffer) {
+      logBuffer = await storage.getDirectorLogs(chatId);
+    }
+    logBuffer.push(directorEntry);
+    if (logBuffer.length > 20) {
+      logBuffer = logBuffer.slice(logBuffer.length - 20);
+    }
+    directorLogBuffers.set(chatId, logBuffer);
+    await storage.saveDirectorLogs(chatId, logBuffer);
+
+    spindle.sendToFrontend({
+      type: "vn_director_log",
+      log: directorEntry,
+    });
+
+    if (effectiveGenId) {
+      injectedDirectives.delete(`${chatId}:${effectiveGenId}`);
     }
 
     const prose = extractProse(targetMessage.content);
@@ -254,6 +298,7 @@ spindle.on("GENERATION_STARTED", (payload: GenerationStartedPayloadDTO) => {
   const previousGenId = activeGenerationIds.get(chatId);
   if (previousGenId && previousGenId !== generationId) {
     pendingCommits.delete(`${chatId}:${previousGenId}`);
+    injectedDirectives.delete(`${chatId}:${previousGenId}`);
     spindle.log.info(`[LumiVN] Discarded uncommitted state from superseded generation ${previousGenId} on chat ${chatId}`);
   }
   activeGenerationIds.set(chatId, generationId);
@@ -265,6 +310,7 @@ spindle.on("GENERATION_STOPPED", (payload: GenerationStoppedPayloadDTO) => {
 
   const commitKey = `${chatId}:${generationId}`;
   pendingCommits.delete(commitKey);
+  injectedDirectives.delete(commitKey);
   if (activeGenerationIds.get(chatId) === generationId) {
     activeGenerationIds.delete(chatId);
   }
@@ -278,6 +324,7 @@ spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
   if (error) {
     if (generationId) {
       pendingCommits.delete(`${chatId}:${generationId}`);
+      injectedDirectives.delete(`${chatId}:${generationId}`);
     }
     if (activeGenerationIds.get(chatId) === generationId) {
       activeGenerationIds.delete(chatId);
@@ -411,6 +458,46 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
       if (manifest) {
         await storage.saveManifest(manifest);
         spindle.sendToFrontend({ type: "vn_manifest", manifest });
+      }
+      break;
+    }
+
+    case "vn_get_director_settings": {
+      const settings = await storage.getDirectorSettings();
+      spindle.sendToFrontend({ type: "vn_director_settings", settings });
+      break;
+    }
+
+    case "vn_save_director_settings": {
+      const settings = payload.settings as DirectorSettings;
+      if (settings) {
+        await storage.saveDirectorSettings(settings);
+        if (typeof (spindle as any).toast?.success === "function") {
+          (spindle as any).toast.success("Director prompt saved");
+        }
+        spindle.sendToFrontend({ type: "vn_director_settings", settings });
+        spindle.sendToFrontend({
+          type: "vn_log",
+          message: "Director prompt and scene notes saved.",
+          level: "info",
+        });
+      }
+      break;
+    }
+
+    case "vn_get_director_logs": {
+      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
+      if (chatId) {
+        let logs = directorLogBuffers.get(chatId);
+        if (!logs) {
+          logs = await storage.getDirectorLogs(chatId);
+          directorLogBuffers.set(chatId, logs);
+        }
+        spindle.sendToFrontend({
+          type: "vn_director_logs",
+          chatId,
+          logs,
+        });
       }
       break;
     }
