@@ -3621,12 +3621,102 @@ class AssetResolver {
   }
 }
 
+// src/backend/director.ts
+var DIRECTOR_DIRECTIVES = [
+  "[LumiVN Living World Director]",
+  "- PLAYER AGENCY GUARD: Never write dialogue, physical reactions, or internal choices for the player character.",
+  "- NPC AUTONOMY: Present NPCs must act on their own active want_now before accommodating {{user}}.",
+  "- PERSISTENT SECRETS: NPCs must conceal guarded secrets until direct witnessed evidence forces exposure.",
+  "- UNRESOLVED TENSION: Keep current scene friction active; do not rush to polite consensus."
+].join(`
+`);
+function extractChatId(context) {
+  if (!context || typeof context !== "object")
+    return null;
+  const ctx = context;
+  if (typeof ctx.chatId === "string" && ctx.chatId.trim())
+    return ctx.chatId.trim();
+  return null;
+}
+function extractGenerationType(context) {
+  if (!context || typeof context !== "object")
+    return null;
+  const ctx = context;
+  if (typeof ctx.generationType === "string" && ctx.generationType.trim()) {
+    return ctx.generationType.trim();
+  }
+  return null;
+}
+async function evaluateDirectorInterceptor(messages, context, getChatState) {
+  const chatId = extractChatId(context);
+  const genType = extractGenerationType(context);
+  const isDry = Boolean(context?.dryRun || context?.isDryRun);
+  if (!chatId || isDry || genType === "quiet")
+    return messages;
+  const currentState = await getChatState(chatId);
+  if (!currentState)
+    return messages;
+  if (messages.some((m) => typeof m.content === "string" && m.content.includes("[LumiVN Living World Director]"))) {
+    return messages;
+  }
+  const directorBlock = {
+    role: "system",
+    content: DIRECTOR_DIRECTIVES
+  };
+  return {
+    messages: [directorBlock, ...messages],
+    breakdown: [{ messageIndex: 0, name: "LumiVN Director" }]
+  };
+}
+function processBPlots(ledger) {
+  let hasBPlotNotification = false;
+  const activeRipples = [];
+  const promotedActors = [];
+  if (!ledger.bplots || !Array.isArray(ledger.bplots)) {
+    return { hasBPlotNotification, activeRipples, promotedActors };
+  }
+  if (!ledger.roster) {
+    ledger.roster = [];
+  }
+  for (const bp of ledger.bplots) {
+    if (bp.ripple === 2 && bp.status === "active") {
+      hasBPlotNotification = true;
+      activeRipples.push(bp);
+    } else if (bp.ripple === 3) {
+      const who = bp.who?.trim() || "newcomer";
+      const exists = ledger.roster.some((r) => r.id === who || r.name && r.name.toLowerCase() === who.toLowerCase());
+      if (!exists) {
+        ledger.roster.push({
+          id: who,
+          name: who,
+          lod: 2,
+          status: bp.doing || "Arrived in area",
+          loc: ledger.scene?.place || "default",
+          record: "roster",
+          tick: 1
+        });
+        promotedActors.push(who);
+      }
+    }
+  }
+  return { hasBPlotNotification, activeRipples, promotedActors };
+}
+
 // src/backend.ts
 var storage = new StorageManager(spindle);
 var resolver = new AssetResolver(spindle, storage);
 var lastActiveChatId = null;
 var isStageOpen = false;
 var activeVnChats = new Set;
+var activeGenerationIds = new Map;
+var pendingCommits = new Map;
+async function handleInterceptor(messages, context) {
+  return evaluateDirectorInterceptor(messages, context, (cid) => storage.getChatState(cid));
+}
+if (typeof spindle.registerInterceptor === "function") {
+  spindle.registerInterceptor(handleInterceptor, 150);
+  spindle.log.info("[LumiVN] Living World Director interceptor registered at priority 150.");
+}
 var spindleAnyObj = spindle;
 if (typeof spindleAnyObj.on === "function") {
   spindleAnyObj.on("CHAT_SWITCHED", (payload) => {
@@ -3679,7 +3769,7 @@ spindle.commands.onInvoked(async (commandId) => {
     await spindle.ui.openDrawerTab("vn_diagnostics");
   }
 });
-async function processChatTurn(chatId, messageId, overrideContent, force = false) {
+async function processChatTurn(chatId, messageId, overrideContent, force = false, generationId) {
   if (!chatId)
     return;
   if (!isStageOpen && !force)
@@ -3722,12 +3812,36 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     if (rawLedger) {
       const delta = parseLedgerYaml(rawLedger);
       cumulativeLedger = deepMergeLedger(cumulativeLedger, delta);
-      await storage.saveChatState(chatId, cumulativeLedger);
     } else if (!cumulativeLedger) {
       cumulativeLedger = deepMergeLedger(null, {});
     }
+    const bplotResult = processBPlots(cumulativeLedger);
+    if (bplotResult.hasBPlotNotification) {
+      spindle.sendToFrontend({
+        type: "vn_bplot_notification",
+        chatId,
+        ripples: bplotResult.activeRipples
+      });
+      spindle.sendToFrontend({
+        type: "vn_log",
+        message: `[B-Plot Alert] Active ripple(s): ${bplotResult.activeRipples.map((r) => `${r.who}: ${r.doing}`).join("; ")}`,
+        level: "warn"
+      });
+    }
+    const effectiveGenId = generationId || activeGenerationIds.get(chatId);
+    const commitKey = effectiveGenId ? `${chatId}:${effectiveGenId}` : null;
+    if (commitKey) {
+      pendingCommits.set(commitKey, cumulativeLedger);
+    }
+    await storage.saveChatState(chatId, cumulativeLedger);
+    if (commitKey) {
+      pendingCommits.delete(commitKey);
+    }
     const prose = extractProse(targetMessage.content);
     const presentation = await resolver.buildPresentationState(chatId, targetMessage.id || "msg_latest", prose, cumulativeLedger, characterId);
+    if (bplotResult.hasBPlotNotification) {
+      presentation.hasBPlotNotification = true;
+    }
     spindle.sendToFrontend({
       type: "vn_state",
       state: presentation
@@ -3753,11 +3867,49 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     });
   }
 }
+spindle.on("GENERATION_STARTED", (payload) => {
+  const { chatId, generationId } = payload || {};
+  if (!chatId || !generationId)
+    return;
+  const previousGenId = activeGenerationIds.get(chatId);
+  if (previousGenId && previousGenId !== generationId) {
+    pendingCommits.delete(`${chatId}:${previousGenId}`);
+    spindle.log.info(`[LumiVN] Discarded uncommitted state from superseded generation ${previousGenId} on chat ${chatId}`);
+  }
+  activeGenerationIds.set(chatId, generationId);
+});
+spindle.on("GENERATION_STOPPED", (payload) => {
+  const { chatId, generationId } = payload || {};
+  if (!chatId || !generationId)
+    return;
+  const commitKey = `${chatId}:${generationId}`;
+  pendingCommits.delete(commitKey);
+  if (activeGenerationIds.get(chatId) === generationId) {
+    activeGenerationIds.delete(chatId);
+  }
+  spindle.log.info(`[LumiVN] Discarded staged commit for stopped generation ${generationId}`);
+});
 spindle.on("GENERATION_ENDED", async (payload) => {
+  const { chatId, generationId, error } = payload || {};
+  if (!chatId)
+    return;
+  if (error) {
+    if (generationId) {
+      pendingCommits.delete(`${chatId}:${generationId}`);
+    }
+    if (activeGenerationIds.get(chatId) === generationId) {
+      activeGenerationIds.delete(chatId);
+    }
+    spindle.log.warn(`[LumiVN] Generation ${generationId} failed with error (${error}), discarded pending commits.`);
+    return;
+  }
+  if (generationId && activeGenerationIds.get(chatId) === generationId) {
+    activeGenerationIds.delete(chatId);
+  }
   if (!isStageOpen)
     return;
-  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
-    await processChatTurn(payload.chatId, payload.messageId);
+  if (activeVnChats.has(chatId) || activeVnChats.size === 0) {
+    await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
   }
 });
 spindle.on("MESSAGE_SWIPED", async (payload) => {

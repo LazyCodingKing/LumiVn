@@ -25,6 +25,7 @@
     "typescript": "^5.9.0"
   }
 }
+
 ```
 
 ## File: `spindle.json`
@@ -42,30 +43,14 @@
     "generation",
     "images",
     "chats",
-    "characters"
+    "characters",
+    "interceptor"
   ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js",
   "minimum_lumiverse_version": "1.1.6"
 }
-```
 
-## File: `tsconfig.json`
-
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["bun-types"],
-    "strict": true,
-    "noUncheckedIndexedAccess": false,
-    "skipLibCheck": true
-  },
-  "include": ["src/**/*.ts"]
-}
 ```
 
 ## File: `src/backend.ts`
@@ -74,9 +59,13 @@
 import type {
   SpindleAPI,
   ChatMessageDTO,
+  GenerationStartedPayloadDTO,
   GenerationEndedPayloadDTO,
+  GenerationStoppedPayloadDTO,
   MessageSwipedPayloadDTO,
   SwipeEditedPayloadDTO,
+  LlmMessageDTO,
+  InterceptorResultDTO,
 } from "lumiverse-spindle-types";
 import { StorageManager } from "./backend/storage.js";
 import { AssetResolver } from "./backend/asset-resolver.js";
@@ -86,7 +75,11 @@ import {
   deepMergeLedger,
   extractProse,
 } from "./backend/ledger-parser.js";
-import type { AssetManifest } from "./shared/types.js";
+import {
+  evaluateDirectorInterceptor,
+  processBPlots,
+} from "./backend/director.js";
+import type { AssetManifest, LedgerData } from "./shared/types.js";
 
 declare const spindle: SpindleAPI;
 
@@ -96,6 +89,23 @@ const resolver = new AssetResolver(spindle, storage);
 let lastActiveChatId: string | null = null;
 let isStageOpen = false;
 const activeVnChats = new Set<string>();
+
+// LumiWorld Two-Stage Commit Lifecycle
+const activeGenerationIds = new Map<string, string>(); // chatId -> generationId
+const pendingCommits = new Map<string, LedgerData>(); // `${chatId}:${generationId}` -> LedgerData
+
+// ── Pre-Turn Director & Agency Guardrails ──
+async function handleInterceptor(
+  messages: LlmMessageDTO[],
+  context: unknown
+): Promise<LlmMessageDTO[] | InterceptorResultDTO> {
+  return evaluateDirectorInterceptor(messages, context, (cid) => storage.getChatState(cid));
+}
+
+if (typeof (spindle as any).registerInterceptor === "function") {
+  (spindle as any).registerInterceptor(handleInterceptor, 150);
+  spindle.log.info("[LumiVN] Living World Director interceptor registered at priority 150.");
+}
 
 const spindleAnyObj = spindle as any;
 if (typeof spindleAnyObj.on === "function") {
@@ -160,7 +170,8 @@ async function processChatTurn(
   chatId: string,
   messageId?: string,
   overrideContent?: string,
-  force = false
+  force = false,
+  generationId?: string
 ): Promise<void> {
   if (!chatId) return;
 
@@ -213,10 +224,37 @@ async function processChatTurn(
     if (rawLedger) {
       const delta = parseLedgerYaml(rawLedger);
       cumulativeLedger = deepMergeLedger(cumulativeLedger, delta);
-      await storage.saveChatState(chatId, cumulativeLedger);
     } else if (!cumulativeLedger) {
       // Create empty baseline
       cumulativeLedger = deepMergeLedger(null, {});
+    }
+
+    // Phase 4: B-Plot State Monitor & Collision Roster Promotion
+    const bplotResult = processBPlots(cumulativeLedger);
+    if (bplotResult.hasBPlotNotification) {
+      spindle.sendToFrontend({
+        type: "vn_bplot_notification",
+        chatId,
+        ripples: bplotResult.activeRipples,
+      });
+      spindle.sendToFrontend({
+        type: "vn_log",
+        message: `[B-Plot Alert] Active ripple(s): ${bplotResult.activeRipples.map((r) => `${r.who}: ${r.doing}`).join("; ")}`,
+        level: "warn",
+      });
+    }
+
+    // Phase 2: Transactional State Merging
+    const effectiveGenId = generationId || activeGenerationIds.get(chatId);
+    const commitKey = effectiveGenId ? `${chatId}:${effectiveGenId}` : null;
+    if (commitKey) {
+      pendingCommits.set(commitKey, cumulativeLedger);
+    }
+
+    await storage.saveChatState(chatId, cumulativeLedger);
+
+    if (commitKey) {
+      pendingCommits.delete(commitKey);
     }
 
     const prose = extractProse(targetMessage.content);
@@ -227,6 +265,10 @@ async function processChatTurn(
       cumulativeLedger,
       characterId
     );
+
+    if (bplotResult.hasBPlotNotification) {
+      presentation.hasBPlotNotification = true;
+    }
 
     // Send main presentation state
     spindle.sendToFrontend({
@@ -263,10 +305,52 @@ async function processChatTurn(
 }
 
 // ── Event Handlers ──
+spindle.on("GENERATION_STARTED", (payload: GenerationStartedPayloadDTO) => {
+  const { chatId, generationId } = payload || {};
+  if (!chatId || !generationId) return;
+
+  const previousGenId = activeGenerationIds.get(chatId);
+  if (previousGenId && previousGenId !== generationId) {
+    pendingCommits.delete(`${chatId}:${previousGenId}`);
+    spindle.log.info(`[LumiVN] Discarded uncommitted state from superseded generation ${previousGenId} on chat ${chatId}`);
+  }
+  activeGenerationIds.set(chatId, generationId);
+});
+
+spindle.on("GENERATION_STOPPED", (payload: GenerationStoppedPayloadDTO) => {
+  const { chatId, generationId } = payload || {};
+  if (!chatId || !generationId) return;
+
+  const commitKey = `${chatId}:${generationId}`;
+  pendingCommits.delete(commitKey);
+  if (activeGenerationIds.get(chatId) === generationId) {
+    activeGenerationIds.delete(chatId);
+  }
+  spindle.log.info(`[LumiVN] Discarded staged commit for stopped generation ${generationId}`);
+});
+
 spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
+  const { chatId, generationId, error } = payload || {};
+  if (!chatId) return;
+
+  if (error) {
+    if (generationId) {
+      pendingCommits.delete(`${chatId}:${generationId}`);
+    }
+    if (activeGenerationIds.get(chatId) === generationId) {
+      activeGenerationIds.delete(chatId);
+    }
+    spindle.log.warn(`[LumiVN] Generation ${generationId} failed with error (${error}), discarded pending commits.`);
+    return;
+  }
+
+  if (generationId && activeGenerationIds.get(chatId) === generationId) {
+    activeGenerationIds.delete(chatId);
+  }
+
   if (!isStageOpen) return;
-  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
-    await processChatTurn(payload.chatId, payload.messageId);
+  if (activeVnChats.has(chatId) || activeVnChats.size === 0) {
+    await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
   }
 });
 
@@ -579,6 +663,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
     }
   }
 });
+
 ```
 
 ## File: `src/backend/asset-resolver.ts`
@@ -860,6 +945,118 @@ export class AssetResolver {
     };
   }
 }
+
+```
+
+## File: `src/backend/director.ts`
+
+```typescript
+import type { LlmMessageDTO, InterceptorResultDTO } from "lumiverse-spindle-types";
+import type { LedgerData, BPlot } from "../shared/types.js";
+
+export const DIRECTOR_DIRECTIVES = [
+  "[LumiVN Living World Director]",
+  "- PLAYER AGENCY GUARD: Never write dialogue, physical reactions, or internal choices for the player character.",
+  "- NPC AUTONOMY: Present NPCs must act on their own active want_now before accommodating {{user}}.",
+  "- PERSISTENT SECRETS: NPCs must conceal guarded secrets until direct witnessed evidence forces exposure.",
+  "- UNRESOLVED TENSION: Keep current scene friction active; do not rush to polite consensus.",
+].join("\n");
+
+export function extractChatId(context: unknown): string | null {
+  if (!context || typeof context !== "object") return null;
+  const ctx = context as Record<string, unknown>;
+  if (typeof ctx.chatId === "string" && ctx.chatId.trim()) return ctx.chatId.trim();
+  return null;
+}
+
+export function extractGenerationType(context: unknown): string | null {
+  if (!context || typeof context !== "object") return null;
+  const ctx = context as Record<string, unknown>;
+  if (typeof ctx.generationType === "string" && ctx.generationType.trim()) {
+    return ctx.generationType.trim();
+  }
+  return null;
+}
+
+export async function evaluateDirectorInterceptor(
+  messages: LlmMessageDTO[],
+  context: unknown,
+  getChatState: (chatId: string) => Promise<LedgerData | null>
+): Promise<LlmMessageDTO[] | InterceptorResultDTO> {
+  const chatId = extractChatId(context);
+  const genType = extractGenerationType(context);
+  const isDry = Boolean((context as any)?.dryRun || (context as any)?.isDryRun);
+
+  // 1. Guard against quiet/background generations & dry runs
+  if (!chatId || isDry || genType === "quiet") return messages;
+
+  // 2. Read latest chat state and roster
+  const currentState = await getChatState(chatId);
+  if (!currentState) return messages;
+
+  // Guard against duplicate injections
+  if (messages.some((m) => typeof m.content === "string" && m.content.includes("[LumiVN Living World Director]"))) {
+    return messages;
+  }
+
+  // 3. Directorial Guidance Block
+  const directorBlock: LlmMessageDTO = {
+    role: "system",
+    content: DIRECTOR_DIRECTIVES,
+  };
+
+  return {
+    messages: [directorBlock, ...messages],
+    breakdown: [{ messageIndex: 0, name: "LumiVN Director" }],
+  };
+}
+
+export interface BPlotProcessResult {
+  hasBPlotNotification: boolean;
+  activeRipples: BPlot[];
+  promotedActors: string[];
+}
+
+export function processBPlots(ledger: LedgerData): BPlotProcessResult {
+  let hasBPlotNotification = false;
+  const activeRipples: BPlot[] = [];
+  const promotedActors: string[] = [];
+
+  if (!ledger.bplots || !Array.isArray(ledger.bplots)) {
+    return { hasBPlotNotification, activeRipples, promotedActors };
+  }
+
+  if (!ledger.roster) {
+    ledger.roster = [];
+  }
+
+  for (const bp of ledger.bplots) {
+    if (bp.ripple === 2 && bp.status === "active") {
+      hasBPlotNotification = true;
+      activeRipples.push(bp);
+    } else if (bp.ripple === 3) {
+      const who = bp.who?.trim() || "newcomer";
+      const exists = ledger.roster.some(
+        (r) => r.id === who || (r.name && r.name.toLowerCase() === who.toLowerCase())
+      );
+      if (!exists) {
+        ledger.roster.push({
+          id: who,
+          name: who,
+          lod: 2,
+          status: bp.doing || "Arrived in area",
+          loc: ledger.scene?.place || "default",
+          record: "roster",
+          tick: 1,
+        });
+        promotedActors.push(who);
+      }
+    }
+  }
+
+  return { hasBPlotNotification, activeRipples, promotedActors };
+}
+
 ```
 
 ## File: `src/backend/ledger-parser.ts`
@@ -1133,6 +1330,7 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
 
   return merged;
 }
+
 ```
 
 ## File: `src/backend/storage.ts`
@@ -1240,6 +1438,7 @@ export class StorageManager {
     }
   }
 }
+
 ```
 
 ## File: `src/frontend.ts`
@@ -1512,6 +1711,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   (globalThis as Record<string, unknown>)[CLEANUP_KEY] = cleanup;
   return cleanup;
 }
+
 ```
 
 ## File: `src/frontend/hud/menu-bar.ts`
@@ -1648,7 +1848,12 @@ export class MenuBar {
     }
 
     if (this.phoneBadge) {
-      this.phoneBadge.style.display = hasBPlotNotification ? "inline-block" : "none";
+      this.phoneBadge.style.display = hasBPlotNotification ? "flex" : "none";
+      if (hasBPlotNotification) {
+        this.phoneBadge.classList.add("vn-pulse");
+      } else {
+        this.phoneBadge.classList.remove("vn-pulse");
+      }
     }
 
     if (this.activeTabId) {
@@ -1716,6 +1921,7 @@ export class MenuBar {
     }
   }
 }
+
 ```
 
 ## File: `src/frontend/hud/tab-characters.ts`
@@ -2335,6 +2541,7 @@ export class CharactersTab {
     this.root.appendChild(container);
   }
 }
+
 ```
 
 ## File: `src/frontend/hud/tab-diagnostics.ts`
@@ -2590,6 +2797,7 @@ export class DiagnosticsTab {
     });
   }
 }
+
 ```
 
 ## File: `src/frontend/hud/tab-inventory.ts`
@@ -2734,6 +2942,7 @@ export class InventoryTab {
     this.root.appendChild(roomSection);
   }
 }
+
 ```
 
 ## File: `src/frontend/hud/tab-journal.ts`
@@ -2835,6 +3044,7 @@ export class JournalTab {
     this.root.appendChild(journalSection);
   }
 }
+
 ```
 
 ## File: `src/frontend/hud/tab-map.ts`
@@ -3441,6 +3651,7 @@ export class MapTab {
     });
   }
 }
+
 ```
 
 ## File: `src/frontend/hud/tab-phone.ts`
@@ -3544,7 +3755,7 @@ export class PhoneTab {
       notifHtml = `
         <div style="background: rgba(244,63,94,0.2); border: 1px solid #f43f5e; border-radius: 12px; padding: 10px; margin-bottom: 16px;">
           <div style="font-size: 11px; font-weight: 700; color: #f43f5e; margin-bottom: 2px;">🚨 EMERGENCY NOTIFICATION</div>
-          ${ripples.map((r) => `<div style="font-size: 11px; color: #fff;"><strong>${r.who}:</strong> ${r.doing}</div>`).join("")}
+          ${ripples.map((r) => `<div style="font-size: 11px; color: #fff;"><strong>${r.who}:</strong> ${r.doing}${r.vector ? ` <span style="color: #94a3b8;">(${r.vector})</span>` : ""}</div>`).join("")}
         </div>
       `;
     }
@@ -4416,6 +4627,7 @@ export class PhoneTab {
     };
   }
 }
+
 ```
 
 ## File: `src/frontend/hud/tab-scene.ts`
@@ -4935,6 +5147,7 @@ export class SceneTab {
     return `data:${file.mimeType || "image/png"};base64,${btoa(binary)}`;
   }
 }
+
 ```
 
 ## File: `src/frontend/hud/tab-stats.ts`
@@ -5298,6 +5511,7 @@ export class StatsTab {
     }
   }
 }
+
 ```
 
 ## File: `src/frontend/hud/tab-wardrobe.ts`
@@ -5408,6 +5622,7 @@ export class WardrobeTab {
     this.root.appendChild(footer);
   }
 }
+
 ```
 
 ## File: `src/frontend/stage/audio-player.ts`
@@ -5587,6 +5802,7 @@ export class VnAudioEngine {
     }
   }
 }
+
 ```
 
 ## File: `src/frontend/stage/backlog.ts`
@@ -5669,6 +5885,7 @@ export class BacklogModal {
     this.root.style.display = "none";
   }
 }
+
 ```
 
 ## File: `src/frontend/stage/beat-splitter.ts`
@@ -5870,6 +6087,7 @@ export function splitParagraphIntoBeats(
 
   return beats.length > 0 ? beats : [{ speaker: defaultSpeaker, text: "...", rawText: "..." }];
 }
+
 ```
 
 ## File: `src/frontend/stage/choice-modal.ts`
@@ -5936,6 +6154,7 @@ export class ChoiceModal {
     this.root.style.display = "none";
   }
 }
+
 ```
 
 ## File: `src/frontend/stage/dialogue-box.ts`
@@ -6415,6 +6634,7 @@ export class DialogueBox {
     this.backlogModal.root.remove();
   }
 }
+
 ```
 
 ## File: `src/frontend/stage/overlay.ts`
@@ -7044,6 +7264,14 @@ export class StageOverlay {
         justify-content: center;
         box-shadow: 0 0 8px #f43f5e;
       }
+      .vn-hud-badge.vn-pulse {
+        animation: vn-badge-pulse 1.5s infinite;
+      }
+      @keyframes vn-badge-pulse {
+        0% { transform: scale(1); box-shadow: 0 0 4px #f43f5e; }
+        50% { transform: scale(1.25); box-shadow: 0 0 14px #f43f5e; }
+        100% { transform: scale(1); box-shadow: 0 0 4px #f43f5e; }
+      }
 
       /* HUD Modal / Overlay */
       .vn-hud-overlay {
@@ -7404,6 +7632,7 @@ export class StageOverlay {
     this.styleEl?.remove();
   }
 }
+
 ```
 
 ## File: `src/frontend/stage/particles.ts`
@@ -7651,6 +7880,7 @@ export class ParticleEngine {
     this.canvas.remove();
   }
 }
+
 ```
 
 ## File: `src/frontend/stage/rich-text.ts`
@@ -7770,6 +8000,7 @@ export const TEXT_EFFECTS_CSS = `
   transform: translateY(-1px);
 }
 `;
+
 ```
 
 ## File: `src/frontend/stage/sprite-transform.ts`
@@ -7814,6 +8045,7 @@ export function resetSpriteTransform(actorId: string): void {
     localStorage.removeItem(STORAGE_PREFIX + actorId.toLowerCase().trim());
   } catch {}
 }
+
 ```
 
 ## File: `src/frontend/stage/staging.ts`
@@ -8037,6 +8269,7 @@ export class StageRenderer {
     this.particleEngine.destroy();
   }
 }
+
 ```
 
 ## File: `src/frontend/stage/theme.ts`
@@ -8122,6 +8355,7 @@ export function applyVnTheme(rootEl: HTMLElement, themeId = "default"): void {
   rootEl.style.setProperty("--vn-glow", theme.glow);
   rootEl.style.setProperty("--vn-text", theme.text);
 }
+
 ```
 
 ## File: `src/frontend/stage/tts-engine.ts`
@@ -8232,6 +8466,7 @@ export class VnTtsEngine {
     window.speechSynthesis.speak(utterance);
   }
 }
+
 ```
 
 ## File: `src/frontend/studio/asset-drawer.ts`
@@ -8420,6 +8655,7 @@ export function registerAssetDrawer(ctx: SpindleFrontendContext): SpindleDrawerT
 
   return handle;
 }
+
 ```
 
 ## File: `src/frontend/studio/diagnostics-drawer.ts`
@@ -8641,6 +8877,7 @@ export function registerDiagnosticsDrawer(
 
   return { tab, pushLog, updateDiagnostic, setLatestLedger, setLatestManifest };
 }
+
 ```
 
 ## File: `src/frontend/utils/bg-remover.ts`
@@ -8695,6 +8932,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
     reader.readAsDataURL(blob);
   });
 }
+
 ```
 
 ## File: `src/frontend/utils/diag-bus.ts`
@@ -8860,6 +9098,7 @@ class DiagnosticBus {
 }
 
 export const diagBus = new DiagnosticBus();
+
 ```
 
 ## File: `src/shared/text-effects.ts`
@@ -8929,6 +9168,7 @@ export function parseTwineChoices(text: string): { cleanText: string; choices: T
 
   return { cleanText, choices };
 }
+
 ```
 
 ## File: `src/shared/types.ts`
@@ -9187,6 +9427,209 @@ export interface AssetManifest {
   }>;
   cgs?: Record<string, string>; // event action/cg name -> url
 }
+
+
+```
+
+## File: `test/director-and-lifecycle.test.ts`
+
+```typescript
+import { describe, expect, test } from "bun:test";
+import {
+  evaluateDirectorInterceptor,
+  processBPlots,
+  DIRECTOR_DIRECTIVES,
+  extractChatId,
+  extractGenerationType,
+} from "../src/backend/director.js";
+import { MenuBar } from "../src/frontend/hud/menu-bar.js";
+import type { LlmMessageDTO, InterceptorResultDTO } from "lumiverse-spindle-types";
+import type { LedgerData } from "../src/shared/types.js";
+
+describe("LumiVN Director & Lifecycle Systems", () => {
+  describe("Pre-Turn Director Interceptor & Agency Guardrails", () => {
+    test("guards against dry runs, missing chat IDs, and quiet generation types", async () => {
+      const messages: LlmMessageDTO[] = [{ role: "user", content: "Hello there" }];
+
+      // 1. Missing chatId
+      const res1 = await evaluateDirectorInterceptor(messages, {}, async () => ({}));
+      expect(res1).toBe(messages);
+
+      // 2. dryRun = true
+      const res2 = await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_123", dryRun: true },
+        async () => ({})
+      );
+      expect(res2).toBe(messages);
+
+      // 3. isDryRun = true
+      const res3 = await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_123", isDryRun: true },
+        async () => ({})
+      );
+      expect(res3).toBe(messages);
+
+      // 4. quiet generation type
+      const res4 = await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_123", generationType: "quiet" },
+        async () => ({})
+      );
+      expect(res4).toBe(messages);
+    });
+
+    test("skips injection if current chat state is not found", async () => {
+      const messages: LlmMessageDTO[] = [{ role: "user", content: "Hello" }];
+      const res = await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_123", generationType: "normal" },
+        async () => null
+      );
+      expect(res).toBe(messages);
+    });
+
+    test("injects living world director directives and breakdown attribution", async () => {
+      const messages: LlmMessageDTO[] = [
+        { role: "user", content: "I take a step into the parlor." },
+      ];
+      const fakeLedger: LedgerData = {
+        scene: { place: "parlor", participants: ["user", "npc_a"] },
+        roster: [{ id: "npc_a", name: "Alice" }],
+      };
+
+      const result = await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_active", generationType: "normal" },
+        async () => fakeLedger
+      );
+
+      expect(typeof result).toBe("object");
+      const interceptorRes = result as InterceptorResultDTO;
+      expect(interceptorRes.messages).toBeDefined();
+      expect(interceptorRes.messages.length).toBe(2);
+
+      // First message is director system prompt
+      const directorMsg = interceptorRes.messages[0];
+      expect(directorMsg.role).toBe("system");
+      expect(directorMsg.content).toContain("[LumiVN Living World Director]");
+      expect(directorMsg.content).toContain("PLAYER AGENCY GUARD");
+      expect(directorMsg.content).toContain("NPC AUTONOMY");
+      expect(directorMsg.content).toContain("PERSISTENT SECRETS");
+      expect(directorMsg.content).toContain("UNRESOLVED TENSION");
+
+      // Original user message preserved
+      expect(interceptorRes.messages[1].content).toBe("I take a step into the parlor.");
+
+      // Prompt breakdown registered
+      expect(interceptorRes.breakdown).toBeDefined();
+      expect(interceptorRes.breakdown?.[0].messageIndex).toBe(0);
+      expect(interceptorRes.breakdown?.[0].name).toBe("LumiVN Director");
+    });
+
+    test("idempotent: does not duplicate director block if already present", async () => {
+      const messages: LlmMessageDTO[] = [
+        { role: "system", content: DIRECTOR_DIRECTIVES },
+        { role: "user", content: "Already injected turn." },
+      ];
+      const result = await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_active" },
+        async () => ({})
+      );
+      expect(result).toBe(messages);
+    });
+  });
+
+  describe("B-Plot Emergent NPC Arrival & Phone Notification Hook", () => {
+    test("detects ripple === 2 active B-plots and flags notification", () => {
+      const ledger: LedgerData = {
+        bplots: [
+          {
+            id: "bp_1",
+            who: "Officer Jenny",
+            doing: "Investigating broken lock at warehouse",
+            vector: "Police radio chatter",
+            ripple: 2,
+            status: "active",
+          },
+          {
+            id: "bp_2",
+            who: "Mysterious Merchant",
+            doing: "Selling rare artifacts",
+            ripple: 1,
+            status: "active",
+          },
+        ],
+      };
+
+      const res = processBPlots(ledger);
+      expect(res.hasBPlotNotification).toBe(true);
+      expect(res.activeRipples.length).toBe(1);
+      expect(res.activeRipples[0].who).toBe("Officer Jenny");
+      expect(res.promotedActors.length).toBe(0);
+    });
+
+    test("promotes ripple === 3 collision actor into roster as newcomer", () => {
+      const ledger: LedgerData = {
+        scene: { place: "warehouse:exterior" },
+        roster: [{ id: "user", name: "User" }],
+        bplots: [
+          {
+            id: "bp_collision",
+            who: "detective_kane",
+            doing: "Kicks open the rear door with weapon drawn",
+            ripple: 3,
+            status: "active",
+          },
+        ],
+      };
+
+      const res = processBPlots(ledger);
+      expect(res.promotedActors).toContain("detective_kane");
+
+      const promoted = ledger.roster?.find((r) => r.id === "detective_kane");
+      expect(promoted).toBeDefined();
+      expect(promoted?.name).toBe("detective_kane");
+      expect(promoted?.status).toBe("Kicks open the rear door with weapon drawn");
+      expect(promoted?.loc).toBe("warehouse:exterior");
+      expect(promoted?.lod).toBe(2);
+      expect(promoted?.record).toBe("roster");
+
+      // Running processBPlots again does not duplicate the promoted actor
+      const res2 = processBPlots(ledger);
+      expect(res2.promotedActors.length).toBe(0);
+      expect(ledger.roster?.filter((r) => r.id === "detective_kane").length).toBe(1);
+    });
+  });
+
+  describe("HUD MenuBar Phone Badge Animation", () => {
+    test("toggles vn-pulse class and display flex on Phone badge when hasBPlotNotification is true", () => {
+      const mockCtx: any = {
+        onBackendMessage: () => () => {},
+        ready: () => {},
+      };
+      const menuBar = new MenuBar(mockCtx, () => {});
+
+      const phoneBtn = menuBar.root.querySelector('[data-tab-id="phone"]');
+      const badge = phoneBtn?.querySelector(".vn-hud-badge") as HTMLElement;
+      expect(badge).not.toBeNull();
+      expect(badge.style.display).toBe("none");
+
+      // Call setLedger with hasBPlotNotification = true
+      menuBar.setLedger({ clock: { t: "14:00" } }, true);
+      expect(badge.style.display).toBe("flex");
+      expect(badge.classList.contains("vn-pulse")).toBe(true);
+
+      // Call setLedger with hasBPlotNotification = false
+      menuBar.setLedger({ clock: { t: "14:05" } }, false);
+      expect(badge.style.display).toBe("none");
+      expect(badge.classList.contains("vn-pulse")).toBe(false);
+    });
+  });
+});
+
 ```
 
 ## File: `test/engine.test.ts`
@@ -9584,6 +10027,10 @@ actors:
     expect(bundle.scene.participants).toContain("user");
   });
 });
+
+
+
+
 ```
 
 ## File: `test/hud-tabs.test.ts`
@@ -10006,5 +10453,25 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     expect(html).toContain("dames_mansion:foyer");
   });
 });
+
+```
+
+## File: `tsconfig.json`
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["bun-types"],
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"]
+}
+
 ```
 

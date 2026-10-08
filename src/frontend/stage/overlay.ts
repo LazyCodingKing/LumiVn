@@ -622,6 +622,14 @@ export class StageOverlay {
         justify-content: center;
         box-shadow: 0 0 8px #f43f5e;
       }
+      .vn-hud-badge.vn-pulse {
+        animation: vn-badge-pulse 1.5s infinite;
+      }
+      @keyframes vn-badge-pulse {
+        0% { transform: scale(1); box-shadow: 0 0 4px #f43f5e; }
+        50% { transform: scale(1.25); box-shadow: 0 0 14px #f43f5e; }
+        100% { transform: scale(1); box-shadow: 0 0 4px #f43f5e; }
+      }
 
       /* HUD Modal / Overlay */
       .vn-hud-overlay {

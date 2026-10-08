@@ -10,7 +10,8 @@
     "generation",
     "images",
     "chats",
-    "characters"
+    "characters",
+    "interceptor"
   ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js",

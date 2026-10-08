@@ -29013,7 +29013,7 @@ class PhoneTab {
       notifHtml = `
         <div style="background: rgba(244,63,94,0.2); border: 1px solid #f43f5e; border-radius: 12px; padding: 10px; margin-bottom: 16px;">
           <div style="font-size: 11px; font-weight: 700; color: #f43f5e; margin-bottom: 2px;">\uD83D\uDEA8 EMERGENCY NOTIFICATION</div>
-          ${ripples.map((r) => `<div style="font-size: 11px; color: #fff;"><strong>${r.who}:</strong> ${r.doing}</div>`).join("")}
+          ${ripples.map((r) => `<div style="font-size: 11px; color: #fff;"><strong>${r.who}:</strong> ${r.doing}${r.vector ? ` <span style="color: #94a3b8;">(${r.vector})</span>` : ""}</div>`).join("")}
         </div>
       `;
     }
@@ -34350,7 +34350,12 @@ class MenuBar {
       this.currentLedger = ledger || {};
     }
     if (this.phoneBadge) {
-      this.phoneBadge.style.display = hasBPlotNotification ? "inline-block" : "none";
+      this.phoneBadge.style.display = hasBPlotNotification ? "flex" : "none";
+      if (hasBPlotNotification) {
+        this.phoneBadge.classList.add("vn-pulse");
+      } else {
+        this.phoneBadge.classList.remove("vn-pulse");
+      }
     }
     if (this.activeTabId) {
       this.renderActiveTab();
@@ -35275,6 +35280,14 @@ class StageOverlay {
         align-items: center;
         justify-content: center;
         box-shadow: 0 0 8px #f43f5e;
+      }
+      .vn-hud-badge.vn-pulse {
+        animation: vn-badge-pulse 1.5s infinite;
+      }
+      @keyframes vn-badge-pulse {
+        0% { transform: scale(1); box-shadow: 0 0 4px #f43f5e; }
+        50% { transform: scale(1.25); box-shadow: 0 0 14px #f43f5e; }
+        100% { transform: scale(1); box-shadow: 0 0 4px #f43f5e; }
       }
 
       /* HUD Modal / Overlay */

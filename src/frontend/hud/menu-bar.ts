@@ -129,7 +129,12 @@ export class MenuBar {
     }
 
     if (this.phoneBadge) {
-      this.phoneBadge.style.display = hasBPlotNotification ? "inline-block" : "none";
+      this.phoneBadge.style.display = hasBPlotNotification ? "flex" : "none";
+      if (hasBPlotNotification) {
+        this.phoneBadge.classList.add("vn-pulse");
+      } else {
+        this.phoneBadge.classList.remove("vn-pulse");
+      }
     }
 
     if (this.activeTabId) {
