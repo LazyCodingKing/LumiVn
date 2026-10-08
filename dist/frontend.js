@@ -27629,12 +27629,19 @@ class CharactersTab {
       { label: "Footwear", key: "shoes", icon: "\uD83D\uDC5F" },
       { label: "Hair & Makeup", key: "hair", icon: "\uD83D\uDC84" },
       { label: "Scent", key: "scent", icon: "✨" },
-      { label: "Dishevelment", key: "state", icon: "\uD83E\uDDF5" }
+      { label: "Condition", key: "state", icon: "\uD83E\uDDF5" },
+      { label: "Integrity", key: "integrity", icon: "\uD83D\uDEE1️" },
+      { label: "Residue", key: "residue", icon: "\uD83D\uDCA7" }
     ];
     let hasOutfitItems = false;
     for (const item of outfitKeys) {
       let val = outfit[item.key] || (item.key === "shoes" ? outfit["footwear"] : undefined);
-      if (val) {
+      if (item.key === "integrity" && val !== undefined) {
+        val = `${val}%`;
+      } else if (item.key === "residue" && Array.isArray(val)) {
+        val = val.length > 0 ? val.join(", ") : undefined;
+      }
+      if (val !== undefined && val !== null && val !== "") {
         hasOutfitItems = true;
         const box = document.createElement("div");
         box.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font-size: 11px;";
@@ -27906,7 +27913,8 @@ class CharactersTab {
             <div>Attraction: <strong>${r.attraction ?? 0}</strong></div>
             <div>Loyalty: <strong>${r.loyalty ?? 0}</strong></div>
           </div>
-          ${r.leverage && r.leverage.length > 0 ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${r.leverage.join(", ")}</div>` : ""}
+          ${r.leverage && r.leverage.length > 0 ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${(Array.isArray(r.leverage) ? r.leverage : [r.leverage]).map((x) => typeof x === "object" ? x.truth || x.id || JSON.stringify(x) : String(x)).join(", ")}</div>` : ""}
+          ${r.obligations && r.obligations.length > 0 ? `<div style="margin-top:4px; color:#38bdf8;">Obligations: ${(Array.isArray(r.obligations) ? r.obligations : [r.obligations]).map((x) => typeof x === "object" ? x.truth || x.id || JSON.stringify(x) : String(x)).join(", ")}</div>` : ""}
         `;
         relsList.appendChild(card);
       }
@@ -27942,6 +27950,19 @@ class WardrobeTab {
     header.className = "vn-tab-header";
     header.innerHTML = `<h3>\uD83D\uDC57 Wardrobe & Dressing — ${actor?.name || actorId}</h3>`;
     this.root.appendChild(header);
+    const statusBar = document.createElement("div");
+    statusBar.className = "vn-wardrobe-status-bar";
+    const scentVal = outfit.scent || "None";
+    const conditionVal = outfit.state || "Clean";
+    const integrityVal = outfit.integrity ?? 100;
+    const residueVal = Array.isArray(outfit.residue) && outfit.residue.length > 0 ? outfit.residue.join(", ") : "None";
+    statusBar.innerHTML = `
+      <div class="vn-wardrobe-status-item"><span>Scent:</span> <strong>${scentVal}</strong></div>
+      <div class="vn-wardrobe-status-item"><span>Condition:</span> <strong>${conditionVal}</strong></div>
+      <div class="vn-wardrobe-status-item"><span>Integrity:</span> <strong>${integrityVal}%</strong></div>
+      <div class="vn-wardrobe-status-item"><span>Residue:</span> <strong>${residueVal}</strong></div>
+    `;
+    this.root.appendChild(statusBar);
     const slotsGrid = document.createElement("div");
     slotsGrid.className = "vn-wardrobe-grid";
     const slots = [
@@ -27986,6 +28007,18 @@ class WardrobeTab {
     this.root.appendChild(slotsGrid);
     const footer = document.createElement("div");
     footer.className = "vn-tab-footer";
+    const cleanBtn = document.createElement("button");
+    cleanBtn.className = "vn-btn vn-btn-primary";
+    cleanBtn.textContent = "Clean Clothes";
+    cleanBtn.addEventListener("click", () => {
+      this.onAction(`*Cleans and washes garments*`);
+    });
+    const repairBtn = document.createElement("button");
+    repairBtn.className = "vn-btn vn-btn-primary";
+    repairBtn.textContent = "Repair Garments";
+    repairBtn.addEventListener("click", () => {
+      this.onAction(`*Mends and repairs clothing tears*`);
+    });
     const undressBtn = document.createElement("button");
     undressBtn.className = "vn-btn vn-btn-warning";
     undressBtn.textContent = "Undress to Underwear";
@@ -27998,6 +28031,8 @@ class WardrobeTab {
     stripBtn.addEventListener("click", () => {
       this.onAction(`*Completely strips clothes*`);
     });
+    footer.appendChild(cleanBtn);
+    footer.appendChild(repairBtn);
     footer.appendChild(undressBtn);
     footer.appendChild(stripBtn);
     this.root.appendChild(footer);
@@ -28292,7 +28327,13 @@ class StatsTab {
       }
       const bThresh = activeRel.betrayal_threshold ?? "N/A";
       const extraInfo = document.createElement("div");
-      extraInfo.style.cssText = "margin-top: 14px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px; display: flex; flex-direction: column; gap: 6px;";
+      extraInfo.style.cssText = "margin-top: 14px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px; display: flex; flex-direction: column; gap: 8px;";
+      const formatChip = (item, color, badge) => {
+        const text = typeof item === "object" ? item.truth || item.id || JSON.stringify(item) : String(item);
+        return `<span style="display:inline-flex; align-items:center; gap:4px; background:${color}22; border:1px solid ${color}66; color:${color}; padding:2px 8px; border-radius:12px; font-size:11px; margin:2px 4px 2px 0;"><strong>${badge}</strong> ${text}</span>`;
+      };
+      const leverageChips = Array.isArray(activeRel.leverage) && activeRel.leverage.length > 0 ? activeRel.leverage.map((item) => formatChip(item, "#f59e0b", "LEVERAGE")).join("") : '<span class="vn-muted">None</span>';
+      const obligationChips = Array.isArray(activeRel.obligations) && activeRel.obligations.length > 0 ? activeRel.obligations.map((item) => formatChip(item, "#38bdf8", "DEBT")).join("") : '<span class="vn-muted">None</span>';
       extraInfo.innerHTML = `
       <div style="display:flex; justify-content:space-between;">
         <span style="color: #94a3b8;">Betrayal Threshold:</span>
@@ -28303,17 +28344,51 @@ class StatsTab {
         <span style="color: #f8fafc;">${activeRel.shared_secrets && activeRel.shared_secrets.length ? activeRel.shared_secrets.join(", ") : "None"}</span>
       </div>
       <div>
-        <span style="color: #94a3b8;">Held Leverage:</span>
-        <span style="color: #f59e0b;">${activeRel.leverage && activeRel.leverage.length ? activeRel.leverage.join(", ") : "None"}</span>
+        <div style="color: #94a3b8; margin-bottom: 4px;">Held Leverage:</div>
+        <div>${leverageChips}</div>
       </div>
       <div>
-        <span style="color: #94a3b8;">Obligations:</span>
-        <span style="color: #38bdf8;">${activeRel.obligations && activeRel.obligations.length ? activeRel.obligations.join(", ") : "None"}</span>
+        <div style="color: #94a3b8; margin-bottom: 4px;">Obligations:</div>
+        <div>${obligationChips}</div>
       </div>
     `;
       metersContainer.appendChild(extraInfo);
       relsSection.appendChild(metersContainer);
       this.root.appendChild(relsSection);
+    }
+    const investigations = ledger.world?.investigations;
+    if (investigations && Object.keys(investigations).length > 0) {
+      const invSection = document.createElement("div");
+      invSection.className = "vn-section";
+      invSection.innerHTML = `<h4>\uD83D\uDD0D Active Investigations</h4>`;
+      const invContainer = document.createElement("div");
+      invContainer.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+      for (const [auth, track] of Object.entries(investigations)) {
+        if (!track)
+          continue;
+        const card = document.createElement("div");
+        card.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px;";
+        const alertColor = track.alert_level >= 3 ? "#ef4444" : track.alert_level === 2 ? "#f59e0b" : track.alert_level === 1 ? "#38bdf8" : "#94a3b8";
+        const alertLabel = track.alert_level === 3 ? "Active Warrant" : track.alert_level === 2 ? "Suspect Named" : track.alert_level === 1 ? "Clue Found" : "Dormant";
+        const clues = Array.isArray(track.clues) && track.clues.length > 0 ? track.clues.join(", ") : "None";
+        card.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <strong style="color:#f8fafc; font-size:13px;">${track.authority || auth}</strong>
+            <span style="background:${alertColor}22; border:1px solid ${alertColor}88; color:${alertColor}; padding:2px 8px; border-radius:10px; font-weight:600; font-size:10px;">
+              Level ${track.alert_level}: ${alertLabel}
+            </span>
+          </div>
+          <div style="color:#cbd5e1; font-size:11px; margin-bottom:4px;">
+            <span style="color:#94a3b8;">Target:</span> <strong>${track.target_id || "Unidentified"}</strong>
+          </div>
+          <div style="color:#cbd5e1; font-size:11px;">
+            <span style="color:#94a3b8;">Clues Linked:</span> <em>${clues}</em>
+          </div>
+        `;
+        invContainer.appendChild(card);
+      }
+      invSection.appendChild(invContainer);
+      this.root.appendChild(invSection);
     }
   }
 }
@@ -33171,7 +33246,16 @@ function deepMergeLedger(base, delta) {
     };
   }
   const merged = {
-    world: { ...base.world, ...delta.world },
+    world: {
+      ...base.world,
+      ...delta.world,
+      ...base.world?.investigations || delta.world?.investigations ? {
+        investigations: {
+          ...base.world?.investigations || {},
+          ...delta.world?.investigations || {}
+        }
+      } : {}
+    },
     clock: { ...base.clock, ...delta.clock },
     scene: { ...base.scene, ...delta.scene },
     places: { ...base.places, ...delta.places },
@@ -33193,7 +33277,10 @@ function deepMergeLedger(base, delta) {
         outfit: {
           ...baseActor.outfit,
           ...actorDelta.outfit,
-          accessories: actorDelta.outfit?.accessories || baseActor.outfit?.accessories || []
+          accessories: actorDelta.outfit?.accessories || baseActor.outfit?.accessories || [],
+          scent: actorDelta.outfit?.scent !== undefined ? actorDelta.outfit.scent : baseActor.outfit?.scent,
+          residue: actorDelta.outfit?.residue !== undefined ? actorDelta.outfit.residue : baseActor.outfit?.residue || [],
+          integrity: actorDelta.outfit?.integrity !== undefined ? actorDelta.outfit.integrity : baseActor.outfit?.integrity ?? 100
         },
         inventory: {
           ...baseActor.inventory,

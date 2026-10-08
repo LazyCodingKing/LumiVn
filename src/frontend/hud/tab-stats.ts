@@ -330,7 +330,21 @@ export class StatsTab {
     // Betrayal Threshold & Secret/Leverage Chips
     const bThresh = activeRel.betrayal_threshold ?? "N/A";
     const extraInfo = document.createElement("div");
-    extraInfo.style.cssText = "margin-top: 14px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px; display: flex; flex-direction: column; gap: 6px;";
+    extraInfo.style.cssText = "margin-top: 14px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px; display: flex; flex-direction: column; gap: 8px;";
+
+    const formatChip = (item: any, color: string, badge: string) => {
+      const text = typeof item === "object" ? (item.truth || item.id || JSON.stringify(item)) : String(item);
+      return `<span style="display:inline-flex; align-items:center; gap:4px; background:${color}22; border:1px solid ${color}66; color:${color}; padding:2px 8px; border-radius:12px; font-size:11px; margin:2px 4px 2px 0;"><strong>${badge}</strong> ${text}</span>`;
+    };
+
+    const leverageChips = Array.isArray(activeRel.leverage) && activeRel.leverage.length > 0
+      ? activeRel.leverage.map((item: any) => formatChip(item, "#f59e0b", "LEVERAGE")).join("")
+      : '<span class="vn-muted">None</span>';
+
+    const obligationChips = Array.isArray(activeRel.obligations) && activeRel.obligations.length > 0
+      ? activeRel.obligations.map((item: any) => formatChip(item, "#38bdf8", "DEBT")).join("")
+      : '<span class="vn-muted">None</span>';
+
     extraInfo.innerHTML = `
       <div style="display:flex; justify-content:space-between;">
         <span style="color: #94a3b8;">Betrayal Threshold:</span>
@@ -341,18 +355,55 @@ export class StatsTab {
         <span style="color: #f8fafc;">${(activeRel.shared_secrets && activeRel.shared_secrets.length) ? activeRel.shared_secrets.join(", ") : "None"}</span>
       </div>
       <div>
-        <span style="color: #94a3b8;">Held Leverage:</span>
-        <span style="color: #f59e0b;">${(activeRel.leverage && activeRel.leverage.length) ? activeRel.leverage.join(", ") : "None"}</span>
+        <div style="color: #94a3b8; margin-bottom: 4px;">Held Leverage:</div>
+        <div>${leverageChips}</div>
       </div>
       <div>
-        <span style="color: #94a3b8;">Obligations:</span>
-        <span style="color: #38bdf8;">${(activeRel.obligations && activeRel.obligations.length) ? activeRel.obligations.join(", ") : "None"}</span>
+        <div style="color: #94a3b8; margin-bottom: 4px;">Obligations:</div>
+        <div>${obligationChips}</div>
       </div>
     `;
     metersContainer.appendChild(extraInfo);
 
       relsSection.appendChild(metersContainer);
       this.root.appendChild(relsSection);
+    }
+
+    // 5. Active Investigations
+    const investigations = ledger.world?.investigations;
+    if (investigations && Object.keys(investigations).length > 0) {
+      const invSection = document.createElement("div");
+      invSection.className = "vn-section";
+      invSection.innerHTML = `<h4>🔍 Active Investigations</h4>`;
+      const invContainer = document.createElement("div");
+      invContainer.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+
+      for (const [auth, track] of Object.entries(investigations)) {
+        if (!track) continue;
+        const card = document.createElement("div");
+        card.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px;";
+        const alertColor = track.alert_level >= 3 ? "#ef4444" : track.alert_level === 2 ? "#f59e0b" : track.alert_level === 1 ? "#38bdf8" : "#94a3b8";
+        const alertLabel = track.alert_level === 3 ? "Active Warrant" : track.alert_level === 2 ? "Suspect Named" : track.alert_level === 1 ? "Clue Found" : "Dormant";
+        const clues = Array.isArray(track.clues) && track.clues.length > 0 ? track.clues.join(", ") : "None";
+
+        card.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <strong style="color:#f8fafc; font-size:13px;">${track.authority || auth}</strong>
+            <span style="background:${alertColor}22; border:1px solid ${alertColor}88; color:${alertColor}; padding:2px 8px; border-radius:10px; font-weight:600; font-size:10px;">
+              Level ${track.alert_level}: ${alertLabel}
+            </span>
+          </div>
+          <div style="color:#cbd5e1; font-size:11px; margin-bottom:4px;">
+            <span style="color:#94a3b8;">Target:</span> <strong>${track.target_id || "Unidentified"}</strong>
+          </div>
+          <div style="color:#cbd5e1; font-size:11px;">
+            <span style="color:#94a3b8;">Clues Linked:</span> <em>${clues}</em>
+          </div>
+        `;
+        invContainer.appendChild(card);
+      }
+      invSection.appendChild(invContainer);
+      this.root.appendChild(invSection);
     }
   }
 }

@@ -337,6 +337,45 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     expect(html).toContain("Affinity");
     expect(html).toContain("Attraction");
     expect(html).toContain("Betrayal Threshold:");
+
+    // Test with active investigation and leverage chips
+    const ledgerWithInv: LedgerData = {
+      ...parsedLedger,
+      world: {
+        investigations: {
+          watch: {
+            authority: "City Watch",
+            alert_level: 2,
+            target_id: "user",
+            clues: ["Muddy footprints", "Torn fabric"],
+          },
+        },
+      },
+      actors: {
+        ...parsedLedger.actors,
+        jessica: {
+          ...parsedLedger.actors?.jessica,
+          relations: {
+            user: {
+              trust: 50,
+              leverage: ["Knows secret entrance"],
+              obligations: ["Owes rent favor"],
+            },
+          },
+        },
+      },
+    };
+    (tab as any).selectedActorId = "jessica";
+    tab.render(ledgerWithInv);
+    const htmlWithInv = tab.root.innerHTML;
+    expect(htmlWithInv).toContain("Active Investigations");
+    expect(htmlWithInv).toContain("City Watch");
+    expect(htmlWithInv).toContain("Level 2: Suspect Named");
+    expect(htmlWithInv).toContain("Muddy footprints, Torn fabric");
+    expect(htmlWithInv).toContain("LEVERAGE");
+    expect(htmlWithInv).toContain("Knows secret entrance");
+    expect(htmlWithInv).toContain("DEBT");
+    expect(htmlWithInv).toContain("Owes rent favor");
   });
 
   test("5. InventoryTab renders in-hand equipment, carried items, and room containers", () => {
@@ -362,6 +401,11 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     expect(html).toContain("Dark slim-fit jeans");
     expect(html).toContain("Calvin Klein trunks");
     expect(html).toContain("White leather sneakers");
+    expect(html).toContain("Scent:");
+    expect(html).toContain("Condition:");
+    expect(html).toContain("Integrity:");
+    expect(html).toContain("Clean Clothes");
+    expect(html).toContain("Repair Garments");
   });
 
   test("7. MapTab renders indoor/outdoor nodes and navigation routes", () => {

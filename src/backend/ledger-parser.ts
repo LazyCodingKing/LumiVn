@@ -227,7 +227,18 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
   }
 
   const merged: LedgerData = {
-    world: { ...base.world, ...delta.world },
+    world: {
+      ...base.world,
+      ...delta.world,
+      ...(base.world?.investigations || delta.world?.investigations
+        ? {
+            investigations: {
+              ...(base.world?.investigations || {}),
+              ...(delta.world?.investigations || {}),
+            },
+          }
+        : {}),
+    },
     clock: { ...base.clock, ...delta.clock },
     scene: { ...base.scene, ...delta.scene },
     places: { ...base.places, ...delta.places },
@@ -251,6 +262,9 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
           ...baseActor.outfit,
           ...actorDelta.outfit,
           accessories: actorDelta.outfit?.accessories || baseActor.outfit?.accessories || [],
+          scent: actorDelta.outfit?.scent !== undefined ? actorDelta.outfit.scent : baseActor.outfit?.scent,
+          residue: actorDelta.outfit?.residue !== undefined ? actorDelta.outfit.residue : (baseActor.outfit?.residue || []),
+          integrity: actorDelta.outfit?.integrity !== undefined ? actorDelta.outfit.integrity : (baseActor.outfit?.integrity ?? 100),
         },
         inventory: {
           ...baseActor.inventory,

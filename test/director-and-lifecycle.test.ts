@@ -158,6 +158,65 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       );
       expect(result).toBe(messages);
     });
+
+    test("injects decorum guidance when player is underdressed in formal public room", async () => {
+      const messages: LlmMessageDTO[] = [{ role: "user", content: "I enter the grand ballroom." }];
+      const ledger: LedgerData = {
+        scene: { place: "ballroom" },
+        places: {
+          ballroom: {
+            norm: "formal gala",
+            privacy: 1,
+          },
+        },
+        actors: {
+          user: {
+            name: "Player",
+            outfit: {
+              top: "none",
+              bottom: "trousers",
+            },
+          },
+        },
+      };
+
+      const res = (await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_ballroom" },
+        async () => ledger
+      )) as any;
+
+      expect(res.messages).toBeDefined();
+      const content = res.messages[0].content;
+      expect(content).toContain("Director Guidance: {{user}} is visibly under-dressed");
+    });
+
+    test("injects active investigation alerts when alert_level >= 1", async () => {
+      const messages: LlmMessageDTO[] = [{ role: "user", content: "Walking through town." }];
+      const ledger: LedgerData = {
+        world: {
+          investigations: {
+            guard: {
+              authority: "Royal Guard",
+              alert_level: 2,
+              target_id: "user",
+              clues: ["Footprint", "Stolen locket"],
+            },
+          },
+        },
+      };
+
+      const res = (await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_town" },
+        async () => ledger
+      )) as any;
+
+      expect(res.messages).toBeDefined();
+      const content = res.messages[0].content;
+      expect(content).toContain("Director Alert: Investigation by Royal Guard active at Alert Level 2");
+      expect(content).toContain("Clues: Footprint, Stolen locket");
+    });
   });
 
   describe("Post-Turn State Diffing & Director Log Generation", () => {
@@ -237,6 +296,69 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       // Journal mutations
       expect(diff.mutations).toContain("tessa.passions.arousal += 30");
       expect(diff.mutations).toContain("user.inventory += 'Old Key'");
+    });
+
+    test("diffs investigations escalation and NPC attire changes (scent, integrity, residue)", () => {
+      const prevLedger: LedgerData = {
+        world: {
+          investigations: {
+            watch: {
+              authority: "City Watch",
+              alert_level: 1,
+              target_id: "suspect",
+              clues: ["bootprint"],
+            },
+          },
+        },
+        actors: {
+          clara: {
+            name: "Clara",
+            outfit: {
+              top: "Silk blouse",
+              integrity: 100,
+              scent: "lavender",
+              residue: [],
+            },
+          },
+        },
+      };
+
+      const nextLedger: LedgerData = {
+        world: {
+          investigations: {
+            watch: {
+              authority: "City Watch",
+              alert_level: 2,
+              target_id: "suspect",
+              clues: ["bootprint", "dagger sheath"],
+            },
+          },
+        },
+        actors: {
+          clara: {
+            name: "Clara",
+            outfit: {
+              top: "Silk blouse",
+              integrity: 75,
+              scent: "smoke",
+              residue: ["soot", "mud"],
+            },
+          },
+        },
+      };
+
+      const diff = computeDirectorImpactDiff(prevLedger, nextLedger, "Directive");
+
+      expect(diff.worldChanges.some((w) => w.includes("Investigation alert escalated: City Watch Alert Level 1 -> 2"))).toBe(true);
+      expect(diff.worldChanges.some((w) => w.includes("Investigation clues discovered by City Watch: dagger sheath"))).toBe(true);
+
+      expect(diff.npcChanges.length).toBe(1);
+      const claraDiff = diff.npcChanges[0];
+      expect(claraDiff.actorId).toBe("clara");
+      expect(claraDiff.attireChanged).toBeDefined();
+      expect(claraDiff.attireChanged).toContain("integrity 100% -> 75%");
+      expect(claraDiff.attireChanged).toContain('scent "lavender" -> "smoke"');
+      expect(claraDiff.attireChanged).toContain("residue [soot, mud]");
     });
   });
 

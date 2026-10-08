@@ -30,6 +30,8 @@ export interface ActorOutfit {
   hair?: string;
   makeup?: string;
   scent?: string;
+  residue?: string[];
+  integrity?: number;
   state?: string;
   [key: string]: unknown;
 }
@@ -188,12 +190,33 @@ export interface JournalEntry {
   [key: string]: unknown;
 }
 
+export interface InvestigationTrack {
+  authority: string;
+  alert_level: number;
+  clues: string[];
+  target_id: string;
+}
+
 export interface LedgerData {
-  world?: Record<string, unknown>;
+  world?: {
+    investigations?: Record<string, InvestigationTrack>;
+    [key: string]: unknown;
+  };
   clock?: ClockState;
   scene?: SceneState;
   places?: Record<string, PlaceNode>;
-  roster?: Array<{ id: string; name?: string; lod?: number; status?: string; loc?: string; posture?: string; activity?: string; [key: string]: unknown }>;
+  roster?: Array<{
+    id: string;
+    name?: string;
+    lod?: number;
+    status?: string;
+    loc?: string;
+    posture?: string;
+    activity?: string;
+    destination?: string;
+    eta?: string;
+    [key: string]: unknown;
+  }>;
   actors?: Record<string, ActorDossier>;
   bplots?: BPlot[];
   opportunities?: Opportunity[];
@@ -268,6 +291,7 @@ export interface DirectorLogEntry {
     wantNow?: string;
     passionsMoved?: Record<string, number>;
     relationsMoved?: Record<string, any>;
+    attireChanged?: string;
   }>;
   mutations: string[];
 }

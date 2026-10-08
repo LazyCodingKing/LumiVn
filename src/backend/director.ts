@@ -66,8 +66,42 @@ export async function evaluateDirectorInterceptor(
   const currentState = await getChatState(chatId);
   if (!currentState) return messages;
 
-  const activeDirective = formatDirectorDirective(settings);
+  let activeDirective = formatDirectorDirective(settings);
   if (!activeDirective) return messages;
+
+  // Decorum validation scan
+  const currentPlaceId = currentState.scene?.place;
+  const currentPlace = currentPlaceId && currentState.places?.[currentPlaceId];
+  const userDossier = currentState.actors?.["user"];
+  if (currentPlace && userDossier?.outfit) {
+    const norm = String(currentPlace.norm || "").toLowerCase();
+    const privacy = Number(currentPlace.privacy ?? 0);
+    const top = String(userDossier.outfit.top || "none").toLowerCase();
+    const bottom = String(userDossier.outfit.bottom || "none").toLowerCase();
+    const isUnderdressed = top === "none" || bottom === "none";
+    if (privacy <= 1 && norm.includes("formal") && isUnderdressed) {
+      activeDirective +=
+        "\n[Director Guidance: {{user}} is visibly under-dressed for this public formal environment. Present NPCs must react to this breach before proceeding.]";
+    }
+  }
+
+  // Active investigation alerts
+  const investigations = currentState.world?.investigations;
+  if (investigations && typeof investigations === "object") {
+    for (const [auth, track] of Object.entries(investigations)) {
+      if (track && typeof track === "object" && track.alert_level >= 1) {
+        const cluesText =
+          Array.isArray(track.clues) && track.clues.length > 0
+            ? track.clues.join(", ")
+            : "none";
+        activeDirective += `\n[Director Alert: Investigation by ${
+          track.authority || auth
+        } active at Alert Level ${track.alert_level} targeting ${
+          track.target_id || "suspect"
+        }. Clues: ${cluesText}. Authorities and informants be vigilant.]`;
+      }
+    }
+  }
 
   // Guard against duplicate injections
   if (messages.some((m) => typeof m.content === "string" && m.content.includes(activeDirective))) {
@@ -99,13 +133,7 @@ export function computeDirectorImpactDiff(
   directive: string
 ): DirectorLogEntry {
   const worldChanges: string[] = [];
-  const npcChanges: Array<{
-    actorId: string;
-    name: string;
-    wantNow?: string;
-    passionsMoved?: Record<string, number>;
-    relationsMoved?: Record<string, any>;
-  }> = [];
+  const npcChanges: DirectorLogEntry["npcChanges"] = [];
   const mutations: string[] = [];
 
   // 1. World diff
@@ -157,6 +185,34 @@ export function computeDirectorImpactDiff(
     }
   }
 
+  // Investigations
+  const prevInvs = prevLedger?.world?.investigations || {};
+  const nextInvs = nextLedger?.world?.investigations || {};
+  for (const [auth, track] of Object.entries(nextInvs)) {
+    if (!track) continue;
+    const prevTrack = prevInvs[auth];
+    const name = track.authority || auth;
+    if (!prevTrack) {
+      worldChanges.push(
+        `New Investigation: ${name} targeting ${track.target_id || "suspect"} (Alert Level ${track.alert_level})`
+      );
+    } else {
+      if (track.alert_level !== prevTrack.alert_level) {
+        worldChanges.push(
+          `Investigation alert escalated: ${name} Alert Level ${prevTrack.alert_level} -> ${track.alert_level}`
+        );
+      }
+      const prevClues = prevTrack.clues || [];
+      const nextClues = track.clues || [];
+      const newClues = nextClues.filter((c) => !prevClues.includes(c));
+      if (newClues.length > 0) {
+        worldChanges.push(
+          `Investigation clues discovered by ${name}: ${newClues.join(", ")}`
+        );
+      }
+    }
+  }
+
   // 2. NPC Behavior & Plans
   const nextActors = nextLedger?.actors || {};
   const prevActors = prevLedger?.actors || {};
@@ -197,11 +253,51 @@ export function computeDirectorImpactDiff(
       }
     }
 
+    // Attire shifts (integrity, scent, residue)
+    const prevOutfit = prevActor?.outfit;
+    const nextOutfit = actor.outfit;
+    const attireShifts: string[] = [];
+    if (nextOutfit && prevOutfit) {
+      if (
+        nextOutfit.integrity !== undefined &&
+        nextOutfit.integrity !== prevOutfit.integrity
+      ) {
+        attireShifts.push(
+          `integrity ${prevOutfit.integrity ?? 100}% -> ${nextOutfit.integrity}%`
+        );
+      }
+      if (
+        nextOutfit.scent !== undefined &&
+        nextOutfit.scent !== prevOutfit.scent
+      ) {
+        attireShifts.push(
+          `scent "${prevOutfit.scent || "none"}" -> "${nextOutfit.scent}"`
+        );
+      }
+      const prevResidue = JSON.stringify(prevOutfit.residue || []);
+      const nextResidue = JSON.stringify(nextOutfit.residue || []);
+      if (nextResidue !== prevResidue) {
+        attireShifts.push(
+          `residue [${(nextOutfit.residue || []).join(", ")}]`
+        );
+      }
+    } else if (nextOutfit && !prevOutfit) {
+      if (nextOutfit.scent) attireShifts.push(`scent "${nextOutfit.scent}"`);
+      if (nextOutfit.residue && nextOutfit.residue.length > 0) {
+        attireShifts.push(`residue [${nextOutfit.residue.join(", ")}]`);
+      }
+      if (nextOutfit.integrity !== undefined && nextOutfit.integrity < 100) {
+        attireShifts.push(`integrity ${nextOutfit.integrity}%`);
+      }
+    }
+    const attireChanged = attireShifts.length > 0 ? attireShifts.join("; ") : undefined;
+
     if (
       wantChanged ||
       goalsChanged ||
       Object.keys(passionsMoved).length > 0 ||
-      Object.keys(relationsMoved).length > 0
+      Object.keys(relationsMoved).length > 0 ||
+      attireChanged
     ) {
       npcChanges.push({
         actorId,
@@ -213,6 +309,7 @@ export function computeDirectorImpactDiff(
           Object.keys(passionsMoved).length > 0 ? passionsMoved : undefined,
         relationsMoved:
           Object.keys(relationsMoved).length > 0 ? relationsMoved : undefined,
+        attireChanged,
       });
     }
   }

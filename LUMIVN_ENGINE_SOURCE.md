@@ -1106,8 +1106,42 @@ export async function evaluateDirectorInterceptor(
   const currentState = await getChatState(chatId);
   if (!currentState) return messages;
 
-  const activeDirective = formatDirectorDirective(settings);
+  let activeDirective = formatDirectorDirective(settings);
   if (!activeDirective) return messages;
+
+  // Decorum validation scan
+  const currentPlaceId = currentState.scene?.place;
+  const currentPlace = currentPlaceId && currentState.places?.[currentPlaceId];
+  const userDossier = currentState.actors?.["user"];
+  if (currentPlace && userDossier?.outfit) {
+    const norm = String(currentPlace.norm || "").toLowerCase();
+    const privacy = Number(currentPlace.privacy ?? 0);
+    const top = String(userDossier.outfit.top || "none").toLowerCase();
+    const bottom = String(userDossier.outfit.bottom || "none").toLowerCase();
+    const isUnderdressed = top === "none" || bottom === "none";
+    if (privacy <= 1 && norm.includes("formal") && isUnderdressed) {
+      activeDirective +=
+        "\n[Director Guidance: {{user}} is visibly under-dressed for this public formal environment. Present NPCs must react to this breach before proceeding.]";
+    }
+  }
+
+  // Active investigation alerts
+  const investigations = currentState.world?.investigations;
+  if (investigations && typeof investigations === "object") {
+    for (const [auth, track] of Object.entries(investigations)) {
+      if (track && typeof track === "object" && track.alert_level >= 1) {
+        const cluesText =
+          Array.isArray(track.clues) && track.clues.length > 0
+            ? track.clues.join(", ")
+            : "none";
+        activeDirective += `\n[Director Alert: Investigation by ${
+          track.authority || auth
+        } active at Alert Level ${track.alert_level} targeting ${
+          track.target_id || "suspect"
+        }. Clues: ${cluesText}. Authorities and informants be vigilant.]`;
+      }
+    }
+  }
 
   // Guard against duplicate injections
   if (messages.some((m) => typeof m.content === "string" && m.content.includes(activeDirective))) {
@@ -1139,13 +1173,7 @@ export function computeDirectorImpactDiff(
   directive: string
 ): DirectorLogEntry {
   const worldChanges: string[] = [];
-  const npcChanges: Array<{
-    actorId: string;
-    name: string;
-    wantNow?: string;
-    passionsMoved?: Record<string, number>;
-    relationsMoved?: Record<string, any>;
-  }> = [];
+  const npcChanges: DirectorLogEntry["npcChanges"] = [];
   const mutations: string[] = [];
 
   // 1. World diff
@@ -1197,6 +1225,34 @@ export function computeDirectorImpactDiff(
     }
   }
 
+  // Investigations
+  const prevInvs = prevLedger?.world?.investigations || {};
+  const nextInvs = nextLedger?.world?.investigations || {};
+  for (const [auth, track] of Object.entries(nextInvs)) {
+    if (!track) continue;
+    const prevTrack = prevInvs[auth];
+    const name = track.authority || auth;
+    if (!prevTrack) {
+      worldChanges.push(
+        `New Investigation: ${name} targeting ${track.target_id || "suspect"} (Alert Level ${track.alert_level})`
+      );
+    } else {
+      if (track.alert_level !== prevTrack.alert_level) {
+        worldChanges.push(
+          `Investigation alert escalated: ${name} Alert Level ${prevTrack.alert_level} -> ${track.alert_level}`
+        );
+      }
+      const prevClues = prevTrack.clues || [];
+      const nextClues = track.clues || [];
+      const newClues = nextClues.filter((c) => !prevClues.includes(c));
+      if (newClues.length > 0) {
+        worldChanges.push(
+          `Investigation clues discovered by ${name}: ${newClues.join(", ")}`
+        );
+      }
+    }
+  }
+
   // 2. NPC Behavior & Plans
   const nextActors = nextLedger?.actors || {};
   const prevActors = prevLedger?.actors || {};
@@ -1237,11 +1293,51 @@ export function computeDirectorImpactDiff(
       }
     }
 
+    // Attire shifts (integrity, scent, residue)
+    const prevOutfit = prevActor?.outfit;
+    const nextOutfit = actor.outfit;
+    const attireShifts: string[] = [];
+    if (nextOutfit && prevOutfit) {
+      if (
+        nextOutfit.integrity !== undefined &&
+        nextOutfit.integrity !== prevOutfit.integrity
+      ) {
+        attireShifts.push(
+          `integrity ${prevOutfit.integrity ?? 100}% -> ${nextOutfit.integrity}%`
+        );
+      }
+      if (
+        nextOutfit.scent !== undefined &&
+        nextOutfit.scent !== prevOutfit.scent
+      ) {
+        attireShifts.push(
+          `scent "${prevOutfit.scent || "none"}" -> "${nextOutfit.scent}"`
+        );
+      }
+      const prevResidue = JSON.stringify(prevOutfit.residue || []);
+      const nextResidue = JSON.stringify(nextOutfit.residue || []);
+      if (nextResidue !== prevResidue) {
+        attireShifts.push(
+          `residue [${(nextOutfit.residue || []).join(", ")}]`
+        );
+      }
+    } else if (nextOutfit && !prevOutfit) {
+      if (nextOutfit.scent) attireShifts.push(`scent "${nextOutfit.scent}"`);
+      if (nextOutfit.residue && nextOutfit.residue.length > 0) {
+        attireShifts.push(`residue [${nextOutfit.residue.join(", ")}]`);
+      }
+      if (nextOutfit.integrity !== undefined && nextOutfit.integrity < 100) {
+        attireShifts.push(`integrity ${nextOutfit.integrity}%`);
+      }
+    }
+    const attireChanged = attireShifts.length > 0 ? attireShifts.join("; ") : undefined;
+
     if (
       wantChanged ||
       goalsChanged ||
       Object.keys(passionsMoved).length > 0 ||
-      Object.keys(relationsMoved).length > 0
+      Object.keys(relationsMoved).length > 0 ||
+      attireChanged
     ) {
       npcChanges.push({
         actorId,
@@ -1253,6 +1349,7 @@ export function computeDirectorImpactDiff(
           Object.keys(passionsMoved).length > 0 ? passionsMoved : undefined,
         relationsMoved:
           Object.keys(relationsMoved).length > 0 ? relationsMoved : undefined,
+        attireChanged,
       });
     }
   }
@@ -1557,7 +1654,18 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
   }
 
   const merged: LedgerData = {
-    world: { ...base.world, ...delta.world },
+    world: {
+      ...base.world,
+      ...delta.world,
+      ...(base.world?.investigations || delta.world?.investigations
+        ? {
+            investigations: {
+              ...(base.world?.investigations || {}),
+              ...(delta.world?.investigations || {}),
+            },
+          }
+        : {}),
+    },
     clock: { ...base.clock, ...delta.clock },
     scene: { ...base.scene, ...delta.scene },
     places: { ...base.places, ...delta.places },
@@ -1581,6 +1689,9 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
           ...baseActor.outfit,
           ...actorDelta.outfit,
           accessories: actorDelta.outfit?.accessories || baseActor.outfit?.accessories || [],
+          scent: actorDelta.outfit?.scent !== undefined ? actorDelta.outfit.scent : baseActor.outfit?.scent,
+          residue: actorDelta.outfit?.residue !== undefined ? actorDelta.outfit.residue : (baseActor.outfit?.residue || []),
+          integrity: actorDelta.outfit?.integrity !== undefined ? actorDelta.outfit.integrity : (baseActor.outfit?.integrity ?? 100),
         },
         inventory: {
           ...baseActor.inventory,
@@ -2552,13 +2663,20 @@ export class CharactersTab {
       { label: "Footwear", key: "shoes", icon: "👟" },
       { label: "Hair & Makeup", key: "hair", icon: "💄" },
       { label: "Scent", key: "scent", icon: "✨" },
-      { label: "Dishevelment", key: "state", icon: "🧵" },
+      { label: "Condition", key: "state", icon: "🧵" },
+      { label: "Integrity", key: "integrity", icon: "🛡️" },
+      { label: "Residue", key: "residue", icon: "💧" },
     ];
 
     let hasOutfitItems = false;
     for (const item of outfitKeys) {
-      let val = outfit[item.key] || (item.key === "shoes" ? outfit["footwear"] : undefined);
-      if (val) {
+      let val = (outfit as any)[item.key] || (item.key === "shoes" ? (outfit as any)["footwear"] : undefined);
+      if (item.key === "integrity" && val !== undefined) {
+        val = `${val}%`;
+      } else if (item.key === "residue" && Array.isArray(val)) {
+        val = val.length > 0 ? val.join(", ") : undefined;
+      }
+      if (val !== undefined && val !== null && val !== "") {
         hasOutfitItems = true;
         const box = document.createElement("div");
         box.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font-size: 11px;";
@@ -2861,7 +2979,8 @@ export class CharactersTab {
             <div>Attraction: <strong>${r.attraction ?? 0}</strong></div>
             <div>Loyalty: <strong>${r.loyalty ?? 0}</strong></div>
           </div>
-          ${(r.leverage && r.leverage.length > 0) ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${r.leverage.join(", ")}</div>` : ""}
+          ${(r.leverage && r.leverage.length > 0) ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${(Array.isArray(r.leverage) ? r.leverage : [r.leverage]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
+          ${(r.obligations && r.obligations.length > 0) ? `<div style="margin-top:4px; color:#38bdf8;">Obligations: ${(Array.isArray(r.obligations) ? r.obligations : [r.obligations]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
         `;
         relsList.appendChild(card);
       }
@@ -5816,7 +5935,21 @@ export class StatsTab {
     // Betrayal Threshold & Secret/Leverage Chips
     const bThresh = activeRel.betrayal_threshold ?? "N/A";
     const extraInfo = document.createElement("div");
-    extraInfo.style.cssText = "margin-top: 14px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px; display: flex; flex-direction: column; gap: 6px;";
+    extraInfo.style.cssText = "margin-top: 14px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px; display: flex; flex-direction: column; gap: 8px;";
+
+    const formatChip = (item: any, color: string, badge: string) => {
+      const text = typeof item === "object" ? (item.truth || item.id || JSON.stringify(item)) : String(item);
+      return `<span style="display:inline-flex; align-items:center; gap:4px; background:${color}22; border:1px solid ${color}66; color:${color}; padding:2px 8px; border-radius:12px; font-size:11px; margin:2px 4px 2px 0;"><strong>${badge}</strong> ${text}</span>`;
+    };
+
+    const leverageChips = Array.isArray(activeRel.leverage) && activeRel.leverage.length > 0
+      ? activeRel.leverage.map((item: any) => formatChip(item, "#f59e0b", "LEVERAGE")).join("")
+      : '<span class="vn-muted">None</span>';
+
+    const obligationChips = Array.isArray(activeRel.obligations) && activeRel.obligations.length > 0
+      ? activeRel.obligations.map((item: any) => formatChip(item, "#38bdf8", "DEBT")).join("")
+      : '<span class="vn-muted">None</span>';
+
     extraInfo.innerHTML = `
       <div style="display:flex; justify-content:space-between;">
         <span style="color: #94a3b8;">Betrayal Threshold:</span>
@@ -5827,18 +5960,55 @@ export class StatsTab {
         <span style="color: #f8fafc;">${(activeRel.shared_secrets && activeRel.shared_secrets.length) ? activeRel.shared_secrets.join(", ") : "None"}</span>
       </div>
       <div>
-        <span style="color: #94a3b8;">Held Leverage:</span>
-        <span style="color: #f59e0b;">${(activeRel.leverage && activeRel.leverage.length) ? activeRel.leverage.join(", ") : "None"}</span>
+        <div style="color: #94a3b8; margin-bottom: 4px;">Held Leverage:</div>
+        <div>${leverageChips}</div>
       </div>
       <div>
-        <span style="color: #94a3b8;">Obligations:</span>
-        <span style="color: #38bdf8;">${(activeRel.obligations && activeRel.obligations.length) ? activeRel.obligations.join(", ") : "None"}</span>
+        <div style="color: #94a3b8; margin-bottom: 4px;">Obligations:</div>
+        <div>${obligationChips}</div>
       </div>
     `;
     metersContainer.appendChild(extraInfo);
 
       relsSection.appendChild(metersContainer);
       this.root.appendChild(relsSection);
+    }
+
+    // 5. Active Investigations
+    const investigations = ledger.world?.investigations;
+    if (investigations && Object.keys(investigations).length > 0) {
+      const invSection = document.createElement("div");
+      invSection.className = "vn-section";
+      invSection.innerHTML = `<h4>🔍 Active Investigations</h4>`;
+      const invContainer = document.createElement("div");
+      invContainer.style.cssText = "display: flex; flex-direction: column; gap: 8px;";
+
+      for (const [auth, track] of Object.entries(investigations)) {
+        if (!track) continue;
+        const card = document.createElement("div");
+        card.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 12px;";
+        const alertColor = track.alert_level >= 3 ? "#ef4444" : track.alert_level === 2 ? "#f59e0b" : track.alert_level === 1 ? "#38bdf8" : "#94a3b8";
+        const alertLabel = track.alert_level === 3 ? "Active Warrant" : track.alert_level === 2 ? "Suspect Named" : track.alert_level === 1 ? "Clue Found" : "Dormant";
+        const clues = Array.isArray(track.clues) && track.clues.length > 0 ? track.clues.join(", ") : "None";
+
+        card.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <strong style="color:#f8fafc; font-size:13px;">${track.authority || auth}</strong>
+            <span style="background:${alertColor}22; border:1px solid ${alertColor}88; color:${alertColor}; padding:2px 8px; border-radius:10px; font-weight:600; font-size:10px;">
+              Level ${track.alert_level}: ${alertLabel}
+            </span>
+          </div>
+          <div style="color:#cbd5e1; font-size:11px; margin-bottom:4px;">
+            <span style="color:#94a3b8;">Target:</span> <strong>${track.target_id || "Unidentified"}</strong>
+          </div>
+          <div style="color:#cbd5e1; font-size:11px;">
+            <span style="color:#94a3b8;">Clues Linked:</span> <em>${clues}</em>
+          </div>
+        `;
+        invContainer.appendChild(card);
+      }
+      invSection.appendChild(invContainer);
+      this.root.appendChild(invSection);
     }
   }
 }
@@ -5879,6 +6049,24 @@ export class WardrobeTab {
     header.className = "vn-tab-header";
     header.innerHTML = `<h3>👗 Wardrobe & Dressing — ${actor?.name || actorId}</h3>`;
     this.root.appendChild(header);
+
+    const statusBar = document.createElement("div");
+    statusBar.className = "vn-wardrobe-status-bar";
+    const scentVal = outfit.scent || "None";
+    const conditionVal = outfit.state || "Clean";
+    const integrityVal = outfit.integrity ?? 100;
+    const residueVal =
+      Array.isArray(outfit.residue) && outfit.residue.length > 0
+        ? outfit.residue.join(", ")
+        : "None";
+
+    statusBar.innerHTML = `
+      <div class="vn-wardrobe-status-item"><span>Scent:</span> <strong>${scentVal}</strong></div>
+      <div class="vn-wardrobe-status-item"><span>Condition:</span> <strong>${conditionVal}</strong></div>
+      <div class="vn-wardrobe-status-item"><span>Integrity:</span> <strong>${integrityVal}%</strong></div>
+      <div class="vn-wardrobe-status-item"><span>Residue:</span> <strong>${residueVal}</strong></div>
+    `;
+    this.root.appendChild(statusBar);
 
     const slotsGrid = document.createElement("div");
     slotsGrid.className = "vn-wardrobe-grid";
@@ -5934,6 +6122,21 @@ export class WardrobeTab {
     // Bulk actions
     const footer = document.createElement("div");
     footer.className = "vn-tab-footer";
+
+    const cleanBtn = document.createElement("button");
+    cleanBtn.className = "vn-btn vn-btn-primary";
+    cleanBtn.textContent = "Clean Clothes";
+    cleanBtn.addEventListener("click", () => {
+      this.onAction(`*Cleans and washes garments*`);
+    });
+
+    const repairBtn = document.createElement("button");
+    repairBtn.className = "vn-btn vn-btn-primary";
+    repairBtn.textContent = "Repair Garments";
+    repairBtn.addEventListener("click", () => {
+      this.onAction(`*Mends and repairs clothing tears*`);
+    });
+
     const undressBtn = document.createElement("button");
     undressBtn.className = "vn-btn vn-btn-warning";
     undressBtn.textContent = "Undress to Underwear";
@@ -5948,6 +6151,8 @@ export class WardrobeTab {
       this.onAction(`*Completely strips clothes*`);
     });
 
+    footer.appendChild(cleanBtn);
+    footer.appendChild(repairBtn);
     footer.appendChild(undressBtn);
     footer.appendChild(stripBtn);
     this.root.appendChild(footer);
@@ -9835,6 +10040,8 @@ export interface ActorOutfit {
   hair?: string;
   makeup?: string;
   scent?: string;
+  residue?: string[];
+  integrity?: number;
   state?: string;
   [key: string]: unknown;
 }
@@ -9993,12 +10200,33 @@ export interface JournalEntry {
   [key: string]: unknown;
 }
 
+export interface InvestigationTrack {
+  authority: string;
+  alert_level: number;
+  clues: string[];
+  target_id: string;
+}
+
 export interface LedgerData {
-  world?: Record<string, unknown>;
+  world?: {
+    investigations?: Record<string, InvestigationTrack>;
+    [key: string]: unknown;
+  };
   clock?: ClockState;
   scene?: SceneState;
   places?: Record<string, PlaceNode>;
-  roster?: Array<{ id: string; name?: string; lod?: number; status?: string; loc?: string; posture?: string; activity?: string; [key: string]: unknown }>;
+  roster?: Array<{
+    id: string;
+    name?: string;
+    lod?: number;
+    status?: string;
+    loc?: string;
+    posture?: string;
+    activity?: string;
+    destination?: string;
+    eta?: string;
+    [key: string]: unknown;
+  }>;
   actors?: Record<string, ActorDossier>;
   bplots?: BPlot[];
   opportunities?: Opportunity[];
@@ -10073,6 +10301,7 @@ export interface DirectorLogEntry {
     wantNow?: string;
     passionsMoved?: Record<string, number>;
     relationsMoved?: Record<string, any>;
+    attireChanged?: string;
   }>;
   mutations: string[];
 }
@@ -10243,6 +10472,65 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       );
       expect(result).toBe(messages);
     });
+
+    test("injects decorum guidance when player is underdressed in formal public room", async () => {
+      const messages: LlmMessageDTO[] = [{ role: "user", content: "I enter the grand ballroom." }];
+      const ledger: LedgerData = {
+        scene: { place: "ballroom" },
+        places: {
+          ballroom: {
+            norm: "formal gala",
+            privacy: 1,
+          },
+        },
+        actors: {
+          user: {
+            name: "Player",
+            outfit: {
+              top: "none",
+              bottom: "trousers",
+            },
+          },
+        },
+      };
+
+      const res = (await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_ballroom" },
+        async () => ledger
+      )) as any;
+
+      expect(res.messages).toBeDefined();
+      const content = res.messages[0].content;
+      expect(content).toContain("Director Guidance: {{user}} is visibly under-dressed");
+    });
+
+    test("injects active investigation alerts when alert_level >= 1", async () => {
+      const messages: LlmMessageDTO[] = [{ role: "user", content: "Walking through town." }];
+      const ledger: LedgerData = {
+        world: {
+          investigations: {
+            guard: {
+              authority: "Royal Guard",
+              alert_level: 2,
+              target_id: "user",
+              clues: ["Footprint", "Stolen locket"],
+            },
+          },
+        },
+      };
+
+      const res = (await evaluateDirectorInterceptor(
+        messages,
+        { chatId: "chat_town" },
+        async () => ledger
+      )) as any;
+
+      expect(res.messages).toBeDefined();
+      const content = res.messages[0].content;
+      expect(content).toContain("Director Alert: Investigation by Royal Guard active at Alert Level 2");
+      expect(content).toContain("Clues: Footprint, Stolen locket");
+    });
   });
 
   describe("Post-Turn State Diffing & Director Log Generation", () => {
@@ -10322,6 +10610,69 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       // Journal mutations
       expect(diff.mutations).toContain("tessa.passions.arousal += 30");
       expect(diff.mutations).toContain("user.inventory += 'Old Key'");
+    });
+
+    test("diffs investigations escalation and NPC attire changes (scent, integrity, residue)", () => {
+      const prevLedger: LedgerData = {
+        world: {
+          investigations: {
+            watch: {
+              authority: "City Watch",
+              alert_level: 1,
+              target_id: "suspect",
+              clues: ["bootprint"],
+            },
+          },
+        },
+        actors: {
+          clara: {
+            name: "Clara",
+            outfit: {
+              top: "Silk blouse",
+              integrity: 100,
+              scent: "lavender",
+              residue: [],
+            },
+          },
+        },
+      };
+
+      const nextLedger: LedgerData = {
+        world: {
+          investigations: {
+            watch: {
+              authority: "City Watch",
+              alert_level: 2,
+              target_id: "suspect",
+              clues: ["bootprint", "dagger sheath"],
+            },
+          },
+        },
+        actors: {
+          clara: {
+            name: "Clara",
+            outfit: {
+              top: "Silk blouse",
+              integrity: 75,
+              scent: "smoke",
+              residue: ["soot", "mud"],
+            },
+          },
+        },
+      };
+
+      const diff = computeDirectorImpactDiff(prevLedger, nextLedger, "Directive");
+
+      expect(diff.worldChanges.some((w) => w.includes("Investigation alert escalated: City Watch Alert Level 1 -> 2"))).toBe(true);
+      expect(diff.worldChanges.some((w) => w.includes("Investigation clues discovered by City Watch: dagger sheath"))).toBe(true);
+
+      expect(diff.npcChanges.length).toBe(1);
+      const claraDiff = diff.npcChanges[0];
+      expect(claraDiff.actorId).toBe("clara");
+      expect(claraDiff.attireChanged).toBeDefined();
+      expect(claraDiff.attireChanged).toContain("integrity 100% -> 75%");
+      expect(claraDiff.attireChanged).toContain('scent "lavender" -> "smoke"');
+      expect(claraDiff.attireChanged).toContain("residue [soot, mud]");
     });
   });
 
@@ -11255,6 +11606,45 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     expect(html).toContain("Affinity");
     expect(html).toContain("Attraction");
     expect(html).toContain("Betrayal Threshold:");
+
+    // Test with active investigation and leverage chips
+    const ledgerWithInv: LedgerData = {
+      ...parsedLedger,
+      world: {
+        investigations: {
+          watch: {
+            authority: "City Watch",
+            alert_level: 2,
+            target_id: "user",
+            clues: ["Muddy footprints", "Torn fabric"],
+          },
+        },
+      },
+      actors: {
+        ...parsedLedger.actors,
+        jessica: {
+          ...parsedLedger.actors?.jessica,
+          relations: {
+            user: {
+              trust: 50,
+              leverage: ["Knows secret entrance"],
+              obligations: ["Owes rent favor"],
+            },
+          },
+        },
+      },
+    };
+    (tab as any).selectedActorId = "jessica";
+    tab.render(ledgerWithInv);
+    const htmlWithInv = tab.root.innerHTML;
+    expect(htmlWithInv).toContain("Active Investigations");
+    expect(htmlWithInv).toContain("City Watch");
+    expect(htmlWithInv).toContain("Level 2: Suspect Named");
+    expect(htmlWithInv).toContain("Muddy footprints, Torn fabric");
+    expect(htmlWithInv).toContain("LEVERAGE");
+    expect(htmlWithInv).toContain("Knows secret entrance");
+    expect(htmlWithInv).toContain("DEBT");
+    expect(htmlWithInv).toContain("Owes rent favor");
   });
 
   test("5. InventoryTab renders in-hand equipment, carried items, and room containers", () => {
@@ -11280,6 +11670,11 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     expect(html).toContain("Dark slim-fit jeans");
     expect(html).toContain("Calvin Klein trunks");
     expect(html).toContain("White leather sneakers");
+    expect(html).toContain("Scent:");
+    expect(html).toContain("Condition:");
+    expect(html).toContain("Integrity:");
+    expect(html).toContain("Clean Clothes");
+    expect(html).toContain("Repair Garments");
   });
 
   test("7. MapTab renders indoor/outdoor nodes and navigation routes", () => {

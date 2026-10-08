@@ -30,6 +30,24 @@ export class WardrobeTab {
     header.innerHTML = `<h3>👗 Wardrobe & Dressing — ${actor?.name || actorId}</h3>`;
     this.root.appendChild(header);
 
+    const statusBar = document.createElement("div");
+    statusBar.className = "vn-wardrobe-status-bar";
+    const scentVal = outfit.scent || "None";
+    const conditionVal = outfit.state || "Clean";
+    const integrityVal = outfit.integrity ?? 100;
+    const residueVal =
+      Array.isArray(outfit.residue) && outfit.residue.length > 0
+        ? outfit.residue.join(", ")
+        : "None";
+
+    statusBar.innerHTML = `
+      <div class="vn-wardrobe-status-item"><span>Scent:</span> <strong>${scentVal}</strong></div>
+      <div class="vn-wardrobe-status-item"><span>Condition:</span> <strong>${conditionVal}</strong></div>
+      <div class="vn-wardrobe-status-item"><span>Integrity:</span> <strong>${integrityVal}%</strong></div>
+      <div class="vn-wardrobe-status-item"><span>Residue:</span> <strong>${residueVal}</strong></div>
+    `;
+    this.root.appendChild(statusBar);
+
     const slotsGrid = document.createElement("div");
     slotsGrid.className = "vn-wardrobe-grid";
 
@@ -84,6 +102,21 @@ export class WardrobeTab {
     // Bulk actions
     const footer = document.createElement("div");
     footer.className = "vn-tab-footer";
+
+    const cleanBtn = document.createElement("button");
+    cleanBtn.className = "vn-btn vn-btn-primary";
+    cleanBtn.textContent = "Clean Clothes";
+    cleanBtn.addEventListener("click", () => {
+      this.onAction(`*Cleans and washes garments*`);
+    });
+
+    const repairBtn = document.createElement("button");
+    repairBtn.className = "vn-btn vn-btn-primary";
+    repairBtn.textContent = "Repair Garments";
+    repairBtn.addEventListener("click", () => {
+      this.onAction(`*Mends and repairs clothing tears*`);
+    });
+
     const undressBtn = document.createElement("button");
     undressBtn.className = "vn-btn vn-btn-warning";
     undressBtn.textContent = "Undress to Underwear";
@@ -98,6 +131,8 @@ export class WardrobeTab {
       this.onAction(`*Completely strips clothes*`);
     });
 
+    footer.appendChild(cleanBtn);
+    footer.appendChild(repairBtn);
     footer.appendChild(undressBtn);
     footer.appendChild(stripBtn);
     this.root.appendChild(footer);

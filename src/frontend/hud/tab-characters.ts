@@ -292,13 +292,20 @@ export class CharactersTab {
       { label: "Footwear", key: "shoes", icon: "👟" },
       { label: "Hair & Makeup", key: "hair", icon: "💄" },
       { label: "Scent", key: "scent", icon: "✨" },
-      { label: "Dishevelment", key: "state", icon: "🧵" },
+      { label: "Condition", key: "state", icon: "🧵" },
+      { label: "Integrity", key: "integrity", icon: "🛡️" },
+      { label: "Residue", key: "residue", icon: "💧" },
     ];
 
     let hasOutfitItems = false;
     for (const item of outfitKeys) {
-      let val = outfit[item.key] || (item.key === "shoes" ? outfit["footwear"] : undefined);
-      if (val) {
+      let val = (outfit as any)[item.key] || (item.key === "shoes" ? (outfit as any)["footwear"] : undefined);
+      if (item.key === "integrity" && val !== undefined) {
+        val = `${val}%`;
+      } else if (item.key === "residue" && Array.isArray(val)) {
+        val = val.length > 0 ? val.join(", ") : undefined;
+      }
+      if (val !== undefined && val !== null && val !== "") {
         hasOutfitItems = true;
         const box = document.createElement("div");
         box.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font-size: 11px;";
@@ -601,7 +608,8 @@ export class CharactersTab {
             <div>Attraction: <strong>${r.attraction ?? 0}</strong></div>
             <div>Loyalty: <strong>${r.loyalty ?? 0}</strong></div>
           </div>
-          ${(r.leverage && r.leverage.length > 0) ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${r.leverage.join(", ")}</div>` : ""}
+          ${(r.leverage && r.leverage.length > 0) ? `<div style="margin-top:4px; color:#f59e0b;">Leverage: ${(Array.isArray(r.leverage) ? r.leverage : [r.leverage]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
+          ${(r.obligations && r.obligations.length > 0) ? `<div style="margin-top:4px; color:#38bdf8;">Obligations: ${(Array.isArray(r.obligations) ? r.obligations : [r.obligations]).map((x: any) => typeof x === 'object' ? (x.truth || x.id || JSON.stringify(x)) : String(x)).join(", ")}</div>` : ""}
         `;
         relsList.appendChild(card);
       }
