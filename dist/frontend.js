@@ -26344,8 +26344,14 @@ class ParticleEngine {
     this.ctx = this.canvas.getContext("2d");
     this.handleResize = this.handleResize.bind(this);
     this.loop = this.loop.bind(this);
-    requestAnimationFrame(() => this.handleResize());
-    window.addEventListener("resize", this.handleResize);
+    if (typeof requestAnimationFrame !== "undefined") {
+      requestAnimationFrame(() => this.handleResize());
+    } else {
+      setTimeout(() => this.handleResize(), 0);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("resize", this.handleResize);
+    }
   }
   handleResize() {
     const rect = this.canvas.parentElement?.getBoundingClientRect() || {
@@ -26726,6 +26732,12 @@ class StageRenderer {
     slotEl.style.setProperty("--char-scale", String(transform.scale));
     slotEl.style.setProperty("--char-offset-x", `${transform.offsetX}px`);
     slotEl.style.setProperty("--char-offset-y", `${transform.offsetY}px`);
+  }
+  reset() {
+    this.currentBgUrl = "";
+    this.bgContainer.innerHTML = "";
+    this.charactersContainer.innerHTML = "";
+    this.particleEngine.setWeather("default");
   }
   destroy() {
     this.particleEngine.destroy();
@@ -27212,6 +27224,40 @@ class DialogueBox {
     };
     window.addEventListener("keydown", this.onKeydown);
   }
+  reset() {
+    if (this.typeTimer)
+      clearTimeout(this.typeTimer);
+    if (this.autoTimer)
+      clearTimeout(this.autoTimer);
+    if (this.skipTimer)
+      clearTimeout(this.skipTimer);
+    this.ttsEngine?.stop();
+    this.beats = [];
+    this.currentBeatIndex = 0;
+    this.backlogHistory = [];
+    this.currentMessageId = "";
+    this.nameplate.style.display = "none";
+    this.nameplate.textContent = "";
+    this.textContainer.innerHTML = "";
+    this.choicesContainer.innerHTML = "";
+    this.composerContainer.style.display = "none";
+    this.inputField.value = "";
+  }
+  showGeneratingIndicator() {
+    if (this.typeTimer)
+      clearTimeout(this.typeTimer);
+    if (this.autoTimer)
+      clearTimeout(this.autoTimer);
+    if (this.skipTimer)
+      clearTimeout(this.skipTimer);
+    this.ttsEngine?.stop();
+    this.beats = [];
+    this.currentBeatIndex = 0;
+    this.nameplate.style.display = "none";
+    this.textContainer.innerHTML = `<span class="vn-generating-indicator" style="opacity:0.75;display:inline-flex;align-items:center;gap:8px;"><span>✍️</span> <i>Writing next response...</i></span>`;
+    this.choicesContainer.innerHTML = "";
+    this.composerContainer.style.display = "none";
+  }
   setContent(speakerName, paragraphs, messageId = "") {
     if (this.typeTimer)
       clearTimeout(this.typeTimer);
@@ -27226,6 +27272,12 @@ class DialogueBox {
     this.composerContainer.style.display = "none";
     this.choicesContainer.innerHTML = "";
     this.inputField.value = "";
+    if (this.beats.length === 0) {
+      this.nameplate.style.display = "none";
+      this.nameplate.textContent = "";
+      this.textContainer.innerHTML = `<span style="opacity:0.55;font-style:italic;">Start a conversation to begin the visual novel scene.</span>`;
+      return;
+    }
     for (const b of this.beats) {
       this.backlogHistory.push({
         messageId,
@@ -35787,13 +35839,15 @@ class StageOverlay {
   setTheme(themeId) {
     applyVnTheme(this.root, themeId);
   }
+  getCurrentChatId() {
+    return this.resolveChatId() || null;
+  }
   resolveChatId() {
-    if (this.currentChatId)
-      return this.currentChatId;
     const ctxAny = this.ctx;
     const active = ctxAny.getActiveChat?.() || ctxAny.activeChat || ctxAny.chat;
-    if (active?.id || active?.chatId)
-      return active.id || active.chatId;
+    const activeId = active?.id || active?.chatId;
+    if (activeId && typeof activeId === "string")
+      return activeId;
     if (typeof window !== "undefined") {
       const urlMatch = window.location.href.match(/[\/#]chat[s]?\/([a-zA-Z0-9_-]+)/);
       if (urlMatch?.[1])
@@ -35802,7 +35856,30 @@ class StageOverlay {
       if (chatEl)
         return chatEl.getAttribute("data-chat-id") || undefined;
     }
-    return;
+    return this.currentChatId || undefined;
+  }
+  resetStage(targetChatId) {
+    this.currentChatId = targetChatId || this.resolveChatId() || null;
+    this.lastProcessedEvtId = null;
+    this.dialogueBox.reset();
+    this.stageRenderer.reset();
+  }
+  showGenerating() {
+    this.dialogueBox.showGeneratingIndicator();
+  }
+  onChatChanged(newChatId) {
+    const resolved = newChatId || this.resolveChatId() || null;
+    this.resetStage(resolved || undefined);
+    if (this.active && resolved) {
+      this.ctx.sendToBackend({
+        type: "vn_stage_opened",
+        chatId: resolved
+      });
+      this.ctx.sendToBackend({
+        type: "vn_get_state",
+        chatId: resolved
+      });
+    }
   }
   activate() {
     if (this.active)
@@ -35855,6 +35932,10 @@ class StageOverlay {
     return this.active;
   }
   updatePresentation(state) {
+    const activeChat = this.resolveChatId();
+    if (activeChat && state.chatId && state.chatId !== activeChat) {
+      return;
+    }
     this.currentChatId = state.chatId;
     this.stageRenderer.setBackground(state.background);
     this.stageRenderer.setCharacters(state.characters);
@@ -37410,6 +37491,21 @@ function setup(ctx) {
     });
     document.body.appendChild(floatBtn);
   }
+  const unsubChatSwitched = ctx.events?.on?.("CHAT_SWITCHED", (payload) => {
+    const candidate = payload && typeof payload === "object" ? payload : {};
+    const newChatId = (typeof candidate.chatId === "string" ? candidate.chatId : null) || ctx.getActiveChat()?.chatId || null;
+    overlay.onChatChanged(newChatId);
+  });
+  const unsubChatChanged = ctx.events?.on?.("CHAT_CHANGED", (payload) => {
+    const candidate = payload && typeof payload === "object" ? payload : {};
+    const newChatId = (typeof candidate.chat?.id === "string" ? candidate.chat.id : null) || (typeof candidate.chatId === "string" ? candidate.chatId : null) || ctx.getActiveChat()?.chatId || null;
+    overlay.onChatChanged(newChatId);
+  });
+  const unsubChatForked = ctx.events?.on?.("CHAT_FORKED", (payload) => {
+    const candidate = payload && typeof payload === "object" ? payload : {};
+    const newChatId = (typeof candidate.forkedChatId === "string" ? candidate.forkedChatId : null) || (typeof candidate.chat?.id === "string" ? candidate.chat.id : null) || ctx.getActiveChat()?.chatId || null;
+    overlay.onChatChanged(newChatId);
+  });
   const unsubscribeBackend = ctx.onBackendMessage((msg) => {
     const payload = msg;
     if (payload?.type === "vn_force_open") {
@@ -37417,6 +37513,11 @@ function setup(ctx) {
         toggleStage();
       diagDrawer?.pushLog("Stage launched via Command Palette.", "info");
       diagBus.pushLog("Stage launched via Command Palette.", "info");
+    } else if (payload?.type === "vn_generating") {
+      const targetCid = typeof payload.chatId === "string" ? payload.chatId : null;
+      if (overlay.isActive() && (!targetCid || overlay.getCurrentChatId() === targetCid)) {
+        overlay.showGenerating();
+      }
     } else if (payload?.type === "vn_diagnostic_update" && payload.data) {
       diagDrawer?.updateDiagnostic(payload.data);
       diagBus.setTelemetry(payload.data);
@@ -37447,6 +37548,9 @@ function setup(ctx) {
   });
   ctx.ready();
   const cleanup = () => {
+    unsubChatSwitched?.();
+    unsubChatChanged?.();
+    unsubChatForked?.();
     unsubscribeBackend();
     chatHeaderActionHandle?.destroy();
     inputBarActionHandle?.destroy();

@@ -40,8 +40,14 @@ export class ParticleEngine {
     this.loop = this.loop.bind(this);
 
     // Initial size
-    requestAnimationFrame(() => this.handleResize());
-    window.addEventListener("resize", this.handleResize);
+    if (typeof requestAnimationFrame !== "undefined") {
+      requestAnimationFrame(() => this.handleResize());
+    } else {
+      setTimeout(() => this.handleResize(), 0);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("resize", this.handleResize);
+    }
   }
 
   private handleResize(): void {

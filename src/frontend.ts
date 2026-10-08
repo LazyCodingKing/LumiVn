@@ -216,6 +216,29 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     document.body.appendChild(floatBtn);
   }
 
+  // ── Host Lifecycle Subscriptions (Chat switched / changed / forked) ──
+  const unsubChatSwitched = ctx.events?.on?.("CHAT_SWITCHED", (payload: unknown) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { chatId?: unknown }) : {};
+    const newChatId = (typeof candidate.chatId === "string" ? candidate.chatId : null) || ctx.getActiveChat()?.chatId || null;
+    overlay.onChatChanged(newChatId);
+  });
+
+  const unsubChatChanged = ctx.events?.on?.("CHAT_CHANGED", (payload: unknown) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { chat?: { id?: unknown }; chatId?: unknown }) : {};
+    const newChatId = (typeof candidate.chat?.id === "string" ? candidate.chat.id : null) ||
+                      (typeof candidate.chatId === "string" ? candidate.chatId : null) ||
+                      ctx.getActiveChat()?.chatId || null;
+    overlay.onChatChanged(newChatId);
+  });
+
+  const unsubChatForked = ctx.events?.on?.("CHAT_FORKED", (payload: unknown) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { forkedChatId?: unknown; chat?: { id?: unknown } }) : {};
+    const newChatId = (typeof candidate.forkedChatId === "string" ? candidate.forkedChatId : null) ||
+                      (typeof candidate.chat?.id === "string" ? candidate.chat.id : null) ||
+                      ctx.getActiveChat()?.chatId || null;
+    overlay.onChatChanged(newChatId);
+  });
+
   // Handle Backend Messages
   const unsubscribeBackend = ctx.onBackendMessage((msg: unknown) => {
     const payload = msg as Record<string, unknown>;
@@ -223,6 +246,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       if (!overlay.isActive()) toggleStage();
       diagDrawer?.pushLog("Stage launched via Command Palette.", "info");
       diagBus.pushLog("Stage launched via Command Palette.", "info");
+    } else if (payload?.type === "vn_generating") {
+      const targetCid = typeof payload.chatId === "string" ? payload.chatId : null;
+      if (overlay.isActive() && (!targetCid || overlay.getCurrentChatId() === targetCid)) {
+        overlay.showGenerating();
+      }
     } else if (payload?.type === "vn_diagnostic_update" && payload.data) {
       diagDrawer?.updateDiagnostic(payload.data as DiagnosticData);
       diagBus.setTelemetry(payload.data as DiagnosticData);
@@ -255,6 +283,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   ctx.ready();
 
   const cleanup = () => {
+    unsubChatSwitched?.();
+    unsubChatChanged?.();
+    unsubChatForked?.();
     unsubscribeBackend();
     chatHeaderActionHandle?.destroy();
     inputBarActionHandle?.destroy();

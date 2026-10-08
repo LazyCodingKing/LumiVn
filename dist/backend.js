@@ -4643,7 +4643,7 @@ var storage = new StorageManager(spindle);
 var resolver = new AssetResolver(spindle, storage);
 var lastActiveChatId = null;
 var isStageOpen = false;
-var activeVnChats = new Set;
+var activeVnChatId = null;
 var activeGenerationIds = new Map;
 var pendingCommits = new Map;
 var injectedDirectives = new Map;
@@ -4663,13 +4663,36 @@ if (typeof spindle.registerInterceptor === "function") {
   spindle.registerInterceptor(handleInterceptor, 50);
   spindle.log.info("[LumiVN] Living World Director interceptor registered at priority 50.");
 }
+function onHostChatSwitched(chatId) {
+  if (!chatId)
+    return;
+  lastActiveChatId = chatId;
+  activeVnChatId = chatId;
+  spindle.log.info("[LumiVN] Active chat switched to: " + chatId);
+  if (isStageOpen) {
+    processChatTurn(chatId, undefined, undefined, true);
+  }
+}
 var spindleAnyObj = spindle;
 if (typeof spindleAnyObj.on === "function") {
   spindleAnyObj.on("CHAT_SWITCHED", (payload) => {
     const candidate = payload && typeof payload === "object" ? payload : {};
     if (typeof candidate.chatId === "string" && candidate.chatId) {
-      lastActiveChatId = candidate.chatId;
-      spindle.log.info("[LumiVN] Active chat switched to: " + lastActiveChatId);
+      onHostChatSwitched(candidate.chatId);
+    }
+  });
+  spindleAnyObj.on("CHAT_CHANGED", (payload) => {
+    const candidate = payload && typeof payload === "object" ? payload : {};
+    const cid = (typeof candidate.chat?.id === "string" ? candidate.chat.id : null) || (typeof candidate.chatId === "string" ? candidate.chatId : null);
+    if (cid) {
+      onHostChatSwitched(cid);
+    }
+  });
+  spindleAnyObj.on("CHAT_FORKED", (payload) => {
+    const candidate = payload && typeof payload === "object" ? payload : {};
+    const cid = (typeof candidate.forkedChatId === "string" ? candidate.forkedChatId : null) || (typeof candidate.chat?.id === "string" ? candidate.chat.id : null);
+    if (cid) {
+      onHostChatSwitched(cid);
     }
   });
 }
@@ -4720,8 +4743,8 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     return;
   if (!isStageOpen && !force)
     return;
-  if (activeVnChats.size > 0 && !activeVnChats.has(chatId) && !force)
-    return;
+  activeVnChatId = chatId;
+  lastActiveChatId = chatId;
   try {
     let targetMessage = null;
     let characterId;
@@ -4731,18 +4754,19 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
         characterId = activeChat.character_id;
       }
     } catch {}
-    if (overrideContent && messageId) {
+    if (overrideContent) {
       targetMessage = {
-        id: messageId,
+        id: messageId || `msg_${Date.now()}`,
         role: "assistant",
         content: overrideContent,
         created_at: new Date().toISOString()
       };
     } else {
-      const messages = await spindle.chat.getMessages(chatId, { limit: 5 });
-      const boundedMessages = Array.isArray(messages) ? messages.slice(-5) : [];
-      if (boundedMessages.length === 0)
-        return;
+      let messages = [];
+      try {
+        messages = await spindle.chat.getMessages(chatId);
+      } catch {}
+      const boundedMessages = Array.isArray(messages) ? messages : [];
       for (let i = boundedMessages.length - 1;i >= 0; i--) {
         const m = boundedMessages[i];
         if (m && (m.role === "assistant" || !m.is_user)) {
@@ -4751,8 +4775,18 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
         }
       }
     }
-    if (!targetMessage || !targetMessage.content)
+    let cumulativeLedger = await storage.getChatState(chatId);
+    if (!targetMessage || !targetMessage.content) {
+      if (!cumulativeLedger) {
+        cumulativeLedger = { scene: { place: "default" }, actors: {} };
+      }
+      const presentation = await resolver.buildPresentationState(chatId, "msg_init", "", cumulativeLedger, characterId);
+      spindle.sendToFrontend({
+        type: "vn_state",
+        state: presentation
+      });
       return;
+    }
     try {
       const jsonMatch = targetMessage.content.match(/\{[\s\S]*?"director_note"[\s\S]*?\}/);
       if (jsonMatch) {
@@ -4771,7 +4805,6 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     } catch (e) {}
     const rawToon = extractToonRaw(targetMessage.content);
     const rawLedger = rawToon ? null : extractLedgerRaw(targetMessage.content);
-    let cumulativeLedger = await storage.getChatState(chatId);
     const prevLedger = cumulativeLedger ? JSON.parse(JSON.stringify(cumulativeLedger)) : null;
     let delta = null;
     if (rawToon) {
@@ -4862,6 +4895,8 @@ spindle.on("GENERATION_STARTED", (payload) => {
   const { chatId, generationId } = payload || {};
   if (!chatId || !generationId)
     return;
+  activeVnChatId = chatId;
+  lastActiveChatId = chatId;
   const previousGenId = activeGenerationIds.get(chatId);
   if (previousGenId && previousGenId !== generationId) {
     pendingCommits.delete(`${chatId}:${previousGenId}`);
@@ -4869,6 +4904,9 @@ spindle.on("GENERATION_STARTED", (payload) => {
     spindle.log.info(`[LumiVN] Discarded uncommitted state from superseded generation ${previousGenId} on chat ${chatId}`);
   }
   activeGenerationIds.set(chatId, generationId);
+  if (isStageOpen) {
+    spindle.sendToFrontend({ type: "vn_generating", chatId });
+  }
 });
 spindle.on("GENERATION_STOPPED", (payload) => {
   const { chatId, generationId } = payload || {};
@@ -4902,32 +4940,37 @@ spindle.on("GENERATION_ENDED", async (payload) => {
   }
   if (!isStageOpen)
     return;
-  if (activeVnChats.has(chatId) || activeVnChats.size === 0) {
-    await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
-  }
+  await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
 });
 spindle.on("MESSAGE_SWIPED", async (payload) => {
   if (!isStageOpen)
     return;
-  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
-    await processChatTurn(payload.chatId, payload.message?.id);
-  }
+  const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
+  if (cid)
+    await processChatTurn(cid, payload.message?.id);
 });
 spindle.on("SWIPE_EDITED", async (payload) => {
   if (!isStageOpen)
     return;
-  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
-    await processChatTurn(payload.chatId, payload.message?.id);
-  }
+  const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
+  if (cid)
+    await processChatTurn(cid, payload.message?.id);
 });
 var spindleAny = spindle;
 if (typeof spindleAny.on === "function") {
   spindleAny.on("MESSAGE_EDITED", async (payload) => {
     if (!isStageOpen)
       return;
-    if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
-      await processChatTurn(payload.chatId, payload.messageId);
-    }
+    const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
+    if (cid)
+      await processChatTurn(cid, payload.messageId);
+  });
+  spindleAny.on("MESSAGE_DELETED", async (payload) => {
+    if (!isStageOpen)
+      return;
+    const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
+    if (cid)
+      await processChatTurn(cid);
   });
 }
 spindle.onFrontendMessage(async (msg, senderUserId) => {
@@ -4939,16 +4982,14 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
     case "vn_stage_opened": {
       isStageOpen = true;
       const cid = String(payload.chatId || "");
-      if (cid)
-        activeVnChats.add(cid);
+      if (cid) {
+        activeVnChatId = cid;
+        lastActiveChatId = cid;
+      }
       break;
     }
     case "vn_stage_closed": {
-      const cid = String(payload.chatId || "");
-      if (cid)
-        activeVnChats.delete(cid);
-      if (activeVnChats.size === 0)
-        isStageOpen = false;
+      isStageOpen = false;
       break;
     }
     case "vn_get_state":
@@ -4956,7 +4997,8 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
       isStageOpen = true;
       const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       if (chatId) {
-        activeVnChats.add(chatId);
+        activeVnChatId = chatId;
+        lastActiveChatId = chatId;
         await processChatTurn(chatId, undefined, undefined, true);
       } else {
         spindle.sendToFrontend({

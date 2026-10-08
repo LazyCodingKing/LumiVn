@@ -212,6 +212,13 @@ export class StageRenderer {
     slotEl.style.setProperty("--char-offset-y", `${transform.offsetY}px`);
   }
 
+  public reset(): void {
+    this.currentBgUrl = "";
+    this.bgContainer.innerHTML = "";
+    this.charactersContainer.innerHTML = "";
+    this.particleEngine.setWeather("default");
+  }
+
   public destroy(): void {
     this.particleEngine.destroy();
   }

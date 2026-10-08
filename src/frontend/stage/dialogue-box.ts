@@ -286,6 +286,38 @@ export class DialogueBox {
     window.addEventListener("keydown", this.onKeydown);
   }
 
+  public reset(): void {
+    if (this.typeTimer) clearTimeout(this.typeTimer);
+    if (this.autoTimer) clearTimeout(this.autoTimer);
+    if (this.skipTimer) clearTimeout(this.skipTimer);
+    this.ttsEngine?.stop();
+
+    this.beats = [];
+    this.currentBeatIndex = 0;
+    this.backlogHistory = [];
+    this.currentMessageId = "";
+    this.nameplate.style.display = "none";
+    this.nameplate.textContent = "";
+    this.textContainer.innerHTML = "";
+    this.choicesContainer.innerHTML = "";
+    this.composerContainer.style.display = "none";
+    this.inputField.value = "";
+  }
+
+  public showGeneratingIndicator(): void {
+    if (this.typeTimer) clearTimeout(this.typeTimer);
+    if (this.autoTimer) clearTimeout(this.autoTimer);
+    if (this.skipTimer) clearTimeout(this.skipTimer);
+    this.ttsEngine?.stop();
+
+    this.beats = [];
+    this.currentBeatIndex = 0;
+    this.nameplate.style.display = "none";
+    this.textContainer.innerHTML = `<span class="vn-generating-indicator" style="opacity:0.75;display:inline-flex;align-items:center;gap:8px;"><span>✍️</span> <i>Writing next response...</i></span>`;
+    this.choicesContainer.innerHTML = "";
+    this.composerContainer.style.display = "none";
+  }
+
   public setContent(speakerName: string, paragraphs: string[], messageId = ""): void {
     if (this.typeTimer) clearTimeout(this.typeTimer);
     if (this.autoTimer) clearTimeout(this.autoTimer);
@@ -298,6 +330,13 @@ export class DialogueBox {
     this.composerContainer.style.display = "none";
     this.choicesContainer.innerHTML = "";
     this.inputField.value = "";
+
+    if (this.beats.length === 0) {
+      this.nameplate.style.display = "none";
+      this.nameplate.textContent = "";
+      this.textContainer.innerHTML = `<span style="opacity:0.55;font-style:italic;">Start a conversation to begin the visual novel scene.</span>`;
+      return;
+    }
 
     // Record into backlog history
     for (const b of this.beats) {

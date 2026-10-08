@@ -110,13 +110,16 @@ export class StageOverlay {
     applyVnTheme(this.root, themeId);
   }
 
-  private resolveChatId(): string | undefined {
-    if (this.currentChatId) return this.currentChatId;
+  public getCurrentChatId(): string | null {
+    return this.resolveChatId() || null;
+  }
 
-    // 1. Host context check
+  private resolveChatId(): string | undefined {
+    // 1. Host context check (always check live active chat first)
     const ctxAny = this.ctx as any;
     const active = ctxAny.getActiveChat?.() || ctxAny.activeChat || ctxAny.chat;
-    if (active?.id || active?.chatId) return active.id || active.chatId;
+    const activeId = active?.id || active?.chatId;
+    if (activeId && typeof activeId === "string") return activeId;
 
     // 2. URL path/hash inspection (/chat/:id or #/chat/:id)
     if (typeof window !== "undefined") {
@@ -128,7 +131,34 @@ export class StageOverlay {
       if (chatEl) return chatEl.getAttribute("data-chat-id") || undefined;
     }
 
-    return undefined;
+    return this.currentChatId || undefined;
+  }
+
+  public resetStage(targetChatId?: string): void {
+    this.currentChatId = targetChatId || this.resolveChatId() || null;
+    this.lastProcessedEvtId = null;
+    this.dialogueBox.reset();
+    this.stageRenderer.reset();
+  }
+
+  public showGenerating(): void {
+    this.dialogueBox.showGeneratingIndicator();
+  }
+
+  public onChatChanged(newChatId: string | null): void {
+    const resolved = newChatId || this.resolveChatId() || null;
+    this.resetStage(resolved || undefined);
+
+    if (this.active && resolved) {
+      this.ctx.sendToBackend({
+        type: "vn_stage_opened",
+        chatId: resolved,
+      });
+      this.ctx.sendToBackend({
+        type: "vn_get_state",
+        chatId: resolved,
+      });
+    }
   }
 
   public activate(): void {
@@ -196,6 +226,12 @@ export class StageOverlay {
   }
 
   public updatePresentation(state: VnPresentationState): void {
+    const activeChat = this.resolveChatId();
+    // Guard against stale async responses arriving after chat was switched
+    if (activeChat && state.chatId && state.chatId !== activeChat) {
+      return;
+    }
+
     this.currentChatId = state.chatId; // Store authoritative chat ID
     this.stageRenderer.setBackground(state.background);
     this.stageRenderer.setCharacters(state.characters);

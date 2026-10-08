@@ -48,7 +48,7 @@ const resolver = new AssetResolver(spindle, storage);
 
 let lastActiveChatId: string | null = null;
 let isStageOpen = false;
-const activeVnChats = new Set<string>();
+let activeVnChatId: string | null = null;
 
 // LumiWorld Two-Stage Commit Lifecycle & Injected Directives Tracking
 const activeGenerationIds = new Map<string, string>(); // chatId -> generationId
@@ -88,13 +88,40 @@ if (typeof (spindle as any).registerInterceptor === "function") {
   spindle.log.info("[LumiVN] Living World Director interceptor registered at priority 50.");
 }
 
+function onHostChatSwitched(chatId: string | null) {
+  if (!chatId) return;
+  lastActiveChatId = chatId;
+  activeVnChatId = chatId;
+  spindle.log.info("[LumiVN] Active chat switched to: " + chatId);
+  if (isStageOpen) {
+    void processChatTurn(chatId, undefined, undefined, true);
+  }
+}
+
 const spindleAnyObj = spindle as any;
 if (typeof spindleAnyObj.on === "function") {
   spindleAnyObj.on("CHAT_SWITCHED", (payload: unknown) => {
     const candidate = payload && typeof payload === "object" ? (payload as { chatId?: unknown }) : {};
     if (typeof candidate.chatId === "string" && candidate.chatId) {
-      lastActiveChatId = candidate.chatId;
-      spindle.log.info("[LumiVN] Active chat switched to: " + lastActiveChatId);
+      onHostChatSwitched(candidate.chatId);
+    }
+  });
+
+  spindleAnyObj.on("CHAT_CHANGED", (payload: unknown) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { chat?: { id?: unknown }; chatId?: unknown }) : {};
+    const cid = (typeof candidate.chat?.id === "string" ? candidate.chat.id : null) ||
+                (typeof candidate.chatId === "string" ? candidate.chatId : null);
+    if (cid) {
+      onHostChatSwitched(cid);
+    }
+  });
+
+  spindleAnyObj.on("CHAT_FORKED", (payload: unknown) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { forkedChatId?: unknown; chat?: { id?: unknown } }) : {};
+    const cid = (typeof candidate.forkedChatId === "string" ? candidate.forkedChatId : null) ||
+                (typeof candidate.chat?.id === "string" ? candidate.chat.id : null);
+    if (cid) {
+      onHostChatSwitched(cid);
     }
   });
 }
@@ -158,7 +185,9 @@ async function processChatTurn(
 
   // View-Gating: Guard background chats when VN stage is not active
   if (!isStageOpen && !force) return;
-  if (activeVnChats.size > 0 && !activeVnChats.has(chatId) && !force) return;
+
+  activeVnChatId = chatId;
+  lastActiveChatId = chatId;
 
   try {
     let targetMessage: ChatMessageDTO | null = null;
@@ -173,30 +202,50 @@ async function processChatTurn(
       // Ignore if chat lookup fails
     }
 
-    if (overrideContent && messageId) {
+    if (overrideContent) {
       targetMessage = {
-        id: messageId,
+        id: messageId || `msg_${Date.now()}`,
         role: "assistant",
         content: overrideContent,
         created_at: new Date().toISOString(),
       } as unknown as ChatMessageDTO;
     } else {
-      // Bounded Message Fetching: Fetch at most 5 messages to avoid large tree memory bloat
-      const messages = await (spindle.chat as any).getMessages(chatId, { limit: 5 });
-      const boundedMessages = Array.isArray(messages) ? messages.slice(-5) : [];
-      if (boundedMessages.length === 0) return;
+      let messages: ChatMessageDTO[] = [];
+      try {
+        messages = await (spindle.chat as any).getMessages(chatId);
+      } catch {}
+      const boundedMessages = Array.isArray(messages) ? messages : [];
 
       // Find the latest assistant message
       for (let i = boundedMessages.length - 1; i >= 0; i--) {
         const m = boundedMessages[i];
-        if (m && (m.role === "assistant" || !m.is_user)) {
+        if (m && ((m as any).role === "assistant" || !m.is_user)) {
           targetMessage = m;
           break;
         }
       }
     }
 
-    if (!targetMessage || !targetMessage.content) return;
+    let cumulativeLedger = await storage.getChatState(chatId);
+
+    // If chat is new / empty / has no assistant message yet:
+    if (!targetMessage || !targetMessage.content) {
+      if (!cumulativeLedger) {
+        cumulativeLedger = { scene: { place: "default" }, actors: {} };
+      }
+      const presentation = await resolver.buildPresentationState(
+        chatId,
+        "msg_init",
+        "",
+        cumulativeLedger,
+        characterId
+      );
+      spindle.sendToFrontend({
+        type: "vn_state",
+        state: presentation,
+      });
+      return;
+    }
 
     // Extract and broadcast AI-generated Director Note
     try {
@@ -221,7 +270,6 @@ async function processChatTurn(
     // Extract State Delta: 1. TOON format, 2. Legacy YAML Ledger, 3. Prose Heuristics Fallback
     const rawToon = extractToonRaw(targetMessage.content);
     const rawLedger = rawToon ? null : extractLedgerRaw(targetMessage.content);
-    let cumulativeLedger = await storage.getChatState(chatId);
     const prevLedger: LedgerData | null = cumulativeLedger
       ? JSON.parse(JSON.stringify(cumulativeLedger))
       : null;
@@ -355,6 +403,9 @@ spindle.on("GENERATION_STARTED", (payload: GenerationStartedPayloadDTO) => {
   const { chatId, generationId } = payload || {};
   if (!chatId || !generationId) return;
 
+  activeVnChatId = chatId;
+  lastActiveChatId = chatId;
+
   const previousGenId = activeGenerationIds.get(chatId);
   if (previousGenId && previousGenId !== generationId) {
     pendingCommits.delete(`${chatId}:${previousGenId}`);
@@ -362,6 +413,11 @@ spindle.on("GENERATION_STARTED", (payload: GenerationStartedPayloadDTO) => {
     spindle.log.info(`[LumiVN] Discarded uncommitted state from superseded generation ${previousGenId} on chat ${chatId}`);
   }
   activeGenerationIds.set(chatId, generationId);
+
+  // Notify frontend that generation started so stale text clears immediately
+  if (isStageOpen) {
+    spindle.sendToFrontend({ type: "vn_generating", chatId });
+  }
 });
 
 spindle.on("GENERATION_STOPPED", (payload: GenerationStoppedPayloadDTO) => {
@@ -398,32 +454,32 @@ spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
   }
 
   if (!isStageOpen) return;
-  if (activeVnChats.has(chatId) || activeVnChats.size === 0) {
-    await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
-  }
+  await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
 });
 
 spindle.on("MESSAGE_SWIPED", async (payload: MessageSwipedPayloadDTO) => {
   if (!isStageOpen) return;
-  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
-    await processChatTurn(payload.chatId, payload.message?.id);
-  }
+  const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
+  if (cid) await processChatTurn(cid, payload.message?.id);
 });
 
 spindle.on("SWIPE_EDITED", async (payload: SwipeEditedPayloadDTO) => {
   if (!isStageOpen) return;
-  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
-    await processChatTurn(payload.chatId, payload.message?.id);
-  }
+  const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
+  if (cid) await processChatTurn(cid, payload.message?.id);
 });
 
 const spindleAny = spindle as any;
 if (typeof spindleAny.on === "function") {
   spindleAny.on("MESSAGE_EDITED", async (payload: { chatId?: string; messageId?: string }) => {
     if (!isStageOpen) return;
-    if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
-      await processChatTurn(payload.chatId, payload.messageId);
-    }
+    const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
+    if (cid) await processChatTurn(cid, payload.messageId);
+  });
+  spindleAny.on("MESSAGE_DELETED", async (payload: { chatId?: string }) => {
+    if (!isStageOpen) return;
+    const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
+    if (cid) await processChatTurn(cid);
   });
 }
 
@@ -438,14 +494,15 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
     case "vn_stage_opened": {
       isStageOpen = true;
       const cid = String(payload.chatId || "");
-      if (cid) activeVnChats.add(cid);
+      if (cid) {
+        activeVnChatId = cid;
+        lastActiveChatId = cid;
+      }
       break;
     }
 
     case "vn_stage_closed": {
-      const cid = String(payload.chatId || "");
-      if (cid) activeVnChats.delete(cid);
-      if (activeVnChats.size === 0) isStageOpen = false;
+      isStageOpen = false;
       break;
     }
 
@@ -454,7 +511,8 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
       isStageOpen = true;
       const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       if (chatId) {
-        activeVnChats.add(chatId);
+        activeVnChatId = chatId;
+        lastActiveChatId = chatId;
         await processChatTurn(chatId, undefined, undefined, true);
       } else {
         spindle.sendToFrontend({

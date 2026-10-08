@@ -9,8 +9,9 @@ import {
 } from "../src/backend/director.js";
 import { MenuBar } from "../src/frontend/hud/menu-bar.js";
 import { registerDiagnosticsDrawer } from "../src/frontend/studio/diagnostics-drawer.js";
+import { StageOverlay } from "../src/frontend/stage/overlay.js";
 import type { LlmMessageDTO, InterceptorResultDTO } from "lumiverse-spindle-types";
-import type { LedgerData, DirectorSettings, DirectorLogEntry } from "../src/shared/types.js";
+import type { LedgerData, DirectorSettings, DirectorLogEntry, VnPresentationState } from "../src/shared/types.js";
 
 describe("LumiVN Director & Lifecycle Systems", () => {
   describe("Macros & Director Directive Formatting", () => {
@@ -542,6 +543,91 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       expect(directorStream.textContent).toContain("anger (40)");
       expect(directorStream.textContent).toContain("[Mutations]");
       expect(directorStream.textContent).toContain("user.stamina -= 10");
+    });
+  });
+
+  describe("Chat Switch, Stage Reset & Live Generation Sync", () => {
+    test("StageOverlay resets state and queries backend when chat is switched", () => {
+      const sentMessages: any[] = [];
+      let activeChatId: string | null = "chat_alpha";
+
+      const mockCtx: any = {
+        getActiveChat: () => ({ chatId: activeChatId, characterId: "char_1" }),
+        sendToBackend: (msg: any) => sentMessages.push(msg),
+        ui: {},
+      };
+
+      const overlay = new StageOverlay({ ctx: mockCtx, onExit: () => {} });
+      overlay.activate();
+
+      expect(overlay.getCurrentChatId()).toBe("chat_alpha");
+      expect(sentMessages).toContainEqual({ type: "vn_stage_opened", chatId: "chat_alpha" });
+      expect(sentMessages).toContainEqual({ type: "vn_get_state", chatId: "chat_alpha" });
+
+      // Simulate chat switch to chat_beta
+      activeChatId = "chat_beta";
+      sentMessages.length = 0;
+      overlay.onChatChanged("chat_beta");
+
+      expect(overlay.getCurrentChatId()).toBe("chat_beta");
+      expect(sentMessages).toContainEqual({ type: "vn_stage_opened", chatId: "chat_beta" });
+      expect(sentMessages).toContainEqual({ type: "vn_get_state", chatId: "chat_beta" });
+    });
+
+    test("StageOverlay ignores presentation updates from stale chats", () => {
+      let activeChatId: string | null = "chat_current";
+      const mockCtx: any = {
+        getActiveChat: () => ({ chatId: activeChatId, characterId: "char_1" }),
+        sendToBackend: () => {},
+        ui: {},
+      };
+
+      const overlay = new StageOverlay({ ctx: mockCtx, onExit: () => {} });
+      overlay.activate();
+
+      const staleState: VnPresentationState = {
+        chatId: "chat_old",
+        messageId: "msg_old",
+        speakerName: "OldSpeaker",
+        paragraphs: ["Old conversation that should be discarded."],
+        characters: [],
+        background: { url: "old_bg.jpg", isVideo: false },
+        ledger: { scene: { place: "old_room" }, actors: {} },
+      };
+
+      overlay.updatePresentation(staleState);
+      // Because state belongs to chat_old while active is chat_current, it must be ignored
+      expect(overlay.getCurrentChatId()).toBe("chat_current");
+    });
+
+    test("StageOverlay showGenerating displays writing indicator and clears stale text", () => {
+      const mockCtx: any = {
+        getActiveChat: () => ({ chatId: "chat_live", characterId: "char_1" }),
+        sendToBackend: () => {},
+        ui: {},
+      };
+
+      const overlay = new StageOverlay({ ctx: mockCtx, onExit: () => {} });
+      overlay.activate();
+
+      // Set some initial content
+      const state: VnPresentationState = {
+        chatId: "chat_live",
+        messageId: "msg_1",
+        speakerName: "Akane",
+        paragraphs: ["Previous message text."],
+        characters: [],
+        background: { url: "room.jpg", isVideo: false },
+        ledger: { scene: { place: "room" }, actors: {} },
+      };
+      overlay.updatePresentation(state);
+
+      const dialogueBoxEl = overlay.root.querySelector(".vn-dialogue-text") as HTMLElement;
+      expect(dialogueBoxEl.textContent.length).toBeGreaterThan(0);
+
+      // Now generation starts
+      overlay.showGenerating();
+      expect(dialogueBoxEl.textContent).toContain("Writing next response...");
     });
   });
 });
