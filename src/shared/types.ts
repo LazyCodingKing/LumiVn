@@ -248,6 +248,17 @@ export interface StageBackground {
   isVideo?: boolean;
 }
 
+export interface DirectorNoteData {
+  directorNote: string;
+  threadLabel: string;
+  timestamp?: string;
+}
+
+export interface DirectorNotePayload {
+  type: "vn_director_note";
+  data: DirectorNoteData;
+}
+
 export interface VnPresentationState {
   chatId: string;
   messageId: string;
@@ -258,6 +269,7 @@ export interface VnPresentationState {
   characters: StageCharacter[];
   ledger: LedgerData;
   hasBPlotNotification?: boolean;
+  directorNote?: DirectorNoteData;
 }
 
 export interface AssetRecord {

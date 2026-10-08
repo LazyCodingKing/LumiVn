@@ -1,5 +1,5 @@
 import type { SpindleFrontendContext, SpindleAppMountHandle } from "lumiverse-spindle-types";
-import type { VnPresentationState, DirectorSettings, DirectorLogEntry } from "./shared/types.js";
+import type { VnPresentationState, DirectorSettings, DirectorLogEntry, DirectorNoteData } from "./shared/types.js";
 import { StageOverlay } from "./frontend/stage/overlay.js";
 import { registerAssetDrawer } from "./frontend/studio/asset-drawer.js";
 import {
@@ -240,8 +240,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       diagBus.setManifest(payload.manifest as any);
     } else if (payload?.type === "vn_director_settings" && payload.settings) {
       diagDrawer?.setDirectorSettings?.(payload.settings as DirectorSettings);
+    } else if (payload?.type === "vn_director_note" && payload.data) {
+      diagBus.setDirectorNote(payload.data as any);
     } else if (payload?.type === "vn_director_log" && payload.log) {
       diagDrawer?.pushDirectorLog?.(payload.log as DirectorLogEntry);
+      if ((payload.log as any).directive) {
+        diagBus.setDirectorNote({
+          directorNote: (payload.log as any).directive,
+          threadLabel: "Turn Guidance",
+          timestamp: (payload.log as any).timestamp,
+        });
+      }
     } else if (payload?.type === "vn_director_logs" && Array.isArray(payload.logs)) {
       diagDrawer?.setDirectorLogs?.(payload.logs as DirectorLogEntry[]);
     } else if (payload?.type === "vn_error") {

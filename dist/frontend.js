@@ -33969,6 +33969,7 @@ class SceneTab {
 class DiagnosticBus {
   logs = [];
   telemetry = null;
+  latestDirectorNote = null;
   latestLedger = {};
   latestManifest = null;
   listeners = new Set;
@@ -34023,6 +34024,14 @@ class DiagnosticBus {
   }
   getManifest() {
     return this.latestManifest;
+  }
+  setDirectorNote(note) {
+    this.latestDirectorNote = note;
+    this.pushLog(`Director Note updated: [${note.threadLabel}]`, "info");
+    this.notify();
+  }
+  getDirectorNote() {
+    return this.latestDirectorNote;
   }
   formatLedgerYaml(ledger) {
     const data = ledger || this.latestLedger;
@@ -34096,6 +34105,7 @@ class DiagnosticBus {
     const bundle = {
       timestamp: new Date().toISOString(),
       telemetry: this.telemetry,
+      directorNote: this.latestDirectorNote,
       clock: this.latestLedger.clock,
       scene: this.latestLedger.scene,
       ledger: this.latestLedger,
@@ -34147,6 +34157,9 @@ class DiagnosticsTab {
         <button id="vn-copy-yaml-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #38bdf8; font-weight: 600; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
           \uD83D\uDCC4 Copy Ledger (YAML)
         </button>
+        <button id="vn-copy-director-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #8b5cf6; color: #c084fc; font-weight: 600; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          \uD83C\uDFAC Copy Director Note
+        </button>
         <button id="vn-copy-json-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
           \uD83D\uDCE6 Copy State (JSON)
         </button>
@@ -34179,6 +34192,16 @@ class DiagnosticsTab {
         return;
       });
       showToast(btn, "Copy Ledger (YAML)");
+    });
+    header.querySelector("#vn-copy-director-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const note = diagBus.getDirectorNote();
+      const text = note ? note.directorNote ? `[${note.threadLabel}]
+${note.directorNote}` : JSON.stringify(note, null, 2) : "No active director note";
+      await navigator.clipboard.writeText(text).catch(() => {
+        return;
+      });
+      showToast(btn, "Copy Director Note");
     });
     header.querySelector("#vn-copy-json-btn")?.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
@@ -34254,6 +34277,24 @@ class DiagnosticsTab {
       </div>
     `;
     this.root.appendChild(midRow);
+    const directorNote = diagBus.getDirectorNote();
+    const directorCard = document.createElement("div");
+    directorCard.style.cssText = "background: #0f172a; border: 1px solid #6366f1; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px;";
+    directorCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 14px;">\uD83C\uDFAC</span>
+          <strong style="color: #a78bfa; font-size: 12px; text-transform: uppercase;">Active Director Guidance</strong>
+        </div>
+        <span id="vn-director-thread-label" style="font-size: 10px; background: rgba(139,92,246,0.2); border: 1px solid #8b5cf6; color: #c084fc; padding: 2px 8px; border-radius: 4px; font-weight: 600;">
+          ${directorNote?.threadLabel || "General Steering"}
+        </span>
+      </div>
+      <div id="vn-director-note-body" style="font-size: 11px; line-height: 1.5; color: #cbd5e1; max-height: 120px; overflow-y: auto; white-space: pre-wrap; font-style: italic;">
+        ${directorNote?.directorNote || "No active turn steering notes recorded."}
+      </div>
+    `;
+    this.root.appendChild(directorCard);
     const bottomSplit = document.createElement("div");
     bottomSplit.style.cssText = "flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 220px; overflow: hidden;";
     const consoleBox = document.createElement("div");
@@ -34337,10 +34378,20 @@ class DiagnosticsTab {
         showToast(btn, "Copy Block");
       }
     });
+    const updateDirectorCard = () => {
+      const note = diagBus.getDirectorNote();
+      const labelEl = directorCard.querySelector("#vn-director-thread-label");
+      const bodyEl = directorCard.querySelector("#vn-director-note-body");
+      if (labelEl)
+        labelEl.textContent = note?.threadLabel || "General Steering";
+      if (bodyEl)
+        bodyEl.textContent = note?.directorNote || "No active turn steering notes recorded.";
+    };
     if (this.unsubscribeBus)
       this.unsubscribeBus();
     this.unsubscribeBus = diagBus.subscribe(() => {
       renderLogs();
+      updateDirectorCard();
     });
   }
 }
@@ -36539,8 +36590,17 @@ function setup(ctx) {
       diagBus.setManifest(payload.manifest);
     } else if (payload?.type === "vn_director_settings" && payload.settings) {
       diagDrawer?.setDirectorSettings?.(payload.settings);
+    } else if (payload?.type === "vn_director_note" && payload.data) {
+      diagBus.setDirectorNote(payload.data);
     } else if (payload?.type === "vn_director_log" && payload.log) {
       diagDrawer?.pushDirectorLog?.(payload.log);
+      if (payload.log.directive) {
+        diagBus.setDirectorNote({
+          directorNote: payload.log.directive,
+          threadLabel: "Turn Guidance",
+          timestamp: payload.log.timestamp
+        });
+      }
     } else if (payload?.type === "vn_director_logs" && Array.isArray(payload.logs)) {
       diagDrawer?.setDirectorLogs?.(payload.logs);
     } else if (payload?.type === "vn_error") {

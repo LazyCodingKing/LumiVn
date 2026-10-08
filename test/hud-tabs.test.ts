@@ -21,6 +21,8 @@ import { PhoneTab } from "../src/frontend/hud/tab-phone.js";
 import { JournalTab } from "../src/frontend/hud/tab-journal.js";
 import { SceneTab } from "../src/frontend/hud/tab-scene.js";
 import { MenuBar } from "../src/frontend/hud/menu-bar.js";
+import { DiagnosticsTab } from "../src/frontend/hud/tab-diagnostics.js";
+import { diagBus } from "../src/frontend/utils/diag-bus.js";
 
 const FENCE = "```";
 const REALISTIC_MY_WORLD_YAML =
@@ -457,5 +459,27 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     const html = tab.root.innerHTML;
     expect(html).toContain("Scene Visuals");
     expect(html).toContain("dames_mansion:foyer");
+  });
+
+  test("11. DiagnosticsTab renders copy director button and active director guidance card", () => {
+    diagBus.setDirectorNote({
+      directorNote: "Maintain romantic tension during the interview.",
+      threadLabel: "Romance Arc",
+      timestamp: "14:00:00",
+    });
+
+    const tab = new DiagnosticsTab();
+    tab.render(parsedLedger);
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("vn-copy-director-btn");
+    expect(html).toContain("Active Director Guidance");
+    expect(html).toContain("Romance Arc");
+    expect(html).toContain("Maintain romantic tension during the interview.");
+
+    expect(diagBus.getDirectorNote()?.threadLabel).toBe("Romance Arc");
+    const bundle = JSON.parse(diagBus.exportAllBundle());
+    expect(bundle.directorNote).toBeDefined();
+    expect(bundle.directorNote.directorNote).toBe("Maintain romantic tension during the interview.");
   });
 });

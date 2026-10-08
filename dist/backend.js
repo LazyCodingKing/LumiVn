@@ -3762,9 +3762,12 @@ async function evaluateDirectorInterceptor(messages, context, getChatState, getD
       }
     }
   }
-  if (messages.some((m) => typeof m.content === "string" && m.content.includes(activeDirective))) {
+  if (messages.some((m) => typeof m.content === "string" && (m.content.includes(activeDirective) || m.content.includes("[LumiVN Living World Director Guidance]")))) {
     return messages;
   }
+  const systemGuard = `[LumiVN Living World Director Guidance]
+${activeDirective}
+(CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON. You MUST generate the roleplay reply following the preset format: <details><summary>\uD83E\uDDE0 Scene Logic</summary>, followed by narrative prose, followed by <details><summary>\uD83D\uDCCA Ledger</summary>.)`;
   const generationId = context?.generationId;
   if (onInjectedDirective) {
     if (generationId)
@@ -3773,7 +3776,7 @@ async function evaluateDirectorInterceptor(messages, context, getChatState, getD
   }
   const directorBlock = {
     role: "system",
-    content: activeDirective
+    content: systemGuard
   };
   return {
     messages: [directorBlock, ...messages],
@@ -4061,6 +4064,63 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     }
     if (!targetMessage || !targetMessage.content)
       return;
+    try {
+      let parsedJson = null;
+      const contentStr = targetMessage.content.trim();
+      if (contentStr.startsWith("{") && contentStr.endsWith("}")) {
+        try {
+          parsedJson = JSON.parse(contentStr);
+        } catch {}
+      }
+      if (!parsedJson) {
+        const jsonBlockMatch = contentStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonBlockMatch) {
+          try {
+            parsedJson = JSON.parse(jsonBlockMatch[1].trim());
+          } catch {}
+        }
+      }
+      if (!parsedJson && (contentStr.includes("director_note") || contentStr.includes("thread_label"))) {
+        const objMatch = contentStr.match(/\{[\s\S]*?"(?:director_note|thread_label)"[\s\S]*?\}/);
+        if (objMatch) {
+          try {
+            parsedJson = JSON.parse(objMatch[0]);
+          } catch {}
+        }
+      }
+      if (parsedJson && (parsedJson.director_note || parsedJson.thread_label)) {
+        const noteData = {
+          directorNote: String(parsedJson.director_note || ""),
+          threadLabel: String(parsedJson.thread_label || "Active Thread"),
+          timestamp: new Date().toLocaleTimeString()
+        };
+        spindle.sendToFrontend({
+          type: "vn_director_note",
+          data: noteData
+        });
+        const recoveredLogEntry = {
+          timestamp: noteData.timestamp || new Date().toLocaleTimeString(),
+          directive: `[Director Note: ${noteData.threadLabel}] ${noteData.directorNote}`,
+          worldChanges: [],
+          npcChanges: [],
+          mutations: ["Recovered JSON director note from assistant output"]
+        };
+        let logBuffer = directorLogBuffers.get(chatId);
+        if (!logBuffer) {
+          logBuffer = await storage.getDirectorLogs(chatId);
+        }
+        logBuffer.push(recoveredLogEntry);
+        if (logBuffer.length > 20) {
+          logBuffer = logBuffer.slice(logBuffer.length - 20);
+        }
+        directorLogBuffers.set(chatId, logBuffer);
+        await storage.saveDirectorLogs(chatId, logBuffer);
+        spindle.sendToFrontend({
+          type: "vn_director_log",
+          log: recoveredLogEntry
+        });
+      }
+    } catch {}
     const rawLedger = extractLedgerRaw(targetMessage.content);
     let cumulativeLedger = await storage.getChatState(chatId);
     const prevLedger = cumulativeLedger ? JSON.parse(JSON.stringify(cumulativeLedger)) : null;

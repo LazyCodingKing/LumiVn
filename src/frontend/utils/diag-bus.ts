@@ -1,4 +1,4 @@
-import type { LedgerData, AssetManifest } from "../../shared/types.js";
+import type { LedgerData, AssetManifest, DirectorNoteData } from "../../shared/types.js";
 import type { DiagnosticData } from "../studio/diagnostics-drawer.js";
 
 export interface LogEntry {
@@ -12,6 +12,7 @@ export type DiagListener = () => void;
 class DiagnosticBus {
   private logs: LogEntry[] = [];
   private telemetry: DiagnosticData | null = null;
+  private latestDirectorNote: DirectorNoteData | null = null;
   private latestLedger: LedgerData = {};
   private latestManifest: AssetManifest | null = null;
   private listeners: Set<DiagListener> = new Set();
@@ -83,6 +84,16 @@ class DiagnosticBus {
     return this.latestManifest;
   }
 
+  public setDirectorNote(note: DirectorNoteData): void {
+    this.latestDirectorNote = note;
+    this.pushLog(`Director Note updated: [${note.threadLabel}]`, "info");
+    this.notify();
+  }
+
+  public getDirectorNote(): DirectorNoteData | null {
+    return this.latestDirectorNote;
+  }
+
   /** Formats current ledger into a clean YAML representation */
   public formatLedgerYaml(ledger?: LedgerData): string {
     const data = ledger || this.latestLedger;
@@ -147,6 +158,7 @@ class DiagnosticBus {
     const bundle = {
       timestamp: new Date().toISOString(),
       telemetry: this.telemetry,
+      directorNote: this.latestDirectorNote,
       clock: this.latestLedger.clock,
       scene: this.latestLedger.scene,
       ledger: this.latestLedger,

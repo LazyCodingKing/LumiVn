@@ -25,7 +25,6 @@
     "typescript": "^5.9.0"
   }
 }
-
 ```
 
 ## File: `spindle.json`
@@ -50,7 +49,6 @@
   "entry_frontend": "dist/frontend.js",
   "minimum_lumiverse_version": "1.1.6"
 }
-
 ```
 
 ## File: `src/backend.ts`
@@ -80,7 +78,7 @@ import {
   processBPlots,
   computeDirectorImpactDiff,
 } from "./backend/director.js";
-import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry } from "./shared/types.js";
+import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry, DirectorNoteData } from "./shared/types.js";
 
 declare const spindle: SpindleAPI;
 
@@ -225,6 +223,75 @@ async function processChatTurn(
     }
 
     if (!targetMessage || !targetMessage.content) return;
+
+    // Fallback JSON recovery for hijacked assistant responses
+    try {
+      let parsedJson: Record<string, any> | null = null;
+      const contentStr = targetMessage.content.trim();
+
+      if (contentStr.startsWith("{") && contentStr.endsWith("}")) {
+        try {
+          parsedJson = JSON.parse(contentStr);
+        } catch {}
+      }
+
+      if (!parsedJson) {
+        const jsonBlockMatch = contentStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonBlockMatch) {
+          try {
+            parsedJson = JSON.parse(jsonBlockMatch[1].trim());
+          } catch {}
+        }
+      }
+
+      if (!parsedJson && (contentStr.includes("director_note") || contentStr.includes("thread_label"))) {
+        const objMatch = contentStr.match(/\{[\s\S]*?"(?:director_note|thread_label)"[\s\S]*?\}/);
+        if (objMatch) {
+          try {
+            parsedJson = JSON.parse(objMatch[0]);
+          } catch {}
+        }
+      }
+
+      if (parsedJson && (parsedJson.director_note || parsedJson.thread_label)) {
+        const noteData: DirectorNoteData = {
+          directorNote: String(parsedJson.director_note || ""),
+          threadLabel: String(parsedJson.thread_label || "Active Thread"),
+          timestamp: new Date().toLocaleTimeString(),
+        };
+
+        spindle.sendToFrontend({
+          type: "vn_director_note",
+          data: noteData,
+        });
+
+        const recoveredLogEntry: DirectorLogEntry = {
+          timestamp: noteData.timestamp || new Date().toLocaleTimeString(),
+          directive: `[Director Note: ${noteData.threadLabel}] ${noteData.directorNote}`,
+          worldChanges: [],
+          npcChanges: [],
+          mutations: ["Recovered JSON director note from assistant output"],
+        };
+
+        let logBuffer = directorLogBuffers.get(chatId);
+        if (!logBuffer) {
+          logBuffer = await storage.getDirectorLogs(chatId);
+        }
+        logBuffer.push(recoveredLogEntry);
+        if (logBuffer.length > 20) {
+          logBuffer = logBuffer.slice(logBuffer.length - 20);
+        }
+        directorLogBuffers.set(chatId, logBuffer);
+        await storage.saveDirectorLogs(chatId, logBuffer);
+
+        spindle.sendToFrontend({
+          type: "vn_director_log",
+          log: recoveredLogEntry,
+        });
+      }
+    } catch {
+      // JSON recovery fallback error ignored
+    }
 
     // Extract Ledger YAML
     const rawLedger = extractLedgerRaw(targetMessage.content);
@@ -750,7 +817,6 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
     }
   }
 });
-
 ```
 
 ## File: `src/backend/asset-resolver.ts`
@@ -1032,7 +1098,6 @@ export class AssetResolver {
     };
   }
 }
-
 ```
 
 ## File: `src/backend/director.ts`
@@ -1144,9 +1209,13 @@ export async function evaluateDirectorInterceptor(
   }
 
   // Guard against duplicate injections
-  if (messages.some((m) => typeof m.content === "string" && m.content.includes(activeDirective))) {
+  if (messages.some((m) => typeof m.content === "string" && (m.content.includes(activeDirective) || m.content.includes("[LumiVN Living World Director Guidance]")))) {
     return messages;
   }
+
+  const systemGuard = `[LumiVN Living World Director Guidance]
+${activeDirective}
+(CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON. You MUST generate the roleplay reply following the preset format: <details><summary>🧠 Scene Logic</summary>, followed by narrative prose, followed by <details><summary>📊 Ledger</summary>.)`;
 
   // Cache injected directive
   const generationId = (context as any)?.generationId;
@@ -1158,7 +1227,7 @@ export async function evaluateDirectorInterceptor(
   // 3. Directorial Guidance Block
   const directorBlock: LlmMessageDTO = {
     role: "system",
-    content: activeDirective,
+    content: systemGuard,
   };
 
   return {
@@ -1419,7 +1488,6 @@ export function processBPlots(ledger: LedgerData): BPlotProcessResult {
 
   return { hasBPlotNotification, activeRipples, promotedActors };
 }
-
 ```
 
 ## File: `src/backend/ledger-parser.ts`
@@ -1707,7 +1775,6 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
 
   return merged;
 }
-
 ```
 
 ## File: `src/backend/storage.ts`
@@ -1874,14 +1941,13 @@ export class StorageManager {
     }
   }
 }
-
 ```
 
 ## File: `src/frontend.ts`
 
 ```typescript
 import type { SpindleFrontendContext, SpindleAppMountHandle } from "lumiverse-spindle-types";
-import type { VnPresentationState, DirectorSettings, DirectorLogEntry } from "./shared/types.js";
+import type { VnPresentationState, DirectorSettings, DirectorLogEntry, DirectorNoteData } from "./shared/types.js";
 import { StageOverlay } from "./frontend/stage/overlay.js";
 import { registerAssetDrawer } from "./frontend/studio/asset-drawer.js";
 import {
@@ -2122,8 +2188,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       diagBus.setManifest(payload.manifest as any);
     } else if (payload?.type === "vn_director_settings" && payload.settings) {
       diagDrawer?.setDirectorSettings?.(payload.settings as DirectorSettings);
+    } else if (payload?.type === "vn_director_note" && payload.data) {
+      diagBus.setDirectorNote(payload.data as any);
     } else if (payload?.type === "vn_director_log" && payload.log) {
       diagDrawer?.pushDirectorLog?.(payload.log as DirectorLogEntry);
+      if ((payload.log as any).directive) {
+        diagBus.setDirectorNote({
+          directorNote: (payload.log as any).directive,
+          threadLabel: "Turn Guidance",
+          timestamp: (payload.log as any).timestamp,
+        });
+      }
     } else if (payload?.type === "vn_director_logs" && Array.isArray(payload.logs)) {
       diagDrawer?.setDirectorLogs?.(payload.logs as DirectorLogEntry[]);
     } else if (payload?.type === "vn_error") {
@@ -2153,7 +2228,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   (globalThis as Record<string, unknown>)[CLEANUP_KEY] = cleanup;
   return cleanup;
 }
-
 ```
 
 ## File: `src/frontend/hud/menu-bar.ts`
@@ -2363,7 +2437,6 @@ export class MenuBar {
     }
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-characters.ts`
@@ -2991,7 +3064,6 @@ export class CharactersTab {
     this.root.appendChild(container);
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-diagnostics.ts`
@@ -3044,6 +3116,9 @@ export class DiagnosticsTab {
         <button id="vn-copy-yaml-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #38bdf8; font-weight: 600; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
           📄 Copy Ledger (YAML)
         </button>
+        <button id="vn-copy-director-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #8b5cf6; color: #c084fc; font-weight: 600; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          🎬 Copy Director Note
+        </button>
         <button id="vn-copy-json-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
           📦 Copy State (JSON)
         </button>
@@ -3076,6 +3151,14 @@ export class DiagnosticsTab {
       const yamlStr = diagBus.formatLedgerYaml(this.currentLedger);
       await navigator.clipboard.writeText(yamlStr).catch(() => undefined);
       showToast(btn, "Copy Ledger (YAML)");
+    });
+
+    header.querySelector("#vn-copy-director-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      const note = diagBus.getDirectorNote();
+      const text = note ? (note.directorNote ? `[${note.threadLabel}]\n${note.directorNote}` : JSON.stringify(note, null, 2)) : "No active director note";
+      await navigator.clipboard.writeText(text).catch(() => undefined);
+      showToast(btn, "Copy Director Note");
     });
 
     header.querySelector("#vn-copy-json-btn")?.addEventListener("click", async (e) => {
@@ -3155,6 +3238,26 @@ export class DiagnosticsTab {
       </div>
     `;
     this.root.appendChild(midRow);
+
+    // Dedicated Director Note Card
+    const directorNote = diagBus.getDirectorNote();
+    const directorCard = document.createElement("div");
+    directorCard.style.cssText = "background: #0f172a; border: 1px solid #6366f1; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px;";
+    directorCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 14px;">🎬</span>
+          <strong style="color: #a78bfa; font-size: 12px; text-transform: uppercase;">Active Director Guidance</strong>
+        </div>
+        <span id="vn-director-thread-label" style="font-size: 10px; background: rgba(139,92,246,0.2); border: 1px solid #8b5cf6; color: #c084fc; padding: 2px 8px; border-radius: 4px; font-weight: 600;">
+          ${directorNote?.threadLabel || "General Steering"}
+        </span>
+      </div>
+      <div id="vn-director-note-body" style="font-size: 11px; line-height: 1.5; color: #cbd5e1; max-height: 120px; overflow-y: auto; white-space: pre-wrap; font-style: italic;">
+        ${directorNote?.directorNote || "No active turn steering notes recorded."}
+      </div>
+    `;
+    this.root.appendChild(directorCard);
 
     // 3. Bottom Row: Diagnostic Console & Raw Ledger Viewer Split
     const bottomSplit = document.createElement("div");
@@ -3241,13 +3344,21 @@ export class DiagnosticsTab {
     });
 
     // Subscribe to bus updates
+    const updateDirectorCard = () => {
+      const note = diagBus.getDirectorNote();
+      const labelEl = directorCard.querySelector("#vn-director-thread-label");
+      const bodyEl = directorCard.querySelector("#vn-director-note-body");
+      if (labelEl) labelEl.textContent = note?.threadLabel || "General Steering";
+      if (bodyEl) bodyEl.textContent = note?.directorNote || "No active turn steering notes recorded.";
+    };
+
     if (this.unsubscribeBus) this.unsubscribeBus();
     this.unsubscribeBus = diagBus.subscribe(() => {
       renderLogs();
+      updateDirectorCard();
     });
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-inventory.ts`
@@ -3392,7 +3503,6 @@ export class InventoryTab {
     this.root.appendChild(roomSection);
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-journal.ts`
@@ -3494,7 +3604,6 @@ export class JournalTab {
     this.root.appendChild(journalSection);
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-map.ts`
@@ -4101,7 +4210,6 @@ export class MapTab {
     });
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-phone.ts`
@@ -5077,7 +5185,6 @@ export class PhoneTab {
     };
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-scene.ts`
@@ -5597,7 +5704,6 @@ export class SceneTab {
     return `data:${file.mimeType || "image/png"};base64,${btoa(binary)}`;
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-stats.ts`
@@ -6012,7 +6118,6 @@ export class StatsTab {
     }
   }
 }
-
 ```
 
 ## File: `src/frontend/hud/tab-wardrobe.ts`
@@ -6158,7 +6263,6 @@ export class WardrobeTab {
     this.root.appendChild(footer);
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/audio-player.ts`
@@ -6338,7 +6442,6 @@ export class VnAudioEngine {
     }
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/backlog.ts`
@@ -6421,7 +6524,6 @@ export class BacklogModal {
     this.root.style.display = "none";
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/beat-splitter.ts`
@@ -6623,7 +6725,6 @@ export function splitParagraphIntoBeats(
 
   return beats.length > 0 ? beats : [{ speaker: defaultSpeaker, text: "...", rawText: "..." }];
 }
-
 ```
 
 ## File: `src/frontend/stage/choice-modal.ts`
@@ -6690,7 +6791,6 @@ export class ChoiceModal {
     this.root.style.display = "none";
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/dialogue-box.ts`
@@ -7170,7 +7270,6 @@ export class DialogueBox {
     this.backlogModal.root.remove();
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/overlay.ts`
@@ -8168,7 +8267,6 @@ export class StageOverlay {
     this.styleEl?.remove();
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/particles.ts`
@@ -8416,7 +8514,6 @@ export class ParticleEngine {
     this.canvas.remove();
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/rich-text.ts`
@@ -8536,7 +8633,6 @@ export const TEXT_EFFECTS_CSS = `
   transform: translateY(-1px);
 }
 `;
-
 ```
 
 ## File: `src/frontend/stage/sprite-transform.ts`
@@ -8581,7 +8677,6 @@ export function resetSpriteTransform(actorId: string): void {
     localStorage.removeItem(STORAGE_PREFIX + actorId.toLowerCase().trim());
   } catch {}
 }
-
 ```
 
 ## File: `src/frontend/stage/staging.ts`
@@ -8805,7 +8900,6 @@ export class StageRenderer {
     this.particleEngine.destroy();
   }
 }
-
 ```
 
 ## File: `src/frontend/stage/theme.ts`
@@ -8891,7 +8985,6 @@ export function applyVnTheme(rootEl: HTMLElement, themeId = "default"): void {
   rootEl.style.setProperty("--vn-glow", theme.glow);
   rootEl.style.setProperty("--vn-text", theme.text);
 }
-
 ```
 
 ## File: `src/frontend/stage/tts-engine.ts`
@@ -9002,7 +9095,6 @@ export class VnTtsEngine {
     window.speechSynthesis.speak(utterance);
   }
 }
-
 ```
 
 ## File: `src/frontend/studio/asset-drawer.ts`
@@ -9191,7 +9283,6 @@ export function registerAssetDrawer(ctx: SpindleFrontendContext): SpindleDrawerT
 
   return handle;
 }
-
 ```
 
 ## File: `src/frontend/studio/diagnostics-drawer.ts`
@@ -9711,7 +9802,6 @@ export function registerDiagnosticsDrawer(
     setDirectorLogs,
   };
 }
-
 ```
 
 ## File: `src/frontend/utils/bg-remover.ts`
@@ -9766,13 +9856,12 @@ function blobToDataUrl(blob: Blob): Promise<string> {
     reader.readAsDataURL(blob);
   });
 }
-
 ```
 
 ## File: `src/frontend/utils/diag-bus.ts`
 
 ```typescript
-import type { LedgerData, AssetManifest } from "../../shared/types.js";
+import type { LedgerData, AssetManifest, DirectorNoteData } from "../../shared/types.js";
 import type { DiagnosticData } from "../studio/diagnostics-drawer.js";
 
 export interface LogEntry {
@@ -9786,6 +9875,7 @@ export type DiagListener = () => void;
 class DiagnosticBus {
   private logs: LogEntry[] = [];
   private telemetry: DiagnosticData | null = null;
+  private latestDirectorNote: DirectorNoteData | null = null;
   private latestLedger: LedgerData = {};
   private latestManifest: AssetManifest | null = null;
   private listeners: Set<DiagListener> = new Set();
@@ -9857,6 +9947,16 @@ class DiagnosticBus {
     return this.latestManifest;
   }
 
+  public setDirectorNote(note: DirectorNoteData): void {
+    this.latestDirectorNote = note;
+    this.pushLog(`Director Note updated: [${note.threadLabel}]`, "info");
+    this.notify();
+  }
+
+  public getDirectorNote(): DirectorNoteData | null {
+    return this.latestDirectorNote;
+  }
+
   /** Formats current ledger into a clean YAML representation */
   public formatLedgerYaml(ledger?: LedgerData): string {
     const data = ledger || this.latestLedger;
@@ -9921,6 +10021,7 @@ class DiagnosticBus {
     const bundle = {
       timestamp: new Date().toISOString(),
       telemetry: this.telemetry,
+      directorNote: this.latestDirectorNote,
       clock: this.latestLedger.clock,
       scene: this.latestLedger.scene,
       ledger: this.latestLedger,
@@ -9932,7 +10033,6 @@ class DiagnosticBus {
 }
 
 export const diagBus = new DiagnosticBus();
-
 ```
 
 ## File: `src/shared/text-effects.ts`
@@ -10002,7 +10102,6 @@ export function parseTwineChoices(text: string): { cleanText: string; choices: T
 
   return { cleanText, choices };
 }
-
 ```
 
 ## File: `src/shared/types.ts`
@@ -10258,6 +10357,17 @@ export interface StageBackground {
   isVideo?: boolean;
 }
 
+export interface DirectorNoteData {
+  directorNote: string;
+  threadLabel: string;
+  timestamp?: string;
+}
+
+export interface DirectorNotePayload {
+  type: "vn_director_note";
+  data: DirectorNoteData;
+}
+
 export interface VnPresentationState {
   chatId: string;
   messageId: string;
@@ -10268,6 +10378,7 @@ export interface VnPresentationState {
   characters: StageCharacter[];
   ledger: LedgerData;
   hasBPlotNotification?: boolean;
+  directorNote?: DirectorNoteData;
 }
 
 export interface AssetRecord {
@@ -10305,7 +10416,6 @@ export interface DirectorLogEntry {
   }>;
   mutations: string[];
 }
-
 
 ```
 
@@ -10440,7 +10550,8 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       // First message is director system prompt
       const directorMsg = interceptorRes.messages[0];
       expect(directorMsg.role).toBe("system");
-      expect(directorMsg.content).toContain("[LumiVN Living World Director]");
+      expect(directorMsg.content).toContain("[LumiVN Living World Director Guidance]");
+      expect(directorMsg.content).toContain("CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON.");
       expect(directorMsg.content).toContain("PLAYER AGENCY GUARD");
       expect(directorMsg.content).toContain("NPC AUTONOMY");
       expect(directorMsg.content).toContain("PERSISTENT SECRETS");
@@ -10860,7 +10971,6 @@ describe("LumiVN Director & Lifecycle Systems", () => {
     });
   });
 });
-
 ```
 
 ## File: `test/engine.test.ts`
@@ -11261,7 +11371,6 @@ actors:
 
 
 
-
 ```
 
 ## File: `test/hud-tabs.test.ts`
@@ -11290,6 +11399,8 @@ import { PhoneTab } from "../src/frontend/hud/tab-phone.js";
 import { JournalTab } from "../src/frontend/hud/tab-journal.js";
 import { SceneTab } from "../src/frontend/hud/tab-scene.js";
 import { MenuBar } from "../src/frontend/hud/menu-bar.js";
+import { DiagnosticsTab } from "../src/frontend/hud/tab-diagnostics.js";
+import { diagBus } from "../src/frontend/utils/diag-bus.js";
 
 const FENCE = "```";
 const REALISTIC_MY_WORLD_YAML =
@@ -11727,8 +11838,29 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     expect(html).toContain("Scene Visuals");
     expect(html).toContain("dames_mansion:foyer");
   });
-});
 
+  test("11. DiagnosticsTab renders copy director button and active director guidance card", () => {
+    diagBus.setDirectorNote({
+      directorNote: "Maintain romantic tension during the interview.",
+      threadLabel: "Romance Arc",
+      timestamp: "14:00:00",
+    });
+
+    const tab = new DiagnosticsTab();
+    tab.render(parsedLedger);
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("vn-copy-director-btn");
+    expect(html).toContain("Active Director Guidance");
+    expect(html).toContain("Romance Arc");
+    expect(html).toContain("Maintain romantic tension during the interview.");
+
+    expect(diagBus.getDirectorNote()?.threadLabel).toBe("Romance Arc");
+    const bundle = JSON.parse(diagBus.exportAllBundle());
+    expect(bundle.directorNote).toBeDefined();
+    expect(bundle.directorNote.directorNote).toBe("Maintain romantic tension during the interview.");
+  });
+});
 ```
 
 ## File: `tsconfig.json`
@@ -11747,6 +11879,4 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
   },
   "include": ["src/**/*.ts"]
 }
-
 ```
-

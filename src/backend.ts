@@ -22,7 +22,7 @@ import {
   processBPlots,
   computeDirectorImpactDiff,
 } from "./backend/director.js";
-import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry } from "./shared/types.js";
+import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry, DirectorNoteData } from "./shared/types.js";
 
 declare const spindle: SpindleAPI;
 
@@ -167,6 +167,75 @@ async function processChatTurn(
     }
 
     if (!targetMessage || !targetMessage.content) return;
+
+    // Fallback JSON recovery for hijacked assistant responses
+    try {
+      let parsedJson: Record<string, any> | null = null;
+      const contentStr = targetMessage.content.trim();
+
+      if (contentStr.startsWith("{") && contentStr.endsWith("}")) {
+        try {
+          parsedJson = JSON.parse(contentStr);
+        } catch {}
+      }
+
+      if (!parsedJson) {
+        const jsonBlockMatch = contentStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonBlockMatch) {
+          try {
+            parsedJson = JSON.parse(jsonBlockMatch[1].trim());
+          } catch {}
+        }
+      }
+
+      if (!parsedJson && (contentStr.includes("director_note") || contentStr.includes("thread_label"))) {
+        const objMatch = contentStr.match(/\{[\s\S]*?"(?:director_note|thread_label)"[\s\S]*?\}/);
+        if (objMatch) {
+          try {
+            parsedJson = JSON.parse(objMatch[0]);
+          } catch {}
+        }
+      }
+
+      if (parsedJson && (parsedJson.director_note || parsedJson.thread_label)) {
+        const noteData: DirectorNoteData = {
+          directorNote: String(parsedJson.director_note || ""),
+          threadLabel: String(parsedJson.thread_label || "Active Thread"),
+          timestamp: new Date().toLocaleTimeString(),
+        };
+
+        spindle.sendToFrontend({
+          type: "vn_director_note",
+          data: noteData,
+        });
+
+        const recoveredLogEntry: DirectorLogEntry = {
+          timestamp: noteData.timestamp || new Date().toLocaleTimeString(),
+          directive: `[Director Note: ${noteData.threadLabel}] ${noteData.directorNote}`,
+          worldChanges: [],
+          npcChanges: [],
+          mutations: ["Recovered JSON director note from assistant output"],
+        };
+
+        let logBuffer = directorLogBuffers.get(chatId);
+        if (!logBuffer) {
+          logBuffer = await storage.getDirectorLogs(chatId);
+        }
+        logBuffer.push(recoveredLogEntry);
+        if (logBuffer.length > 20) {
+          logBuffer = logBuffer.slice(logBuffer.length - 20);
+        }
+        directorLogBuffers.set(chatId, logBuffer);
+        await storage.saveDirectorLogs(chatId, logBuffer);
+
+        spindle.sendToFrontend({
+          type: "vn_director_log",
+          log: recoveredLogEntry,
+        });
+      }
+    } catch {
+      // JSON recovery fallback error ignored
+    }
 
     // Extract Ledger YAML
     const rawLedger = extractLedgerRaw(targetMessage.content);

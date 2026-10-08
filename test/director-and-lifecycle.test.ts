@@ -126,7 +126,8 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       // First message is director system prompt
       const directorMsg = interceptorRes.messages[0];
       expect(directorMsg.role).toBe("system");
-      expect(directorMsg.content).toContain("[LumiVN Living World Director]");
+      expect(directorMsg.content).toContain("[LumiVN Living World Director Guidance]");
+      expect(directorMsg.content).toContain("CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON.");
       expect(directorMsg.content).toContain("PLAYER AGENCY GUARD");
       expect(directorMsg.content).toContain("NPC AUTONOMY");
       expect(directorMsg.content).toContain("PERSISTENT SECRETS");

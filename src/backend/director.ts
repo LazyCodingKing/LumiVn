@@ -104,9 +104,13 @@ export async function evaluateDirectorInterceptor(
   }
 
   // Guard against duplicate injections
-  if (messages.some((m) => typeof m.content === "string" && m.content.includes(activeDirective))) {
+  if (messages.some((m) => typeof m.content === "string" && (m.content.includes(activeDirective) || m.content.includes("[LumiVN Living World Director Guidance]")))) {
     return messages;
   }
+
+  const systemGuard = `[LumiVN Living World Director Guidance]
+${activeDirective}
+(CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON. You MUST generate the roleplay reply following the preset format: <details><summary>🧠 Scene Logic</summary>, followed by narrative prose, followed by <details><summary>📊 Ledger</summary>.)`;
 
   // Cache injected directive
   const generationId = (context as any)?.generationId;
@@ -118,7 +122,7 @@ export async function evaluateDirectorInterceptor(
   // 3. Directorial Guidance Block
   const directorBlock: LlmMessageDTO = {
     role: "system",
-    content: activeDirective,
+    content: systemGuard,
   };
 
   return {
