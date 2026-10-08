@@ -127,10 +127,9 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       const directorMsg = interceptorRes.messages[0];
       expect(directorMsg.role).toBe("system");
       expect(directorMsg.content).toContain("[LumiVN Living World Director Guidance]");
-      expect(directorMsg.content).toContain("[OUTPUT FORMAT REQUIREMENT]");
-      expect(directorMsg.content).toContain('Line 1: Return the director JSON object');
-      expect(directorMsg.content).toContain("You are LumiWorld, the private world-state director and area orchestrator");
-      expect(directorMsg.content).toContain("Decide what the living world does behind the next visible reply");
+      expect(directorMsg.content).toContain("[LumiVN Living World Context]");
+      expect(directorMsg.content).toContain("[OUTPUT FORMAT]");
+      expect(directorMsg.content).toContain("Respond with natural, vivid story narrative prose");
       expect(directorMsg.content).toContain("Stay cautious.");
 
       // Injected directive cached for post-turn diff logging

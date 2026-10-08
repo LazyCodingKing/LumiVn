@@ -262,6 +262,16 @@ export interface InvestigationTrack {
   target_id: string;
 }
 
+export interface BulletinPost {
+  id: string;
+  category?: string;
+  title: string;
+  body: string;
+  source?: string;
+  timestamp?: string;
+  hot?: boolean;
+}
+
 export interface LedgerData {
   world?: Record<string, unknown>;
   clock?: ClockState;
@@ -274,6 +284,7 @@ export interface LedgerData {
   fronts?: FrontNode[];
   opportunities?: Opportunity[];
   journal?: JournalEntry[];
+  bulletins?: BulletinPost[];
   [key: string]: unknown;
 }
 

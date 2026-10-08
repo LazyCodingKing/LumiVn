@@ -12,11 +12,10 @@ import {
   deepMergeLedger,
 } from "../src/backend/ledger-parser.js";
 import {
-  isRulesetBookName,
-  isRulesetEntryTitle,
-  ensureCharacterRulebook,
-  loadRulebookForCharacter,
-} from "../src/backend/rulebook.js";
+  generateCharacterDossier,
+  generateSurroundingPlaces,
+  simulateOffscreenMoves,
+} from "../src/backend/out-of-band.js";
 import type { LedgerData } from "../src/shared/types.js";
 
 describe("TOON Format & Preset Independence", () => {
@@ -128,50 +127,54 @@ actors[1]{id,mood,slot}:
   });
 });
 
-describe("Character Rulebook Lorebook System", () => {
-  test("identifies ruleset book names and entry titles", () => {
-    expect(isRulesetBookName("lumivn-ruleset")).toBe(true);
-    expect(isRulesetBookName("lumivn-ruleset-v2")).toBe(true);
-    expect(isRulesetBookName("my_regular_lore")).toBe(false);
-
-    expect(isRulesetEntryTitle("lumivn-ruleset · Places")).toBe(true);
-    expect(isRulesetEntryTitle("[lumivn] Cast")).toBe(true);
-    expect(isRulesetEntryTitle("General Lore")).toBe(false);
-  });
-
-  test("ensureCharacterRulebook creates and attaches world book when missing", async () => {
-    const createdEntries: any[] = [];
-    let updatedChar: any = null;
-
+describe("Out-of-Band LLM Generation & World Simulation", () => {
+  test("generateCharacterDossier provides complete fallback dossier on missing LLM", async () => {
     const mockSpindle: any = {
-      characters: {
-        get: async () => ({ id: "char_1", name: "Akane", world_book_ids: [] }),
-        update: async (id: string, patch: any) => {
-          updatedChar = patch;
-        },
-      },
-      world_books: {
-        create: async (data: any) => ({ id: "wb_999", name: data.name }),
-        entries: {
-          create: async (bookId: string, entry: any) => {
-            createdEntries.push(entry);
-            return { id: `entry_${createdEntries.length}`, ...entry };
-          },
-        },
-      },
-      log: { info: () => {}, warn: () => {} },
+      log: { error: () => {}, info: () => {} },
     };
-
-    const bookId = await ensureCharacterRulebook(
+    const dossier = await generateCharacterDossier(
       mockSpindle,
-      "char_1",
-      { places: { tendo_dojo: "url1" }, characters: { akane: {} as any } }
+      "akane",
+      "Akane Tendo",
+      { scene: { place: "tendo_dojo" } }
     );
 
-    expect(bookId).toBe("wb_999");
-    expect(createdEntries.length).toBe(2);
-    expect(createdEntries[0].comment).toContain("Places");
-    expect(createdEntries[1].comment).toContain("Cast");
-    expect(updatedChar?.world_book_ids).toEqual(["wb_999"]);
+    expect(dossier.id).toBe("akane");
+    expect(dossier.name).toBe("Akane Tendo");
+    expect(dossier.combat?.tier).toBe(1);
+    expect(dossier.combat?.hp).toBe("150/150");
+    expect(dossier.life_model?.routines?.length).toBeGreaterThan(0);
+    expect(dossier.passions?.joy).toBe(40);
+  });
+
+  test("generateSurroundingPlaces returns adjoining room fallback", async () => {
+    const mockSpindle: any = {
+      log: { error: () => {}, info: () => {} },
+    };
+    const places = await generateSurroundingPlaces(
+      mockSpindle,
+      "tendo_dojo:hall",
+      { scene: { place: "tendo_dojo:hall" } }
+    );
+
+    expect(Object.keys(places).length).toBeGreaterThan(0);
+    expect(Object.keys(places)[0]).toContain("tendo_dojo");
+  });
+
+  test("simulateOffscreenMoves produces bulletin post and rumor", async () => {
+    const mockSpindle: any = {
+      log: { error: () => {}, info: () => {} },
+    };
+    const sim = await simulateOffscreenMoves(mockSpindle, {
+      clock: { t: "14:00", date: "Day 1" },
+      actors: {
+        akane: { name: "Akane" },
+        ranma: { name: "Ranma" },
+      },
+    });
+
+    expect(sim.bulletin).toBeDefined();
+    expect(sim.bulletin.title).toContain("Spotted");
+    expect(sim.relationUpdates?.length).toBe(1);
   });
 });

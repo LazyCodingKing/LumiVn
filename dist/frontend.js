@@ -27517,11 +27517,41 @@ function normalizeRoutine(r) {
     phase: String(r?.phase ?? "")
   };
 }
+function getActorMoodBadge(passions) {
+  if (!passions)
+    return { label: "Composed", color: "#94a3b8", icon: "\uD83D\uDE10" };
+  const map = {
+    arousal: { label: "Flustered", color: "#f43f5e", icon: "\uD83D\uDE33" },
+    anger: { label: "Irritated", color: "#ef4444", icon: "\uD83D\uDE20" },
+    fear: { label: "Guarded", color: "#a855f7", icon: "\uD83D\uDE28" },
+    suspicion: { label: "Suspicious", color: "#eab308", icon: "\uD83E\uDD28" },
+    stress: { label: "Stressed", color: "#f97316", icon: "\uD83D\uDE30" },
+    joy: { label: "Pleased", color: "#10b981", icon: "\uD83D\uDE0A" },
+    sadness: { label: "Pensive", color: "#38bdf8", icon: "\uD83D\uDE14" },
+    shame: { label: "Embarrassed", color: "#ec4899", icon: "\uD83E\uDEE3" }
+  };
+  let topKey = "";
+  let topVal = 0;
+  for (const [k, v] of Object.entries(passions)) {
+    if (typeof v === "number" && v > topVal) {
+      topVal = v;
+      topKey = k;
+    }
+  }
+  if (topVal >= 20 && map[topKey]) {
+    return map[topKey];
+  }
+  return { label: "Composed", color: "#64748b", icon: "\uD83D\uDE10" };
+}
 
 class CharactersTab {
   root;
   selectedActorId = null;
-  constructor() {
+  ctx;
+  onAction;
+  constructor(ctx, onAction) {
+    this.ctx = ctx;
+    this.onAction = onAction;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-characters";
   }
@@ -27609,6 +27639,7 @@ class CharactersTab {
       const item = document.createElement("div");
       item.style.cssText = `display: flex; flex-direction: column; align-items: center; cursor: pointer; min-width: 68px; transition: transform 0.15s ease;`;
       const displayName = id.toLowerCase() === "user" ? "Player (You)" : actor.name || id;
+      const moodBadge = getActorMoodBadge(actor.passions);
       item.innerHTML = `
         <div style="width: 52px; height: 52px; border-radius: 50%; overflow: hidden; border: 2px solid ${isSelected ? "#818cf8" : "#475569"}; box-shadow: ${isSelected ? "0 0 10px rgba(99,102,241,0.6)" : "none"}; background: #1e293b; display: flex; align-items: center; justify-content: center; position: relative;">
           ${avatarUrl ? `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="${displayName}" />` : `<span style="font-size: 22px;">\uD83D\uDC64</span>`}
@@ -27616,6 +27647,9 @@ class CharactersTab {
         </div>
         <span style="font-size: 11px; margin-top: 5px; color: ${isSelected ? "#f8fafc" : "#94a3b8"}; font-weight: ${isSelected ? "700" : "500"}; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
           ${displayName}
+        </span>
+        <span style="font-size: 9px; margin-top: 2px; padding: 1px 4px; border-radius: 4px; background: #0f172a; border: 1px solid ${moodBadge.color}; color: ${moodBadge.color}; font-weight: 600; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          ${moodBadge.icon} ${moodBadge.label}
         </span>
         ${rosterItem?.loc ? `<span style="font-size: 9px; color: #64748b; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${rosterItem.loc}</span>` : ""}
       `;
@@ -27709,6 +27743,88 @@ class CharactersTab {
         </div>
       ` : ""}
     `;
+    if (!isUser) {
+      const actionsBar = document.createElement("div");
+      actionsBar.style.cssText = "display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 8px; border-top: 1px solid #334155;";
+      const unfoldBtn = document.createElement("button");
+      unfoldBtn.className = "vn-btn";
+      unfoldBtn.style.cssText = "font-size: 11px; padding: 5px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px; background: #4f46e5; color: white; border: none; cursor: pointer; font-weight: 600;";
+      unfoldBtn.innerHTML = `<span>\uD83D\uDCD6</span> <span>Unfold Backstory & Dossier</span>`;
+      unfoldBtn.addEventListener("click", () => {
+        unfoldBtn.disabled = true;
+        unfoldBtn.innerHTML = `<span>⏳</span> <span>Generating Dossier...</span>`;
+        this.ctx?.sendToBackend({
+          type: "vn_unfold_dossier",
+          actorId: actor.id || displayName,
+          actorName: displayName
+        });
+      });
+      actionsBar.appendChild(unfoldBtn);
+      const giftBtn = document.createElement("button");
+      giftBtn.className = "vn-btn";
+      giftBtn.style.cssText = "font-size: 11px; padding: 5px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px; background: #0f172a; color: #f8fafc; border: 1px solid #475569; cursor: pointer; font-weight: 600;";
+      giftBtn.innerHTML = `<span>\uD83C\uDF81</span> <span>Give Gift</span>`;
+      giftBtn.addEventListener("click", () => {
+        const userCarried = ledger.actors?.user?.inventory?.carried || [];
+        if (!userCarried.length) {
+          alert("You have no carried items to give as a gift.");
+          return;
+        }
+        const itemToGift = prompt(`Select item to gift to ${displayName}:
+Available: ${userCarried.join(", ")}`, userCarried[0]);
+        if (itemToGift && itemToGift.trim()) {
+          this.ctx?.sendToBackend({
+            type: "vn_gift_item",
+            actorId: actor.id || displayName,
+            itemName: itemToGift.trim()
+          });
+        }
+      });
+      actionsBar.appendChild(giftBtn);
+      banner.appendChild(actionsBar);
+      const userRel = rels.user || {};
+      const aff = Math.min(100, Math.max(0, Number(userRel.affinity ?? 50)));
+      const dom = Math.min(100, Math.max(0, Number(userRel.respect ?? userRel.trust ?? 50)));
+      const att = Math.min(100, Math.max(0, Number(userRel.attraction ?? 20)));
+      const relSection = document.createElement("div");
+      relSection.style.cssText = "margin-top: 10px; padding: 10px; background: #0f172a; border-radius: 6px; border: 1px solid #334155;";
+      relSection.innerHTML = `
+        <div style="font-size: 11px; font-weight: 700; color: #f8fafc; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+          <span>Dynamic Relationship Metrics</span>
+          <span style="color: #94a3b8; font-size: 10px; font-weight: normal;">Favors Owed: <strong style="color: #fbbf24;">${userRel.favors_owed ?? 0}</strong></span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 10px;">
+          <div>
+            <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+              <span style="color: #f43f5e; font-weight: 600;">❤️ Affection / Trust</span>
+              <span><strong>${aff}%</strong></span>
+            </div>
+            <div style="height: 6px; background: #334155; border-radius: 3px; overflow: hidden;">
+              <div style="height: 100%; width: ${aff}%; background: linear-gradient(90deg, #f43f5e, #fb7185); border-radius: 3px;"></div>
+            </div>
+          </div>
+          <div>
+            <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+              <span style="color: #38bdf8; font-weight: 600;">⚡ Dominance / Influence</span>
+              <span><strong>${dom}%</strong></span>
+            </div>
+            <div style="height: 6px; background: #334155; border-radius: 3px; overflow: hidden;">
+              <div style="height: 100%; width: ${dom}%; background: linear-gradient(90deg, #0284c7, #38bdf8); border-radius: 3px;"></div>
+            </div>
+          </div>
+          <div>
+            <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+              <span style="color: #a855f7; font-weight: 600;">\uD83D\uDC9C Attraction / Chemistry</span>
+              <span><strong>${att}%</strong></span>
+            </div>
+            <div style="height: 6px; background: #334155; border-radius: 3px; overflow: hidden;">
+              <div style="height: 100%; width: ${att}%; background: linear-gradient(90deg, #9333ea, #c084fc); border-radius: 3px;"></div>
+            </div>
+          </div>
+        </div>
+      `;
+      banner.appendChild(relSection);
+    }
     const rawPassions = actor.passions;
     if (rawPassions) {
       let passionBadges = [];
@@ -29070,6 +29186,7 @@ class InventoryTab {
 class MapTab {
   root;
   onAction;
+  ctx;
   viewMode = "indoor";
   zoom = 1;
   panX = 0;
@@ -29078,8 +29195,9 @@ class MapTab {
   startPointerX = 0;
   startPointerY = 0;
   selectedNodeId = null;
-  constructor(onAction) {
+  constructor(onAction, ctx) {
     this.onAction = onAction;
+    this.ctx = ctx;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-map";
   }
@@ -29547,9 +29665,25 @@ class MapTab {
             ${isGated ? "\uD83D\uDD12 Travel Gated" : `Travel to ${cleanName.replace(/_/g, " ")}`}
           </button>
         ` : `
-          <button class="vn-btn" style="width: 100%; padding: 8px; font-size: 12px; background: #0284c7; cursor: default;" disabled>
-            ✓ Already Present Here
-          </button>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase;">Room Interactions</div>
+            <button id="vn-sidebar-search-btn" class="vn-btn" style="width: 100%; padding: 6px; font-size: 11px; font-weight: 600; background: #334155; color: #f8fafc; border: 1px solid #475569; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;">
+              <span>\uD83D\uDD0D</span> <span>Snoop / Search Room</span>
+            </button>
+            <button id="vn-sidebar-scout-btn" class="vn-btn" style="width: 100%; padding: 6px; font-size: 11px; font-weight: 600; background: #1e293b; color: #38bdf8; border: 1px solid rgba(56,189,248,0.4); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;">
+              <span>\uD83D\uDDFA️</span> <span>Scout Connected Areas</span>
+            </button>
+            ${cleanName.includes("bath") || cleanName.includes("wash") ? `
+              <button id="vn-sidebar-wash-btn" class="vn-btn" style="width: 100%; padding: 6px; font-size: 11px; background: #0f766e; color: #ccfbf1; border: none; cursor: pointer;">
+                \uD83D\uDEBF Refresh / Wash Face
+              </button>
+            ` : ""}
+            ${cleanName.includes("kitchen") || cleanName.includes("bar") || cleanName.includes("cafe") ? `
+              <button id="vn-sidebar-snack-btn" class="vn-btn" style="width: 100%; padding: 6px; font-size: 11px; background: #b45309; color: #fef3c7; border: none; cursor: pointer;">
+                ☕ Snack / Grab Coffee
+              </button>
+            ` : ""}
+          </div>
         `}
       </div>
     `;
@@ -29557,6 +29691,18 @@ class MapTab {
       if (isGated)
         return;
       this.onAction(`*Travels to the ${cleanName.replace(/_/g, " ")}*`);
+    });
+    sidebar.querySelector("#vn-sidebar-search-btn")?.addEventListener("click", () => {
+      this.ctx?.sendToBackend({ type: "vn_search_room", placeId: selected });
+    });
+    sidebar.querySelector("#vn-sidebar-scout-btn")?.addEventListener("click", () => {
+      this.ctx?.sendToBackend({ type: "vn_scout_places", placeId: selected });
+    });
+    sidebar.querySelector("#vn-sidebar-wash-btn")?.addEventListener("click", () => {
+      this.onAction(`*Washes face and freshens up in the ${cleanName.replace(/_/g, " ")}*`);
+    });
+    sidebar.querySelector("#vn-sidebar-snack-btn")?.addEventListener("click", () => {
+      this.onAction(`*Prepares a light snack and drink in the ${cleanName.replace(/_/g, " ")}*`);
     });
   }
 }
@@ -30427,7 +30573,9 @@ class PhoneTab {
 // src/frontend/hud/tab-journal.ts
 class JournalTab {
   root;
-  constructor() {
+  ctx;
+  constructor(ctx) {
+    this.ctx = ctx;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-journal";
   }
@@ -30435,8 +30583,44 @@ class JournalTab {
     this.root.innerHTML = "";
     const header = document.createElement("div");
     header.className = "vn-tab-header";
-    header.innerHTML = `<h3>\uD83D\uDCDC Journal & Opportunity Leads</h3>`;
+    header.style.cssText = "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;";
+    header.innerHTML = `
+      <h3 style="margin: 0;">\uD83D\uDCDC Journal & Opportunity Leads</h3>
+      <button id="vn-sim-offscreen-btn" class="vn-btn" style="font-size: 11px; padding: 5px 12px; border-radius: 6px; background: #6366f1; color: white; border: none; cursor: pointer; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+        <span>\uD83C\uDFAD</span> <span>Simulate Offscreen Moves</span>
+      </button>
+    `;
     this.root.appendChild(header);
+    header.querySelector("#vn-sim-offscreen-btn")?.addEventListener("click", () => {
+      this.ctx?.sendToBackend({ type: "vn_simulate_offscreen" });
+    });
+    const rumorsSection = document.createElement("div");
+    rumorsSection.className = "vn-section";
+    rumorsSection.innerHTML = `<h4>\uD83D\uDCE2 Bulletin Board & Local Rumors (${ledger.bulletins?.length || 0})</h4>`;
+    const rumorsList = document.createElement("div");
+    rumorsList.className = "vn-opps-list";
+    if (!ledger.bulletins || ledger.bulletins.length === 0) {
+      rumorsList.innerHTML = `<div class="vn-muted">No ambient rumors or board notices posted yet. Click "Simulate Offscreen Moves" above to generate local chatter.</div>`;
+    } else {
+      for (const post of ledger.bulletins) {
+        const card = document.createElement("div");
+        card.className = "vn-opp-card";
+        card.innerHTML = `
+          <div class="vn-opp-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <strong style="color: #f59e0b;">${post.title}</strong>
+            <span style="font-size: 10px; background: #1e293b; padding: 2px 6px; border-radius: 4px; color: #94a3b8; border: 1px solid #334155;">${post.category || "Rumor"}</span>
+          </div>
+          <div class="vn-opp-body" style="font-size: 12px; margin: 6px 0; color: #cbd5e1; line-height: 1.4;">${post.body}</div>
+          <div class="vn-opp-footer" style="display: flex; justify-content: space-between; font-size: 10px; color: #64748b; border-top: 1px solid #1e293b; padding-top: 4px;">
+            <span>Source: ${post.source || "Word on the Street"}</span>
+            ${post.timestamp ? `<span>${post.timestamp}</span>` : ""}
+          </div>
+        `;
+        rumorsList.appendChild(card);
+      }
+    }
+    rumorsSection.appendChild(rumorsList);
+    this.root.appendChild(rumorsSection);
     const oppsSection = document.createElement("div");
     oppsSection.className = "vn-section";
     oppsSection.innerHTML = `<h4>Open Opportunities (${ledger.opportunities?.length || 0})</h4>`;
@@ -35011,6 +35195,8 @@ class MenuBar {
   panelOverlay;
   panelBody;
   phoneBadge = null;
+  clockPill;
+  options;
   charactersTab;
   bplotsTab;
   wardrobeTab;
@@ -35025,6 +35211,7 @@ class MenuBar {
   currentLedger = {};
   currentManifest;
   constructor(options) {
+    this.options = options;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-menubar";
     this.panelOverlay = document.createElement("div");
@@ -35045,16 +35232,50 @@ class MenuBar {
       if (e.target === this.panelOverlay)
         this.closeTab();
     });
-    this.charactersTab = new CharactersTab;
+    this.charactersTab = new CharactersTab(options.ctx, options.onAction);
     this.bplotsTab = new BPlotsTab;
     this.wardrobeTab = new WardrobeTab(options.onAction);
     this.statsTab = new StatsTab;
     this.inventoryTab = new InventoryTab(options.onAction);
-    this.mapTab = new MapTab(options.onAction);
+    this.mapTab = new MapTab(options.onAction, options.ctx);
     this.phoneTab = new PhoneTab(options.ctx, options.onAction);
-    this.journalTab = new JournalTab;
+    this.journalTab = new JournalTab(options.ctx);
     this.sceneTab = new SceneTab(options.ctx, options.onTransformChange);
     this.diagnosticsTab = new DiagnosticsTab;
+    const clockContainer = document.createElement("div");
+    clockContainer.className = "vn-hud-clock-container";
+    clockContainer.style.cssText = "display: flex; align-items: center; gap: 6px; padding: 0 10px 0 4px; border-right: 1px solid #334155; margin-right: 4px;";
+    this.clockPill = document.createElement("span");
+    this.clockPill.className = "vn-hud-clock";
+    this.clockPill.style.cssText = "font-size: 11px; font-weight: 600; color: #cbd5e1; background: #0f172a; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155; white-space: nowrap;";
+    this.clockPill.textContent = "\uD83D\uDCC5 Day 1 • 12:00";
+    const skipTimeBtn = document.createElement("button");
+    skipTimeBtn.className = "vn-hud-btn vn-hud-btn-skip";
+    skipTimeBtn.style.cssText = "font-size: 11px; font-weight: 600; color: #38bdf8; background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.4); padding: 4px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px;";
+    skipTimeBtn.innerHTML = `<span>⏩ Skip Time</span>`;
+    skipTimeBtn.addEventListener("click", () => {
+      const choice = prompt(`Skip in-game time:
+1: +30 Minutes
+2: +1 Hour
+3: +3 Hours
+4: Sleep until 07:00 (Tomorrow Morning)
+
+Enter 1, 2, 3, or 4:`, "2");
+      if (!choice)
+        return;
+      if (choice === "1") {
+        options.ctx.sendToBackend({ type: "vn_skip_time", minutes: 30 });
+      } else if (choice === "2") {
+        options.ctx.sendToBackend({ type: "vn_skip_time", minutes: 60 });
+      } else if (choice === "3") {
+        options.ctx.sendToBackend({ type: "vn_skip_time", minutes: 180 });
+      } else if (choice === "4") {
+        options.ctx.sendToBackend({ type: "vn_skip_time", sleep: true });
+      }
+    });
+    clockContainer.appendChild(this.clockPill);
+    clockContainer.appendChild(skipTimeBtn);
+    this.root.appendChild(clockContainer);
     const barItems = [
       { id: "characters", icon: "\uD83D\uDC65", label: "Cast" },
       { id: "bplots", icon: "\uD83D\uDCE1", label: "B-Plots" },
@@ -35106,6 +35327,13 @@ class MenuBar {
       } else {
         this.phoneBadge.classList.remove("vn-pulse");
       }
+    }
+    const c = this.currentLedger.clock;
+    if (this.clockPill && c) {
+      const date = c.date || "Day 1";
+      const time = c.t || "12:00";
+      const phase = c.phase ? ` (${c.phase})` : "";
+      this.clockPill.textContent = `\uD83D\uDCC5 ${date} • ${time}${phase}`;
     }
     if (this.activeTabId) {
       this.renderActiveTab();

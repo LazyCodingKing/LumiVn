@@ -35,6 +35,8 @@ export class MenuBar {
   private panelOverlay: HTMLElement;
   private panelBody: HTMLElement;
   private phoneBadge: HTMLElement | null = null;
+  private clockPill?: HTMLElement;
+  private options: MenuBarOptions;
 
   private charactersTab: CharactersTab;
   private bplotsTab: BPlotsTab;
@@ -52,6 +54,7 @@ export class MenuBar {
   private currentManifest?: AssetManifest;
 
   constructor(options: MenuBarOptions) {
+    this.options = options;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-menubar";
 
@@ -79,16 +82,49 @@ export class MenuBar {
     });
 
     // Instantiate tab views
-    this.charactersTab = new CharactersTab();
+    this.charactersTab = new CharactersTab(options.ctx, options.onAction);
     this.bplotsTab = new BPlotsTab();
     this.wardrobeTab = new WardrobeTab(options.onAction);
     this.statsTab = new StatsTab();
     this.inventoryTab = new InventoryTab(options.onAction);
-    this.mapTab = new MapTab(options.onAction);
+    this.mapTab = new MapTab(options.onAction, options.ctx);
     this.phoneTab = new PhoneTab(options.ctx, options.onAction);
-    this.journalTab = new JournalTab();
+    this.journalTab = new JournalTab(options.ctx);
     this.sceneTab = new SceneTab(options.ctx, options.onTransformChange);
     this.diagnosticsTab = new DiagnosticsTab();
+
+    // Clock & Skip Time Control Bar Item
+    const clockContainer = document.createElement("div");
+    clockContainer.className = "vn-hud-clock-container";
+    clockContainer.style.cssText = "display: flex; align-items: center; gap: 6px; padding: 0 10px 0 4px; border-right: 1px solid #334155; margin-right: 4px;";
+
+    this.clockPill = document.createElement("span");
+    this.clockPill.className = "vn-hud-clock";
+    this.clockPill.style.cssText = "font-size: 11px; font-weight: 600; color: #cbd5e1; background: #0f172a; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155; white-space: nowrap;";
+    this.clockPill.textContent = "📅 Day 1 • 12:00";
+
+    const skipTimeBtn = document.createElement("button");
+    skipTimeBtn.className = "vn-hud-btn vn-hud-btn-skip";
+    skipTimeBtn.style.cssText = "font-size: 11px; font-weight: 600; color: #38bdf8; background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.4); padding: 4px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px;";
+    skipTimeBtn.innerHTML = `<span>⏩ Skip Time</span>`;
+
+    skipTimeBtn.addEventListener("click", () => {
+      const choice = prompt("Skip in-game time:\n1: +30 Minutes\n2: +1 Hour\n3: +3 Hours\n4: Sleep until 07:00 (Tomorrow Morning)\n\nEnter 1, 2, 3, or 4:", "2");
+      if (!choice) return;
+      if (choice === "1") {
+        options.ctx.sendToBackend({ type: "vn_skip_time", minutes: 30 });
+      } else if (choice === "2") {
+        options.ctx.sendToBackend({ type: "vn_skip_time", minutes: 60 });
+      } else if (choice === "3") {
+        options.ctx.sendToBackend({ type: "vn_skip_time", minutes: 180 });
+      } else if (choice === "4") {
+        options.ctx.sendToBackend({ type: "vn_skip_time", sleep: true });
+      }
+    });
+
+    clockContainer.appendChild(this.clockPill);
+    clockContainer.appendChild(skipTimeBtn);
+    this.root.appendChild(clockContainer);
 
     // Render bar buttons
     const barItems: Array<{ id: HudTabId; icon: string; label: string }> = [
@@ -149,6 +185,14 @@ export class MenuBar {
       } else {
         this.phoneBadge.classList.remove("vn-pulse");
       }
+    }
+
+    const c = this.currentLedger.clock;
+    if (this.clockPill && c) {
+      const date = c.date || "Day 1";
+      const time = c.t || "12:00";
+      const phase = c.phase ? ` (${c.phase})` : "";
+      this.clockPill.textContent = `📅 ${date} • ${time}${phase}`;
     }
 
     if (this.activeTabId) {
