@@ -1168,9 +1168,21 @@ export async function evaluateDirectorInterceptor(
 ${activeDirective}
 
 [OUTPUT FORMAT REQUIREMENT]
-1. Begin your reply on the very first line with the director JSON:
-{"director_note":"<your directive here>","thread_label":"<short thread name>"}
-2. Immediately continue with the preset output contract:
+Line 1 MUST strictly be a JSON object containing your forward-looking directive:
+{"director_note":"<directive>","thread_label":"<short label>"}
+
+STRICT DIRECTIVE CONSTRAINTS:
+- ZERO RECAP: Never write "User asks...", "Jessica feels...", or summarize what just happened.
+- IMPERATIVE ONLY: Sentence 1 MUST start with an active command verb: "Escalate", "Have", "Make", "Let", "Pressure", or "Force".
+- PUSH THE WORLD: Command a concrete physical action, an offscreen arrival/sound, an escalating tension, or an NPC counter-move that forces the scene forward.
+
+GOOD EXAMPLE:
+{"director_note":"Escalate the tension around the absent husband. Have Jessica fluster and press the wine bottle into User's hands to change the subject, while Tessa calls out her mother's locked bedroom drawer. Let Mila rattle coffee mugs in the kitchen. Keep Leslie hidden upstairs.","thread_label":"Foyer Tension"}
+
+BAD EXAMPLE (BANNED):
+{"director_note":"User asks Tessa about her dad and Jessica feels defensive about her husband while Tessa teases her.","thread_label":"new_tenant_arrival"}
+
+Follow immediately on Line 2 with:
 <details><summary>🧠 Scene Logic</summary>
 ...
 </details>
@@ -10528,7 +10540,8 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       expect(directorMsg.role).toBe("system");
       expect(directorMsg.content).toContain("[LumiVN Living World Director Guidance]");
       expect(directorMsg.content).toContain("[OUTPUT FORMAT REQUIREMENT]");
-      expect(directorMsg.content).toContain('{"director_note":"<your directive here>","thread_label":"<short thread name>"}');
+      expect(directorMsg.content).toContain('{"director_note":"<directive>","thread_label":"<short label>"}');
+      expect(directorMsg.content).toContain("STRICT DIRECTIVE CONSTRAINTS:");
       expect(directorMsg.content).toContain("You are LumiWorld, a private world-state director");
       expect(directorMsg.content).toContain("advance the world behind the next visible reply");
       expect(directorMsg.content).toContain("Stay cautious.");
