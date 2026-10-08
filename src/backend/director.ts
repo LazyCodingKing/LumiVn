@@ -1,6 +1,7 @@
 import type { LlmMessageDTO, InterceptorResultDTO } from "lumiverse-spindle-types";
 import type { LedgerData, BPlot, DirectorSettings, DirectorLogEntry } from "../shared/types.js";
 import { DEFAULT_DIRECTOR_SETTINGS } from "./storage.js";
+import { encodeToonState } from "./toon-parser.js";
 
 export const DIRECTOR_DIRECTIVES = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
 
@@ -108,21 +109,25 @@ export async function evaluateDirectorInterceptor(
     return messages;
   }
 
+  const toonStateSummary = encodeToonState(currentState);
+
   const systemGuard = `[LumiVN Living World Director Guidance]
 ${activeDirective}
+
+[LumiVN Stage State (TOON)]
+${toonStateSummary}
 
 [OUTPUT FORMAT REQUIREMENT]
 Line 1: Return the director JSON object (optionally inside <details><summary>🎬 Director</summary>...</details>):
 {"director_note":"FIRST BEAT: ... WORLD: ... OFFSCREEN: ... PRESSURE: ... PRESENT: ... VOICE: ... TEXTURE: ... CANON: ... END ON: ...","thread_label":"<3-6 words thread title>"}
 
-Follow immediately on Line 2 with the preset contract:
-<details><summary>🧠 Scene Logic</summary>
-...
-</details>
-(Prose text here)
-<details><summary>📊 Ledger</summary>
-...
-</details>`;
+Follow with standard narrative prose.
+To update scene visuals or actor expressions, you may append a compact TOON delta tag at the end (or legacy <details>Ledger</details>):
+<!--toon
+scene: place:<place_id>
+actors[N]{id,mood,slot}:
+ <actor_id>,<mood>,<slot>
+-->`;
 
   // Cache injected directive
   const generationId = (context as any)?.generationId;

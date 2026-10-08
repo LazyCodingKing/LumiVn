@@ -3311,8 +3311,10 @@ var SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary
 var DIRECTOR_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Director.*?<\/summary>[\s\S]*?<\/details>/gi;
 var DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"[\s\S]*?\}\s*/gi;
 var PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
+var TOON_COMMENT_RE = /<!--\s*toon\b[\s\S]*?-->/gi;
+var TOON_BRACKET_RE = /\[toon\b[\s\S]*?\]/gi;
 function extractProse(rawContent) {
-  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(DIRECTOR_DETAILS_RE, "").replace(LEDGER_DETAILS_RE, "").replace(DIRECTOR_JSON_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
+  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(DIRECTOR_DETAILS_RE, "").replace(LEDGER_DETAILS_RE, "").replace(DIRECTOR_JSON_RE, "").replace(TOON_COMMENT_RE, "").replace(TOON_BRACKET_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
   return cleaned;
 }
 function extractParagraphs(prose) {
@@ -3520,6 +3522,53 @@ function deepMergeLedger(base, delta) {
   }
   return merged;
 }
+function inferProseEmotionDelta(prose, defaultActor = "char") {
+  if (!prose || !prose.trim())
+    return null;
+  const paragraphs = extractParagraphs(prose);
+  if (paragraphs.length === 0)
+    return null;
+  let targetSpeaker = defaultActor;
+  for (let i = paragraphs.length - 1;i >= 0; i--) {
+    const detected = detectSpeaker(paragraphs[i], defaultActor);
+    if (detected.speaker && detected.speaker !== "Narrator") {
+      targetSpeaker = detected.speaker.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      break;
+    }
+  }
+  const lowerProse = prose.toLowerCase();
+  let inferredEmotion = null;
+  if (/\b(blush\w*|fluster\w*|flush\w*|shy\w*|embarrass\w*|heat rises)\b/i.test(lowerProse)) {
+    inferredEmotion = "blush";
+  } else if (/\b(smile\w*|laugh\w*|giggle\w*|grin\w*|chuckle\w*|warmly)\b/i.test(lowerProse)) {
+    inferredEmotion = "smile";
+  } else if (/\b(angr\w*|shout\w*|frown\w*|glar\w*|growl\w*|scowl\w*|snarl\w*|fum\w*)\b/i.test(lowerProse)) {
+    inferredEmotion = "angry";
+  } else if (/\b(scar\w*|fear\w*|trembl\w*|shiver\w*|gasp\w*|wide-eyed|shriek\w*)\b/i.test(lowerProse)) {
+    inferredEmotion = "scared";
+  } else if (/\b(sad\w*|cr\w*|sob\w*|weep\w*|tear\w*|falter\w*|mourn\w*|sniffl\w*)\b/i.test(lowerProse)) {
+    inferredEmotion = "sad";
+  } else if (/\b(suspicio\w*|doubt\w*|squint\w*|narrowed eyes)\b/i.test(lowerProse)) {
+    inferredEmotion = "suspicious";
+  }
+  if (!inferredEmotion)
+    return null;
+  const passions = {
+    blush: { arousal: 60 },
+    smile: { joy: 60 },
+    angry: { anger: 60 },
+    scared: { fear: 60 },
+    sad: { sadness: 60 },
+    suspicious: { suspicion: 60 }
+  }[inferredEmotion] || {};
+  return {
+    actors: {
+      [targetSpeaker]: {
+        passions
+      }
+    }
+  };
+}
 
 // src/backend/asset-resolver.ts
 function resolveDominantEmotion(passions) {
@@ -3716,6 +3765,218 @@ class AssetResolver {
   }
 }
 
+// src/backend/toon-parser.ts
+var TOON_COMMENT_RE2 = /<!--\s*toon\b([\s\S]*?)-->/i;
+var TOON_FENCE_RE = /```(?:toon)?\s*([\s\S]*?)```/i;
+var TOON_BRACKET_RE2 = /\[toon\b([\s\S]*?)\]/i;
+function moodToPassions(mood) {
+  const clean = (mood || "").toLowerCase().trim();
+  switch (clean) {
+    case "blush":
+    case "horny":
+    case "lust":
+      return { arousal: 70 };
+    case "angry":
+    case "rage":
+    case "mad":
+      return { anger: 60 };
+    case "scared":
+    case "fear":
+    case "shock":
+      return { fear: 60 };
+    case "smile":
+    case "joy":
+    case "happy":
+    case "laugh":
+      return { joy: 60 };
+    case "sad":
+    case "cry":
+    case "sorrow":
+      return { sadness: 60 };
+    case "suspicious":
+    case "doubt":
+    case "glare":
+      return { suspicion: 60 };
+    default:
+      return { arousal: 0, anger: 0, fear: 0, joy: 0, sadness: 0, suspicion: 0 };
+  }
+}
+function encodeToonState(ledger) {
+  if (!ledger)
+    return `scene: place:default
+actors[0]{id,mood,slot,outfit}:`;
+  const lines = [];
+  const place = ledger.scene?.place || "default";
+  const time = ledger.clock?.t || ledger.scene?.time || "";
+  lines.push(`scene: place:${place}${time ? ` time:${time}` : ""}`);
+  const actorEntries = Object.entries(ledger.actors || {});
+  const count = actorEntries.length;
+  lines.push(`actors[${count}]{id,mood,slot,outfit}:`);
+  for (const [id, actor] of actorEntries) {
+    const mood = resolveDominantEmotion(actor.passions);
+    const slot = actor.slot || (id === "user" ? "left" : "center");
+    const outfit = resolveOutfitName(actor);
+    lines.push(` ${id},${mood},${slot},${outfit}`);
+  }
+  return lines.join(`
+`);
+}
+function extractToonRaw(content) {
+  if (!content)
+    return null;
+  const commentMatch = TOON_COMMENT_RE2.exec(content);
+  if (commentMatch && commentMatch[1])
+    return commentMatch[1].trim();
+  const bracketMatch = TOON_BRACKET_RE2.exec(content);
+  if (bracketMatch && bracketMatch[1])
+    return bracketMatch[1].trim();
+  const fenceMatch = TOON_FENCE_RE.exec(content);
+  if (fenceMatch && fenceMatch[1] && /actors\[|scene:/i.test(fenceMatch[1])) {
+    return fenceMatch[1].trim();
+  }
+  return null;
+}
+function parseToonDelta(toonText) {
+  if (!toonText || !toonText.trim())
+    return null;
+  const lines = toonText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0 && !l.startsWith("#"));
+  if (lines.length === 0)
+    return null;
+  const result = {};
+  let currentTable = null;
+  for (const line of lines) {
+    const tableHeaderMatch = /^([A-Za-z0-9_]+)\[\d*\]\{([^}]+)\}:?$/.exec(line);
+    if (tableHeaderMatch) {
+      const tableName = tableHeaderMatch[1].toLowerCase();
+      const columns = tableHeaderMatch[2].split(",").map((c) => c.trim().toLowerCase());
+      currentTable = { name: tableName, columns };
+      continue;
+    }
+    if (currentTable && currentTable.name === "actors" && line.includes(",")) {
+      const values = line.split(",").map((v) => v.trim());
+      const rowData = {};
+      currentTable.columns.forEach((col, idx) => {
+        rowData[col] = values[idx] || "";
+      });
+      const actorId = rowData.id || rowData.actor || rowData.name;
+      if (actorId) {
+        if (!result.actors)
+          result.actors = {};
+        const passions = rowData.mood ? moodToPassions(rowData.mood) : undefined;
+        const actorDelta = {};
+        if (passions)
+          actorDelta.passions = passions;
+        if (rowData.outfit) {
+          actorDelta.outfit = { state: rowData.outfit, top: rowData.outfit };
+        }
+        if (rowData.slot) {
+          actorDelta.slot = rowData.slot;
+        }
+        result.actors[actorId] = actorDelta;
+      }
+      continue;
+    }
+    if (/^scene\s*:/i.test(line)) {
+      currentTable = null;
+      if (!result.scene)
+        result.scene = {};
+      const rest = line.replace(/^scene\s*:\s*/i, "").trim();
+      const tokens = rest.split(/\s+/);
+      for (const token of tokens) {
+        const colonIdx = token.indexOf(":");
+        if (colonIdx > 0) {
+          const k = token.slice(0, colonIdx).toLowerCase();
+          const v = token.slice(colonIdx + 1).trim();
+          if (k === "place")
+            result.scene.place = v;
+          if (k === "time")
+            result.scene.time = v;
+          if (k === "weather")
+            result.scene.weather = v;
+        } else if (!result.scene.place && token) {
+          result.scene.place = token;
+        }
+      }
+      continue;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+// src/backend/rulebook.ts
+var RULESET_BOOK_NAME = "lumivn-ruleset";
+var knownRulebookEntryIds = new Set;
+var knownRulebookBookIds = new Set;
+function isRulesetBookName(name) {
+  if (!name)
+    return false;
+  return name.trim().toLowerCase().startsWith(RULESET_BOOK_NAME);
+}
+function isRulesetEntryTitle(comment) {
+  if (!comment)
+    return false;
+  const c = comment.trim().toLowerCase();
+  return c.startsWith("lumivn-ruleset") || c.startsWith("[lumivn]") || c.startsWith("lumivn ·");
+}
+async function ensureCharacterRulebook(spindle2, characterId, manifest, userId) {
+  try {
+    const character = await spindle2.characters.get(characterId, userId);
+    if (!character)
+      return null;
+    if (Array.isArray(character.world_book_ids)) {
+      for (const bookId of character.world_book_ids) {
+        const book = await spindle2.world_books.get(bookId, userId).catch(() => null);
+        if (book && isRulesetBookName(book.name)) {
+          knownRulebookBookIds.add(book.id);
+          return book.id;
+        }
+      }
+    }
+    const book = await spindle2.world_books.create({
+      name: RULESET_BOOK_NAME,
+      description: `Visual novel stage definitions for ${character.name || characterId}. Managed by LumiVN.`,
+      metadata: { lumivn: { rulebook: 1 } }
+    }, userId);
+    knownRulebookBookIds.add(book.id);
+    const placeKeys = Object.keys(manifest.places || {});
+    const placesContent = placeKeys.length > 0 ? placeKeys.map((p) => `place: ${p}`).join(`
+`) : `place: default
+place: room
+place: outdoors`;
+    const pEntry = await spindle2.world_books.entries.create(book.id, {
+      comment: "lumivn-ruleset · Places",
+      content: `# Places and Stage Backgrounds
+${placesContent}`,
+      key: [],
+      disabled: true,
+      constant: false,
+      order_value: 10
+    }, userId);
+    knownRulebookEntryIds.add(pEntry.id);
+    const charKeys = Object.keys(manifest.characters || {});
+    const charContent = charKeys.length > 0 ? charKeys.map((c) => `character: ${c}`).join(`
+`) : `character: ${character.name?.toLowerCase().replace(/[^a-z0-9_-]/g, "_") || "char"}
+character: user`;
+    const cEntry = await spindle2.world_books.entries.create(book.id, {
+      comment: "lumivn-ruleset · Cast",
+      content: `# Stage Cast and Default Slots
+${charContent}`,
+      key: [],
+      disabled: true,
+      constant: false,
+      order_value: 20
+    }, userId);
+    knownRulebookEntryIds.add(cEntry.id);
+    const existingBookIds = character.world_book_ids || [];
+    await spindle2.characters.update(characterId, { world_book_ids: [...existingBookIds, book.id] }, userId);
+    spindle2.log?.info?.(`[LumiVN] Created and attached ${RULESET_BOOK_NAME} to character ${character.name}`);
+    return book.id;
+  } catch (e) {
+    spindle2.log?.warn?.(`[LumiVN] Failed to ensure character rulebook: ${e}`);
+    return null;
+  }
+}
+
 // src/backend/director.ts
 var DIRECTOR_DIRECTIVES = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
 function extractChatId(context) {
@@ -3793,21 +4054,24 @@ async function evaluateDirectorInterceptor(messages, context, getChatState, getD
   if (messages.some((m) => typeof m.content === "string" && (m.content.includes(activeDirective) || m.content.includes("[LumiVN Living World Director Guidance]")))) {
     return messages;
   }
+  const toonStateSummary = encodeToonState(currentState);
   const systemGuard = `[LumiVN Living World Director Guidance]
 ${activeDirective}
+
+[LumiVN Stage State (TOON)]
+${toonStateSummary}
 
 [OUTPUT FORMAT REQUIREMENT]
 Line 1: Return the director JSON object (optionally inside <details><summary>\uD83C\uDFAC Director</summary>...</details>):
 {"director_note":"FIRST BEAT: ... WORLD: ... OFFSCREEN: ... PRESSURE: ... PRESENT: ... VOICE: ... TEXTURE: ... CANON: ... END ON: ...","thread_label":"<3-6 words thread title>"}
 
-Follow immediately on Line 2 with the preset contract:
-<details><summary>\uD83E\uDDE0 Scene Logic</summary>
-...
-</details>
-(Prose text here)
-<details><summary>\uD83D\uDCCA Ledger</summary>
-...
-</details>`;
+Follow with standard narrative prose.
+To update scene visuals or actor expressions, you may append a compact TOON delta tag at the end (or legacy <details>Ledger</details>):
+<!--toon
+scene: place:<place_id>
+actors[N]{id,mood,slot}:
+ <actor_id>,<mood>,<slot>
+-->`;
   const generationId = context?.generationId;
   if (onInjectedDirective) {
     if (generationId)
@@ -4014,6 +4278,13 @@ if (typeof spindle.registerInterceptor === "function") {
   spindle.registerInterceptor(handleInterceptor, 150);
   spindle.log.info("[LumiVN] Living World Director interceptor registered at priority 150.");
 }
+if (typeof spindle.registerWorldInfoInterceptor === "function") {
+  spindle.registerWorldInfoInterceptor(async (ctx) => {
+    const disabled = (ctx?.entries || []).filter((e) => knownRulebookEntryIds.has(e.id) || knownRulebookBookIds.has(e.world_book_id) || isRulesetEntryTitle(e.comment)).map((e) => e.id);
+    return disabled.length ? { disabled } : undefined;
+  }, 10);
+  spindle.log.info("[LumiVN] World Info interceptor registered for lumivn-ruleset gating.");
+}
 var spindleAnyObj = spindle;
 if (typeof spindleAnyObj.on === "function") {
   spindleAnyObj.on("CHAT_SWITCHED", (payload) => {
@@ -4080,6 +4351,9 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
       const activeChat = await spindle.chats.get(chatId);
       if (activeChat) {
         characterId = activeChat.character_id;
+        if (characterId) {
+          storage.getManifest().then((m) => ensureCharacterRulebook(spindle, characterId, m)).catch(() => {});
+        }
       }
     } catch {}
     if (overrideContent && messageId) {
@@ -4120,11 +4394,20 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
         }
       }
     } catch (e) {}
-    const rawLedger = extractLedgerRaw(targetMessage.content);
+    const rawToon = extractToonRaw(targetMessage.content);
+    const rawLedger = rawToon ? null : extractLedgerRaw(targetMessage.content);
     let cumulativeLedger = await storage.getChatState(chatId);
     const prevLedger = cumulativeLedger ? JSON.parse(JSON.stringify(cumulativeLedger)) : null;
-    if (rawLedger) {
-      const delta = parseLedgerYaml(rawLedger);
+    let delta = null;
+    if (rawToon) {
+      delta = parseToonDelta(rawToon);
+    } else if (rawLedger) {
+      delta = parseLedgerYaml(rawLedger);
+    } else {
+      const prose = extractProse(targetMessage.content);
+      delta = inferProseEmotionDelta(prose, characterId || "char");
+    }
+    if (delta) {
       cumulativeLedger = deepMergeLedger(cumulativeLedger, delta);
     } else if (!cumulativeLedger) {
       cumulativeLedger = deepMergeLedger(null, {});
@@ -4185,7 +4468,7 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
         timestamp: new Date().toLocaleTimeString(),
         chatId,
         messageId: targetMessage.id,
-        hasLedger: Boolean(rawLedger),
+        hasLedger: Boolean(rawLedger || rawToon || delta),
         placeId: cumulativeLedger?.scene?.place || "default",
         participants: presentation.characters.map((c) => `${c.name} (${c.slot}) [${c.spriteUrl?.startsWith("data:") ? "Fallback SVG" : c.spriteUrl || "none"}]`),
         bgUrl: presentation.background.url

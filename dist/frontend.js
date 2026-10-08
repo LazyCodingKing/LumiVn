@@ -33642,8 +33642,10 @@ var SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary
 var DIRECTOR_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Director.*?<\/summary>[\s\S]*?<\/details>/gi;
 var DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"[\s\S]*?\}\s*/gi;
 var PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
+var TOON_COMMENT_RE = /<!--\s*toon\b[\s\S]*?-->/gi;
+var TOON_BRACKET_RE = /\[toon\b[\s\S]*?\]/gi;
 function extractProse(rawContent) {
-  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(DIRECTOR_DETAILS_RE, "").replace(LEDGER_DETAILS_RE, "").replace(DIRECTOR_JSON_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
+  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(DIRECTOR_DETAILS_RE, "").replace(LEDGER_DETAILS_RE, "").replace(DIRECTOR_JSON_RE, "").replace(TOON_COMMENT_RE, "").replace(TOON_BRACKET_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
   return cleaned;
 }
 function extractParagraphs(prose) {
@@ -33850,6 +33852,53 @@ function deepMergeLedger(base, delta) {
     }
   }
   return merged;
+}
+function inferProseEmotionDelta(prose, defaultActor = "char") {
+  if (!prose || !prose.trim())
+    return null;
+  const paragraphs = extractParagraphs(prose);
+  if (paragraphs.length === 0)
+    return null;
+  let targetSpeaker = defaultActor;
+  for (let i = paragraphs.length - 1;i >= 0; i--) {
+    const detected = detectSpeaker(paragraphs[i], defaultActor);
+    if (detected.speaker && detected.speaker !== "Narrator") {
+      targetSpeaker = detected.speaker.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      break;
+    }
+  }
+  const lowerProse = prose.toLowerCase();
+  let inferredEmotion = null;
+  if (/\b(blush\w*|fluster\w*|flush\w*|shy\w*|embarrass\w*|heat rises)\b/i.test(lowerProse)) {
+    inferredEmotion = "blush";
+  } else if (/\b(smile\w*|laugh\w*|giggle\w*|grin\w*|chuckle\w*|warmly)\b/i.test(lowerProse)) {
+    inferredEmotion = "smile";
+  } else if (/\b(angr\w*|shout\w*|frown\w*|glar\w*|growl\w*|scowl\w*|snarl\w*|fum\w*)\b/i.test(lowerProse)) {
+    inferredEmotion = "angry";
+  } else if (/\b(scar\w*|fear\w*|trembl\w*|shiver\w*|gasp\w*|wide-eyed|shriek\w*)\b/i.test(lowerProse)) {
+    inferredEmotion = "scared";
+  } else if (/\b(sad\w*|cr\w*|sob\w*|weep\w*|tear\w*|falter\w*|mourn\w*|sniffl\w*)\b/i.test(lowerProse)) {
+    inferredEmotion = "sad";
+  } else if (/\b(suspicio\w*|doubt\w*|squint\w*|narrowed eyes)\b/i.test(lowerProse)) {
+    inferredEmotion = "suspicious";
+  }
+  if (!inferredEmotion)
+    return null;
+  const passions = {
+    blush: { arousal: 60 },
+    smile: { joy: 60 },
+    angry: { anger: 60 },
+    scared: { fear: 60 },
+    sad: { sadness: 60 },
+    suspicious: { suspicion: 60 }
+  }[inferredEmotion] || {};
+  return {
+    actors: {
+      [targetSpeaker]: {
+        passions
+      }
+    }
+  };
 }
 
 // src/backend/asset-resolver.ts

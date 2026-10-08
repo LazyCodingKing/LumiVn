@@ -8,6 +8,8 @@ const SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summa
 const DIRECTOR_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Director.*?<\/summary>[\s\S]*?<\/details>/gi;
 const DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"[\s\S]*?\}\s*/gi;
 const PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
+const TOON_COMMENT_RE = /<!--\s*toon\b[\s\S]*?-->/gi;
+const TOON_BRACKET_RE = /\[toon\b[\s\S]*?\]/gi;
 
 /**
  * Extracts and cleans the narrative prose from the raw assistant message.
@@ -19,6 +21,8 @@ export function extractProse(rawContent: string): string {
     .replace(DIRECTOR_DETAILS_RE, "")
     .replace(LEDGER_DETAILS_RE, "")
     .replace(DIRECTOR_JSON_RE, "")
+    .replace(TOON_COMMENT_RE, "")
+    .replace(TOON_BRACKET_RE, "")
     .replace(PLAYER_TRACKING_RE, "")
     .trim();
 
@@ -284,3 +288,64 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
 
   return merged;
 }
+
+/**
+ * Infers emotion and active speaker deltas directly from pure narrative prose
+ * when no structured tags (TOON or Ledger) are emitted by the model.
+ */
+export function inferProseEmotionDelta(
+  prose: string,
+  defaultActor = "char"
+): Partial<LedgerData> | null {
+  if (!prose || !prose.trim()) return null;
+
+  const paragraphs = extractParagraphs(prose);
+  if (paragraphs.length === 0) return null;
+
+  // Determine active speaker from latest dialogue or paragraph
+  let targetSpeaker = defaultActor;
+  for (let i = paragraphs.length - 1; i >= 0; i--) {
+    const detected = detectSpeaker(paragraphs[i]!, defaultActor);
+    if (detected.speaker && detected.speaker !== "Narrator") {
+      targetSpeaker = detected.speaker.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      break;
+    }
+  }
+
+  const lowerProse = prose.toLowerCase();
+  let inferredEmotion: string | null = null;
+
+  if (/\b(blush\w*|fluster\w*|flush\w*|shy\w*|embarrass\w*|heat rises)\b/i.test(lowerProse)) {
+    inferredEmotion = "blush";
+  } else if (/\b(smile\w*|laugh\w*|giggle\w*|grin\w*|chuckle\w*|warmly)\b/i.test(lowerProse)) {
+    inferredEmotion = "smile";
+  } else if (/\b(angr\w*|shout\w*|frown\w*|glar\w*|growl\w*|scowl\w*|snarl\w*|fum\w*)\b/i.test(lowerProse)) {
+    inferredEmotion = "angry";
+  } else if (/\b(scar\w*|fear\w*|trembl\w*|shiver\w*|gasp\w*|wide-eyed|shriek\w*)\b/i.test(lowerProse)) {
+    inferredEmotion = "scared";
+  } else if (/\b(sad\w*|cr\w*|sob\w*|weep\w*|tear\w*|falter\w*|mourn\w*|sniffl\w*)\b/i.test(lowerProse)) {
+    inferredEmotion = "sad";
+  } else if (/\b(suspicio\w*|doubt\w*|squint\w*|narrowed eyes)\b/i.test(lowerProse)) {
+    inferredEmotion = "suspicious";
+  }
+
+  if (!inferredEmotion) return null;
+
+  const passions: Record<string, number> = {
+    blush: { arousal: 60 },
+    smile: { joy: 60 },
+    angry: { anger: 60 },
+    scared: { fear: 60 },
+    sad: { sadness: 60 },
+    suspicious: { suspicion: 60 },
+  }[inferredEmotion] || {};
+
+  return {
+    actors: {
+      [targetSpeaker]: {
+        passions,
+      } as ActorDossier,
+    },
+  };
+}
+

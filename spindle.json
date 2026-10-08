@@ -11,7 +11,8 @@
     "images",
     "chats",
     "characters",
-    "interceptor"
+    "interceptor",
+    "world_books"
   ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js",

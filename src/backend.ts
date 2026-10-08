@@ -16,7 +16,18 @@ import {
   parseLedgerYaml,
   deepMergeLedger,
   extractProse,
+  inferProseEmotionDelta,
 } from "./backend/ledger-parser.js";
+import {
+  extractToonRaw,
+  parseToonDelta,
+} from "./backend/toon-parser.js";
+import {
+  knownRulebookEntryIds,
+  knownRulebookBookIds,
+  isRulesetEntryTitle,
+  ensureCharacterRulebook,
+} from "./backend/rulebook.js";
 import {
   evaluateDirectorInterceptor,
   processBPlots,
@@ -56,6 +67,16 @@ async function handleInterceptor(
 if (typeof (spindle as any).registerInterceptor === "function") {
   (spindle as any).registerInterceptor(handleInterceptor, 150);
   spindle.log.info("[LumiVN] Living World Director interceptor registered at priority 150.");
+}
+
+if (typeof (spindle as any).registerWorldInfoInterceptor === "function") {
+  (spindle as any).registerWorldInfoInterceptor(async (ctx: any) => {
+    const disabled = (ctx?.entries || [])
+      .filter((e: any) => knownRulebookEntryIds.has(e.id) || knownRulebookBookIds.has(e.world_book_id) || isRulesetEntryTitle(e.comment))
+      .map((e: any) => e.id);
+    return disabled.length ? { disabled } : undefined;
+  }, 10);
+  spindle.log.info("[LumiVN] World Info interceptor registered for lumivn-ruleset gating.");
 }
 
 const spindleAnyObj = spindle as any;
@@ -138,6 +159,9 @@ async function processChatTurn(
       const activeChat = await spindle.chats.get(chatId);
       if (activeChat) {
         characterId = activeChat.character_id;
+        if (characterId) {
+          void storage.getManifest().then((m) => ensureCharacterRulebook(spindle, characterId!, m)).catch(() => {});
+        }
       }
     } catch {
       // Ignore if chat lookup fails
@@ -188,15 +212,25 @@ async function processChatTurn(
       // Ignore malformed JSON chunks
     }
 
-    // Extract Ledger YAML
-    const rawLedger = extractLedgerRaw(targetMessage.content);
+    // Extract State Delta: 1. TOON format, 2. Legacy YAML Ledger, 3. Prose Heuristics Fallback
+    const rawToon = extractToonRaw(targetMessage.content);
+    const rawLedger = rawToon ? null : extractLedgerRaw(targetMessage.content);
     let cumulativeLedger = await storage.getChatState(chatId);
     const prevLedger: LedgerData | null = cumulativeLedger
       ? JSON.parse(JSON.stringify(cumulativeLedger))
       : null;
 
-    if (rawLedger) {
-      const delta = parseLedgerYaml(rawLedger);
+    let delta: Partial<LedgerData> | null = null;
+    if (rawToon) {
+      delta = parseToonDelta(rawToon);
+    } else if (rawLedger) {
+      delta = parseLedgerYaml(rawLedger);
+    } else {
+      const prose = extractProse(targetMessage.content);
+      delta = inferProseEmotionDelta(prose, characterId || "char");
+    }
+
+    if (delta) {
       cumulativeLedger = deepMergeLedger(cumulativeLedger, delta);
     } else if (!cumulativeLedger) {
       // Create empty baseline
@@ -289,7 +323,7 @@ async function processChatTurn(
         timestamp: new Date().toLocaleTimeString(),
         chatId,
         messageId: targetMessage.id,
-        hasLedger: Boolean(rawLedger),
+        hasLedger: Boolean(rawLedger || rawToon || delta),
         placeId: cumulativeLedger?.scene?.place || "default",
         participants: presentation.characters.map(
           (c) => `${c.name} (${c.slot}) [${c.spriteUrl?.startsWith("data:") ? "Fallback SVG" : (c.spriteUrl || "none")}]`
