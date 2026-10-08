@@ -32,6 +32,7 @@ import {
   evaluateDirectorInterceptor,
   processBPlots,
   computeDirectorImpactDiff,
+  extractChatId,
 } from "./backend/director.js";
 import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry, DirectorNoteData } from "./shared/types.js";
 
@@ -55,18 +56,31 @@ async function handleInterceptor(
   messages: LlmMessageDTO[],
   context: unknown
 ): Promise<LlmMessageDTO[] | InterceptorResultDTO> {
+  let effectiveChatId = extractChatId(context);
+  if (!effectiveChatId) {
+    effectiveChatId = lastActiveChatId || (await resolveEffectiveChatId());
+  }
+
+  const effectiveContext =
+    context && typeof context === "object"
+      ? { ...context, chatId: effectiveChatId }
+      : { chatId: effectiveChatId };
+
   return evaluateDirectorInterceptor(
     messages,
-    context,
-    (cid) => storage.getChatState(cid),
+    effectiveContext,
+    async (cid) => {
+      const state = await storage.getChatState(cid);
+      return state || { scene: { place: "default" }, actors: {} };
+    },
     () => storage.getDirectorSettings(),
     (key, directive) => injectedDirectives.set(key, directive)
   );
 }
 
 if (typeof (spindle as any).registerInterceptor === "function") {
-  (spindle as any).registerInterceptor(handleInterceptor, 150);
-  spindle.log.info("[LumiVN] Living World Director interceptor registered at priority 150.");
+  (spindle as any).registerInterceptor(handleInterceptor, 50);
+  spindle.log.info("[LumiVN] Living World Director interceptor registered at priority 50.");
 }
 
 if (typeof (spindle as any).registerWorldInfoInterceptor === "function") {
