@@ -21,6 +21,8 @@ const storage = new StorageManager(spindle);
 const resolver = new AssetResolver(spindle, storage);
 
 let lastActiveChatId: string | null = null;
+let isStageOpen = false;
+const activeVnChats = new Set<string>();
 
 const spindleAnyObj = spindle as any;
 if (typeof spindleAnyObj.on === "function") {
@@ -74,14 +76,24 @@ spindle.commands.register([
 
 spindle.commands.onInvoked(async (commandId) => {
   if (commandId === "lumivn_launch") {
+    isStageOpen = true;
     spindle.sendToFrontend({ type: "vn_force_open" });
   } else if (commandId === "lumivn_diagnostics") {
     await spindle.ui.openDrawerTab("vn_diagnostics");
   }
 });
 
-async function processChatTurn(chatId: string, messageId?: string, overrideContent?: string): Promise<void> {
+async function processChatTurn(
+  chatId: string,
+  messageId?: string,
+  overrideContent?: string,
+  force = false
+): Promise<void> {
   if (!chatId) return;
+
+  // View-Gating: Guard background chats when VN stage is not active
+  if (!isStageOpen && !force) return;
+  if (activeVnChats.size > 0 && !activeVnChats.has(chatId) && !force) return;
 
   try {
     let targetMessage: ChatMessageDTO | null = null;
@@ -104,12 +116,14 @@ async function processChatTurn(chatId: string, messageId?: string, overrideConte
         created_at: new Date().toISOString(),
       } as unknown as ChatMessageDTO;
     } else {
-      const messages = await spindle.chat.getMessages(chatId);
-      if (!messages || messages.length === 0) return;
+      // Bounded Message Fetching: Fetch at most 5 messages to avoid large tree memory bloat
+      const messages = await (spindle.chat as any).getMessages(chatId, { limit: 5 });
+      const boundedMessages = Array.isArray(messages) ? messages.slice(-5) : [];
+      if (boundedMessages.length === 0) return;
 
       // Find the latest assistant message
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const m = messages[i];
+      for (let i = boundedMessages.length - 1; i >= 0; i--) {
+        const m = boundedMessages[i];
         if (m && (m.role === "assistant" || !m.is_user)) {
           targetMessage = m;
           break;
@@ -177,19 +191,22 @@ async function processChatTurn(chatId: string, messageId?: string, overrideConte
 
 // ── Event Handlers ──
 spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
-  if (payload?.chatId) {
+  if (!isStageOpen) return;
+  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
     await processChatTurn(payload.chatId, payload.messageId);
   }
 });
 
 spindle.on("MESSAGE_SWIPED", async (payload: MessageSwipedPayloadDTO) => {
-  if (payload?.chatId) {
+  if (!isStageOpen) return;
+  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
     await processChatTurn(payload.chatId, payload.message?.id);
   }
 });
 
 spindle.on("SWIPE_EDITED", async (payload: SwipeEditedPayloadDTO) => {
-  if (payload?.chatId) {
+  if (!isStageOpen) return;
+  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
     await processChatTurn(payload.chatId, payload.message?.id);
   }
 });
@@ -197,7 +214,8 @@ spindle.on("SWIPE_EDITED", async (payload: SwipeEditedPayloadDTO) => {
 const spindleAny = spindle as any;
 if (typeof spindleAny.on === "function") {
   spindleAny.on("MESSAGE_EDITED", async (payload: { chatId?: string; messageId?: string }) => {
-    if (payload?.chatId) {
+    if (!isStageOpen) return;
+    if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
       await processChatTurn(payload.chatId, payload.messageId);
     }
   });
@@ -211,11 +229,27 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
   const type = String(payload.type);
 
   switch (type) {
+    case "vn_stage_opened": {
+      isStageOpen = true;
+      const cid = String(payload.chatId || "");
+      if (cid) activeVnChats.add(cid);
+      break;
+    }
+
+    case "vn_stage_closed": {
+      const cid = String(payload.chatId || "");
+      if (cid) activeVnChats.delete(cid);
+      if (activeVnChats.size === 0) isStageOpen = false;
+      break;
+    }
+
     case "vn_get_state":
     case "vn_init": {
+      isStageOpen = true;
       const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       if (chatId) {
-        await processChatTurn(chatId);
+        activeVnChats.add(chatId);
+        await processChatTurn(chatId, undefined, undefined, true);
       } else {
         spindle.sendToFrontend({
           type: "vn_error",

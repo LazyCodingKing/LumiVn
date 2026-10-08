@@ -3625,6 +3625,8 @@ class AssetResolver {
 var storage = new StorageManager(spindle);
 var resolver = new AssetResolver(spindle, storage);
 var lastActiveChatId = null;
+var isStageOpen = false;
+var activeVnChats = new Set;
 var spindleAnyObj = spindle;
 if (typeof spindleAnyObj.on === "function") {
   spindleAnyObj.on("CHAT_SWITCHED", (payload) => {
@@ -3671,13 +3673,18 @@ spindle.commands.register([
 ]);
 spindle.commands.onInvoked(async (commandId) => {
   if (commandId === "lumivn_launch") {
+    isStageOpen = true;
     spindle.sendToFrontend({ type: "vn_force_open" });
   } else if (commandId === "lumivn_diagnostics") {
     await spindle.ui.openDrawerTab("vn_diagnostics");
   }
 });
-async function processChatTurn(chatId, messageId, overrideContent) {
+async function processChatTurn(chatId, messageId, overrideContent, force = false) {
   if (!chatId)
+    return;
+  if (!isStageOpen && !force)
+    return;
+  if (activeVnChats.size > 0 && !activeVnChats.has(chatId) && !force)
     return;
   try {
     let targetMessage = null;
@@ -3696,11 +3703,12 @@ async function processChatTurn(chatId, messageId, overrideContent) {
         created_at: new Date().toISOString()
       };
     } else {
-      const messages = await spindle.chat.getMessages(chatId);
-      if (!messages || messages.length === 0)
+      const messages = await spindle.chat.getMessages(chatId, { limit: 5 });
+      const boundedMessages = Array.isArray(messages) ? messages.slice(-5) : [];
+      if (boundedMessages.length === 0)
         return;
-      for (let i = messages.length - 1;i >= 0; i--) {
-        const m = messages[i];
+      for (let i = boundedMessages.length - 1;i >= 0; i--) {
+        const m = boundedMessages[i];
         if (m && (m.role === "assistant" || !m.is_user)) {
           targetMessage = m;
           break;
@@ -3746,24 +3754,32 @@ async function processChatTurn(chatId, messageId, overrideContent) {
   }
 }
 spindle.on("GENERATION_ENDED", async (payload) => {
-  if (payload?.chatId) {
+  if (!isStageOpen)
+    return;
+  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
     await processChatTurn(payload.chatId, payload.messageId);
   }
 });
 spindle.on("MESSAGE_SWIPED", async (payload) => {
-  if (payload?.chatId) {
+  if (!isStageOpen)
+    return;
+  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
     await processChatTurn(payload.chatId, payload.message?.id);
   }
 });
 spindle.on("SWIPE_EDITED", async (payload) => {
-  if (payload?.chatId) {
+  if (!isStageOpen)
+    return;
+  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
     await processChatTurn(payload.chatId, payload.message?.id);
   }
 });
 var spindleAny = spindle;
 if (typeof spindleAny.on === "function") {
   spindleAny.on("MESSAGE_EDITED", async (payload) => {
-    if (payload?.chatId) {
+    if (!isStageOpen)
+      return;
+    if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
       await processChatTurn(payload.chatId, payload.messageId);
     }
   });
@@ -3774,11 +3790,28 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
     return;
   const type = String(payload.type);
   switch (type) {
+    case "vn_stage_opened": {
+      isStageOpen = true;
+      const cid = String(payload.chatId || "");
+      if (cid)
+        activeVnChats.add(cid);
+      break;
+    }
+    case "vn_stage_closed": {
+      const cid = String(payload.chatId || "");
+      if (cid)
+        activeVnChats.delete(cid);
+      if (activeVnChats.size === 0)
+        isStageOpen = false;
+      break;
+    }
     case "vn_get_state":
     case "vn_init": {
+      isStageOpen = true;
       const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       if (chatId) {
-        await processChatTurn(chatId);
+        activeVnChats.add(chatId);
+        await processChatTurn(chatId, undefined, undefined, true);
       } else {
         spindle.sendToFrontend({
           type: "vn_error",

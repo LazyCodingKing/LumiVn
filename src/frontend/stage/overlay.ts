@@ -61,6 +61,7 @@ export class StageOverlay {
       onAction: (actionText) => this.dispatchAction(actionText),
       audioEngine: this.audioEngine,
       ttsEngine: this.ttsEngine,
+      isOverlayActive: () => this.isActive(),
       onEditMessage: (messageId, content) => {
         const activeChat = (this.ctx as any).getActiveChat?.();
         const targetChatId = this.currentChatId || activeChat?.id || activeChat?.chatId;
@@ -157,6 +158,11 @@ export class StageOverlay {
     const targetChatId = this.resolveChatId();
 
     this.ctx.sendToBackend({
+      type: "vn_stage_opened",
+      chatId: targetChatId || "",
+    });
+
+    this.ctx.sendToBackend({
       type: "vn_get_state",
       chatId: targetChatId || "",
     });
@@ -165,6 +171,12 @@ export class StageOverlay {
   public deactivate(): void {
     if (!this.active) return;
     this.active = false;
+
+    const targetChatId = this.resolveChatId();
+    this.ctx.sendToBackend({
+      type: "vn_stage_closed",
+      chatId: targetChatId || "",
+    });
 
     // Destroy overrides immediately to restore native chat
     for (const h of this.overrideHandles) {

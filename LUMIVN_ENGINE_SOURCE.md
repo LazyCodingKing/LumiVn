@@ -94,6 +94,8 @@ const storage = new StorageManager(spindle);
 const resolver = new AssetResolver(spindle, storage);
 
 let lastActiveChatId: string | null = null;
+let isStageOpen = false;
+const activeVnChats = new Set<string>();
 
 const spindleAnyObj = spindle as any;
 if (typeof spindleAnyObj.on === "function") {
@@ -147,14 +149,24 @@ spindle.commands.register([
 
 spindle.commands.onInvoked(async (commandId) => {
   if (commandId === "lumivn_launch") {
+    isStageOpen = true;
     spindle.sendToFrontend({ type: "vn_force_open" });
   } else if (commandId === "lumivn_diagnostics") {
     await spindle.ui.openDrawerTab("vn_diagnostics");
   }
 });
 
-async function processChatTurn(chatId: string, messageId?: string, overrideContent?: string): Promise<void> {
+async function processChatTurn(
+  chatId: string,
+  messageId?: string,
+  overrideContent?: string,
+  force = false
+): Promise<void> {
   if (!chatId) return;
+
+  // View-Gating: Guard background chats when VN stage is not active
+  if (!isStageOpen && !force) return;
+  if (activeVnChats.size > 0 && !activeVnChats.has(chatId) && !force) return;
 
   try {
     let targetMessage: ChatMessageDTO | null = null;
@@ -177,12 +189,14 @@ async function processChatTurn(chatId: string, messageId?: string, overrideConte
         created_at: new Date().toISOString(),
       } as unknown as ChatMessageDTO;
     } else {
-      const messages = await spindle.chat.getMessages(chatId);
-      if (!messages || messages.length === 0) return;
+      // Bounded Message Fetching: Fetch at most 5 messages to avoid large tree memory bloat
+      const messages = await (spindle.chat as any).getMessages(chatId, { limit: 5 });
+      const boundedMessages = Array.isArray(messages) ? messages.slice(-5) : [];
+      if (boundedMessages.length === 0) return;
 
       // Find the latest assistant message
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const m = messages[i];
+      for (let i = boundedMessages.length - 1; i >= 0; i--) {
+        const m = boundedMessages[i];
         if (m && (m.role === "assistant" || !m.is_user)) {
           targetMessage = m;
           break;
@@ -250,19 +264,22 @@ async function processChatTurn(chatId: string, messageId?: string, overrideConte
 
 // ── Event Handlers ──
 spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
-  if (payload?.chatId) {
+  if (!isStageOpen) return;
+  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
     await processChatTurn(payload.chatId, payload.messageId);
   }
 });
 
 spindle.on("MESSAGE_SWIPED", async (payload: MessageSwipedPayloadDTO) => {
-  if (payload?.chatId) {
+  if (!isStageOpen) return;
+  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
     await processChatTurn(payload.chatId, payload.message?.id);
   }
 });
 
 spindle.on("SWIPE_EDITED", async (payload: SwipeEditedPayloadDTO) => {
-  if (payload?.chatId) {
+  if (!isStageOpen) return;
+  if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
     await processChatTurn(payload.chatId, payload.message?.id);
   }
 });
@@ -270,7 +287,8 @@ spindle.on("SWIPE_EDITED", async (payload: SwipeEditedPayloadDTO) => {
 const spindleAny = spindle as any;
 if (typeof spindleAny.on === "function") {
   spindleAny.on("MESSAGE_EDITED", async (payload: { chatId?: string; messageId?: string }) => {
-    if (payload?.chatId) {
+    if (!isStageOpen) return;
+    if (payload?.chatId && (activeVnChats.has(payload.chatId) || activeVnChats.size === 0)) {
       await processChatTurn(payload.chatId, payload.messageId);
     }
   });
@@ -284,11 +302,27 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
   const type = String(payload.type);
 
   switch (type) {
+    case "vn_stage_opened": {
+      isStageOpen = true;
+      const cid = String(payload.chatId || "");
+      if (cid) activeVnChats.add(cid);
+      break;
+    }
+
+    case "vn_stage_closed": {
+      const cid = String(payload.chatId || "");
+      if (cid) activeVnChats.delete(cid);
+      if (activeVnChats.size === 0) isStageOpen = false;
+      break;
+    }
+
     case "vn_get_state":
     case "vn_init": {
+      isStageOpen = true;
       const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       if (chatId) {
-        await processChatTurn(chatId);
+        activeVnChats.add(chatId);
+        await processChatTurn(chatId, undefined, undefined, true);
       } else {
         spindle.sendToFrontend({
           type: "vn_error",
@@ -5919,6 +5953,7 @@ export interface DialogueBoxOptions {
   onEditMessage?: (messageId: string, content: string) => void;
   onParagraphChange?: (paraIndex: number, speaker: string) => void;
   onBeatChange?: (beat: DialogueBeat, index: number) => void;
+  isOverlayActive?: () => boolean;
   audioEngine?: VnAudioEngine;
   ttsEngine?: VnTtsEngine;
   knownActors?: string[];
@@ -5953,6 +5988,8 @@ export class DialogueBox {
   private onAction: (actionText: string) => void;
   private onParagraphChange?: (paraIndex: number, speaker: string) => void;
   private onBeatChange?: (beat: DialogueBeat, index: number) => void;
+  private isOverlayActive?: () => boolean;
+  private onKeydown?: (e: KeyboardEvent) => void;
   private audioEngine?: VnAudioEngine;
   private ttsEngine?: VnTtsEngine;
   private knownActors: string[] = [];
@@ -5961,6 +5998,7 @@ export class DialogueBox {
     this.onAction = options.onAction;
     this.onParagraphChange = options.onParagraphChange;
     this.onBeatChange = options.onBeatChange;
+    this.isOverlayActive = options.isOverlayActive;
     this.audioEngine = options.audioEngine;
     this.ttsEngine = options.ttsEngine;
     this.knownActors = options.knownActors || [];
@@ -6136,7 +6174,19 @@ export class DialogueBox {
       this.advance();
     });
 
-    window.addEventListener("keydown", (e) => {
+    this.onKeydown = (e: KeyboardEvent) => {
+      // 1. Strict Stage / Overlay Active Gate
+      if (this.isOverlayActive && !this.isOverlayActive()) {
+        return;
+      }
+      if (!this.root.isConnected || this.root.offsetParent === null) {
+        return;
+      }
+      const stageOverlay = this.root.closest<HTMLElement>(".vn-stage-overlay");
+      if (stageOverlay && stageOverlay.style.display === "none") {
+        return;
+      }
+
       if (
         document.activeElement?.tagName === "INPUT" ||
         document.activeElement?.tagName === "TEXTAREA"
@@ -6174,7 +6224,9 @@ export class DialogueBox {
         e.preventDefault();
         this.rewind();
       }
-    });
+    };
+
+    window.addEventListener("keydown", this.onKeydown);
   }
 
   public setContent(speakerName: string, paragraphs: string[], messageId = ""): void {
@@ -6351,6 +6403,10 @@ export class DialogueBox {
   }
 
   public destroy(): void {
+    if (this.onKeydown) {
+      window.removeEventListener("keydown", this.onKeydown);
+      this.onKeydown = undefined;
+    }
     if (this.typeTimer) clearTimeout(this.typeTimer);
     if (this.autoTimer) clearTimeout(this.autoTimer);
     if (this.skipTimer) clearTimeout(this.skipTimer);
@@ -6427,6 +6483,7 @@ export class StageOverlay {
       onAction: (actionText) => this.dispatchAction(actionText),
       audioEngine: this.audioEngine,
       ttsEngine: this.ttsEngine,
+      isOverlayActive: () => this.isActive(),
       onEditMessage: (messageId, content) => {
         const activeChat = (this.ctx as any).getActiveChat?.();
         const targetChatId = this.currentChatId || activeChat?.id || activeChat?.chatId;
@@ -6523,6 +6580,11 @@ export class StageOverlay {
     const targetChatId = this.resolveChatId();
 
     this.ctx.sendToBackend({
+      type: "vn_stage_opened",
+      chatId: targetChatId || "",
+    });
+
+    this.ctx.sendToBackend({
       type: "vn_get_state",
       chatId: targetChatId || "",
     });
@@ -6531,6 +6593,12 @@ export class StageOverlay {
   public deactivate(): void {
     if (!this.active) return;
     this.active = false;
+
+    const targetChatId = this.resolveChatId();
+    this.ctx.sendToBackend({
+      type: "vn_stage_closed",
+      chatId: targetChatId || "",
+    });
 
     // Destroy overrides immediately to restore native chat
     for (const h of this.overrideHandles) {

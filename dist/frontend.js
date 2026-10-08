@@ -27023,6 +27023,8 @@ class DialogueBox {
   onAction;
   onParagraphChange;
   onBeatChange;
+  isOverlayActive;
+  onKeydown;
   audioEngine;
   ttsEngine;
   knownActors = [];
@@ -27030,6 +27032,7 @@ class DialogueBox {
     this.onAction = options.onAction;
     this.onParagraphChange = options.onParagraphChange;
     this.onBeatChange = options.onBeatChange;
+    this.isOverlayActive = options.isOverlayActive;
     this.audioEngine = options.audioEngine;
     this.ttsEngine = options.ttsEngine;
     this.knownActors = options.knownActors || [];
@@ -27173,7 +27176,17 @@ class DialogueBox {
       }
       this.advance();
     });
-    window.addEventListener("keydown", (e) => {
+    this.onKeydown = (e) => {
+      if (this.isOverlayActive && !this.isOverlayActive()) {
+        return;
+      }
+      if (!this.root.isConnected || this.root.offsetParent === null) {
+        return;
+      }
+      const stageOverlay = this.root.closest(".vn-stage-overlay");
+      if (stageOverlay && stageOverlay.style.display === "none") {
+        return;
+      }
       if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") {
         return;
       }
@@ -27196,7 +27209,8 @@ class DialogueBox {
         e.preventDefault();
         this.rewind();
       }
-    });
+    };
+    window.addEventListener("keydown", this.onKeydown);
   }
   setContent(speakerName, paragraphs, messageId = "") {
     if (this.typeTimer)
@@ -27360,6 +27374,10 @@ class DialogueBox {
     this.choiceModal.show(choices, prompt2);
   }
   destroy() {
+    if (this.onKeydown) {
+      window.removeEventListener("keydown", this.onKeydown);
+      this.onKeydown = undefined;
+    }
     if (this.typeTimer)
       clearTimeout(this.typeTimer);
     if (this.autoTimer)
@@ -34741,6 +34759,7 @@ class StageOverlay {
       onAction: (actionText) => this.dispatchAction(actionText),
       audioEngine: this.audioEngine,
       ttsEngine: this.ttsEngine,
+      isOverlayActive: () => this.isActive(),
       onEditMessage: (messageId, content) => {
         const activeChat = this.ctx.getActiveChat?.();
         const targetChatId = this.currentChatId || activeChat?.id || activeChat?.chatId;
@@ -34819,6 +34838,10 @@ class StageOverlay {
     this.root.style.display = "block";
     const targetChatId = this.resolveChatId();
     this.ctx.sendToBackend({
+      type: "vn_stage_opened",
+      chatId: targetChatId || ""
+    });
+    this.ctx.sendToBackend({
       type: "vn_get_state",
       chatId: targetChatId || ""
     });
@@ -34827,6 +34850,11 @@ class StageOverlay {
     if (!this.active)
       return;
     this.active = false;
+    const targetChatId = this.resolveChatId();
+    this.ctx.sendToBackend({
+      type: "vn_stage_closed",
+      chatId: targetChatId || ""
+    });
     for (const h of this.overrideHandles) {
       try {
         h.destroy();

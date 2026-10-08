@@ -10,6 +10,7 @@ export interface DialogueBoxOptions {
   onEditMessage?: (messageId: string, content: string) => void;
   onParagraphChange?: (paraIndex: number, speaker: string) => void;
   onBeatChange?: (beat: DialogueBeat, index: number) => void;
+  isOverlayActive?: () => boolean;
   audioEngine?: VnAudioEngine;
   ttsEngine?: VnTtsEngine;
   knownActors?: string[];
@@ -44,6 +45,8 @@ export class DialogueBox {
   private onAction: (actionText: string) => void;
   private onParagraphChange?: (paraIndex: number, speaker: string) => void;
   private onBeatChange?: (beat: DialogueBeat, index: number) => void;
+  private isOverlayActive?: () => boolean;
+  private onKeydown?: (e: KeyboardEvent) => void;
   private audioEngine?: VnAudioEngine;
   private ttsEngine?: VnTtsEngine;
   private knownActors: string[] = [];
@@ -52,6 +55,7 @@ export class DialogueBox {
     this.onAction = options.onAction;
     this.onParagraphChange = options.onParagraphChange;
     this.onBeatChange = options.onBeatChange;
+    this.isOverlayActive = options.isOverlayActive;
     this.audioEngine = options.audioEngine;
     this.ttsEngine = options.ttsEngine;
     this.knownActors = options.knownActors || [];
@@ -227,7 +231,19 @@ export class DialogueBox {
       this.advance();
     });
 
-    window.addEventListener("keydown", (e) => {
+    this.onKeydown = (e: KeyboardEvent) => {
+      // 1. Strict Stage / Overlay Active Gate
+      if (this.isOverlayActive && !this.isOverlayActive()) {
+        return;
+      }
+      if (!this.root.isConnected || this.root.offsetParent === null) {
+        return;
+      }
+      const stageOverlay = this.root.closest<HTMLElement>(".vn-stage-overlay");
+      if (stageOverlay && stageOverlay.style.display === "none") {
+        return;
+      }
+
       if (
         document.activeElement?.tagName === "INPUT" ||
         document.activeElement?.tagName === "TEXTAREA"
@@ -265,7 +281,9 @@ export class DialogueBox {
         e.preventDefault();
         this.rewind();
       }
-    });
+    };
+
+    window.addEventListener("keydown", this.onKeydown);
   }
 
   public setContent(speakerName: string, paragraphs: string[], messageId = ""): void {
@@ -442,6 +460,10 @@ export class DialogueBox {
   }
 
   public destroy(): void {
+    if (this.onKeydown) {
+      window.removeEventListener("keydown", this.onKeydown);
+      this.onKeydown = undefined;
+    }
     if (this.typeTimer) clearTimeout(this.typeTimer);
     if (this.autoTimer) clearTimeout(this.autoTimer);
     if (this.skipTimer) clearTimeout(this.skipTimer);
