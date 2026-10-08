@@ -1,11 +1,10 @@
 import yaml from "js-yaml";
 import type { LedgerData, ActorDossier, PlaceNode, BPlot, Opportunity, JournalEntry } from "../shared/types.js";
 
-const LEDGER_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Ledger.*?<\/summary>([\s\S]*?)<\/details>/i;
+const ALL_DETAILS_RE = /<details\b[^>]*>[\s\S]*?<\/details>/gi;
+const DETAILS_BLOCK_EXTRACT_RE = /<details\b[^>]*>([\s\S]*?)<\/details>/gi;
 const YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
 const THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
-const SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary>[\s\S]*?<\/details>/gi;
-const DIRECTOR_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Director.*?<\/summary>[\s\S]*?<\/details>/gi;
 const DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"[\s\S]*?\}\s*/gi;
 const PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
 const TOON_COMMENT_RE = /<!--\s*toon\b[\s\S]*?-->/gi;
@@ -17,9 +16,7 @@ const TOON_BRACKET_RE = /\[toon\b[\s\S]*?\]/gi;
 export function extractProse(rawContent: string): string {
   let cleaned = (rawContent || "")
     .replace(THINK_TAGS_RE, "")
-    .replace(SCENE_LOGIC_RE, "")
-    .replace(DIRECTOR_DETAILS_RE, "")
-    .replace(LEDGER_DETAILS_RE, "")
+    .replace(ALL_DETAILS_RE, "")
     .replace(DIRECTOR_JSON_RE, "")
     .replace(TOON_COMMENT_RE, "")
     .replace(TOON_BRACKET_RE, "")
@@ -71,13 +68,52 @@ export function detectSpeaker(paragraph: string, defaultSpeaker = "Narrator"): {
 }
 
 /**
- * Extracts raw YAML from the My World Ledger block.
+ * Extracts raw YAML from any details block (State, Ledger, Status, or untagged details).
  */
 export function extractLedgerRaw(rawContent: string): string | null {
-  const match = LEDGER_DETAILS_RE.exec(rawContent);
-  if (!match) return null;
-  return match[1] || "";
+  if (!rawContent) return null;
+
+  const matches: string[] = [];
+  let m: RegExpExecArray | null;
+  DETAILS_BLOCK_EXTRACT_RE.lastIndex = 0;
+  while ((m = DETAILS_BLOCK_EXTRACT_RE.exec(rawContent)) !== null) {
+    if (m[1]) matches.push(m[1]);
+  }
+
+  // Prioritize block containing state indicators
+  for (const block of matches) {
+    if (
+      block.includes("actors:") ||
+      block.includes("scene:") ||
+      block.includes("clock:") ||
+      block.includes("passions:") ||
+      block.includes("combat:") ||
+      block.includes("relations:") ||
+      block.includes("world:")
+    ) {
+      return block.replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
+    }
+  }
+
+  // Second pass: any details block containing a yaml codefence
+  for (const block of matches) {
+    if (block.includes("```yaml") || block.includes("```yml")) {
+      return block.replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
+    }
+  }
+
+  // Fallback if details exist but didn't hit keywords (and not pure director note)
+  if (matches.length > 0) {
+    const candidate = matches[matches.length - 1]!;
+    if (!candidate.includes("director_note")) {
+      return candidate.replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
+    }
+  }
+
+  return null;
 }
+
+export const extractDetailsRaw = extractLedgerRaw;
 
 /**
  * Parses the raw Ledger details content into a structured LedgerData object.

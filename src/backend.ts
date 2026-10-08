@@ -28,17 +28,6 @@ import {
   computeDirectorImpactDiff,
   extractChatId,
 } from "./backend/director.js";
-import {
-  generateCharacterDossier,
-  generateSurroundingPlaces,
-  simulateOffscreenMoves,
-} from "./backend/out-of-band.js";
-import {
-  advanceClock,
-  updateActorLocationsByRoutines,
-  giftItem,
-  snoopRoom,
-} from "./backend/engine-actions.js";
 import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry, DirectorNoteData } from "./shared/types.js";
 
 declare const spindle: SpindleAPI;
@@ -267,18 +256,18 @@ async function processChatTurn(
       // Ignore malformed JSON chunks
     }
 
-    // Extract State Delta: 1. TOON format, 2. Legacy YAML Ledger, 3. Prose Heuristics Fallback
-    const rawToon = extractToonRaw(targetMessage.content);
-    const rawLedger = rawToon ? null : extractLedgerRaw(targetMessage.content);
+    // Extract State Delta: 1. State Details Block (YAML), 2. TOON format, 3. Prose Heuristics Fallback
+    const rawLedger = extractLedgerRaw(targetMessage.content);
+    const rawToon = rawLedger ? null : extractToonRaw(targetMessage.content);
     const prevLedger: LedgerData | null = cumulativeLedger
       ? JSON.parse(JSON.stringify(cumulativeLedger))
       : null;
 
     let delta: Partial<LedgerData> | null = null;
-    if (rawToon) {
-      delta = parseToonDelta(rawToon);
-    } else if (rawLedger) {
+    if (rawLedger) {
       delta = parseLedgerYaml(rawLedger);
+    } else if (rawToon) {
+      delta = parseToonDelta(rawToon);
     } else {
       const prose = extractProse(targetMessage.content);
       delta = inferProseEmotionDelta(prose, characterId || "char");
@@ -564,141 +553,6 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
       }
       break;
     }
-
-    case "vn_unfold_dossier": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      const actorId = String(payload.actorId || "");
-      const actorName = String(payload.actorName || actorId);
-      if (!chatId || !actorId) break;
-
-      const state = (await storage.getChatState(chatId)) || { scene: { place: "default" }, actors: {} };
-      spindle.sendToFrontend({ type: "vn_log", message: `Unfolding backstory and dossier for ${actorName}...`, level: "action" });
-
-      try {
-        const partialDossier = await generateCharacterDossier(spindle, actorId, actorName, state, chatId);
-        if (!state.actors) state.actors = {};
-        state.actors[actorId] = {
-          ...(state.actors[actorId] || {}),
-          ...partialDossier,
-          appearance: { ...(state.actors[actorId]?.appearance || {}), ...(partialDossier.appearance || {}) },
-          combat: { ...(state.actors[actorId]?.combat || {}), ...(partialDossier.combat || {}) },
-          life_model: { ...(state.actors[actorId]?.life_model || {}), ...(partialDossier.life_model || {}) },
-          passions: { ...(state.actors[actorId]?.passions || {}), ...(partialDossier.passions || {}) },
-          profile: { ...(state.actors[actorId]?.profile || {}), ...(partialDossier.profile || {}) },
-          agency: { ...(state.actors[actorId]?.agency || {}), ...(partialDossier.agency || {}) },
-          knowledge: { ...(state.actors[actorId]?.knowledge || {}), ...(partialDossier.knowledge || {}) },
-        };
-        await storage.saveChatState(chatId, state);
-        spindle.sendToFrontend({ type: "vn_state", ledger: state });
-        spindle.sendToFrontend({ type: "vn_log", message: `Dossier for ${actorName} complete!`, level: "action" });
-      } catch (err: any) {
-        spindle.sendToFrontend({ type: "vn_error", error: `Failed to unfold dossier: ${String(err?.message || err)}` });
-      }
-      break;
-    }
-
-    case "vn_skip_time": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      const minutes = Number(payload.minutes || 60);
-      const sleep = Boolean(payload.sleep);
-      if (!chatId) break;
-
-      const state = (await storage.getChatState(chatId)) || { scene: { place: "default" }, actors: {} };
-      state.clock = advanceClock(state.clock, minutes, sleep);
-      if (state.actors) {
-        state.actors = updateActorLocationsByRoutines(state.actors, state.clock.t || "12:00", state.clock.phase || "Day");
-      }
-      await storage.saveChatState(chatId, state);
-      spindle.sendToFrontend({ type: "vn_state", ledger: state });
-      spindle.sendToFrontend({ type: "vn_log", message: `Time advanced to ${state.clock.date}, ${state.clock.t} (${state.clock.phase})`, level: "action" });
-      break;
-    }
-
-    case "vn_scout_places": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      const placeId = String(payload.placeId || "");
-      if (!chatId) break;
-
-      const state = (await storage.getChatState(chatId)) || { scene: { place: "default" }, actors: {} };
-      const currentPlace = placeId || state.scene?.place || "local:room";
-      spindle.sendToFrontend({ type: "vn_log", message: `Scouting surrounding areas from ${currentPlace}...`, level: "action" });
-
-      try {
-        const newPlaces = await generateSurroundingPlaces(spindle, currentPlace, state);
-        if (!state.places) state.places = {};
-        state.places = { ...state.places, ...newPlaces };
-        await storage.saveChatState(chatId, state);
-        spindle.sendToFrontend({ type: "vn_state", ledger: state });
-        spindle.sendToFrontend({ type: "vn_log", message: `Discovered ${Object.keys(newPlaces).length} connected places!`, level: "action" });
-      } catch (err: any) {
-        spindle.sendToFrontend({ type: "vn_error", error: `Failed to scout places: ${String(err?.message || err)}` });
-      }
-      break;
-    }
-
-    case "vn_simulate_offscreen": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      if (!chatId) break;
-
-      const state = (await storage.getChatState(chatId)) || { scene: { place: "default" }, actors: {} };
-      spindle.sendToFrontend({ type: "vn_log", message: `Simulating offscreen cast movements and rumors...`, level: "action" });
-
-      try {
-        const sim = await simulateOffscreenMoves(spindle, state);
-        if (!Array.isArray(state.bulletins)) state.bulletins = [];
-        state.bulletins.unshift(sim.bulletin);
-
-        if (sim.relationUpdates && state.actors) {
-          for (const upd of sim.relationUpdates) {
-            if (state.actors[upd.from]) {
-              const rels = state.actors[upd.from].relations || {};
-              const cur = (rels[upd.to] as any)?.affinity ?? 50;
-              rels[upd.to] = { ...(rels[upd.to] || {}), affinity: Math.min(100, cur + upd.affinityDelta) };
-              state.actors[upd.from].relations = rels;
-            }
-          }
-        }
-        await storage.saveChatState(chatId, state);
-        spindle.sendToFrontend({ type: "vn_state", ledger: state });
-        spindle.sendToFrontend({ type: "vn_log", message: `Offscreen move recorded: "${sim.bulletin.title}"`, level: "action" });
-      } catch (err: any) {
-        spindle.sendToFrontend({ type: "vn_error", error: `Failed offscreen simulation: ${String(err?.message || err)}` });
-      }
-      break;
-    }
-
-    case "vn_gift_item": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      const actorId = String(payload.actorId || "");
-      const itemName = String(payload.itemName || "");
-      if (!chatId || !actorId || !itemName) break;
-
-      const state = (await storage.getChatState(chatId)) || { scene: { place: "default" }, actors: {} };
-      const res = giftItem(state, actorId, itemName);
-      if (res.success) {
-        await storage.saveChatState(chatId, res.state);
-        spindle.sendToFrontend({ type: "vn_state", ledger: res.state });
-        spindle.sendToFrontend({ type: "vn_log", message: res.message, level: "action" });
-      } else {
-        spindle.sendToFrontend({ type: "vn_error", error: res.message });
-      }
-      break;
-    }
-
-    case "vn_search_room": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      const placeId = String(payload.placeId || "");
-      if (!chatId) break;
-
-      const state = (await storage.getChatState(chatId)) || { scene: { place: "default" }, actors: {} };
-      const currentPlace = placeId || state.scene?.place || "current_room";
-      const res = snoopRoom(state, currentPlace);
-      await storage.saveChatState(chatId, res.state);
-      spindle.sendToFrontend({ type: "vn_state", ledger: res.state });
-      spindle.sendToFrontend({ type: "vn_log", message: res.message, level: "action" });
-      break;
-    }
-
     case "vn_get_manifest": {
       const manifest = await storage.getManifest();
       spindle.sendToFrontend({ type: "vn_manifest", manifest });

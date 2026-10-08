@@ -3304,17 +3304,16 @@ var {
 } = yaml;
 
 // src/backend/ledger-parser.ts
-var LEDGER_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Ledger.*?<\/summary>([\s\S]*?)<\/details>/i;
+var ALL_DETAILS_RE = /<details\b[^>]*>[\s\S]*?<\/details>/gi;
+var DETAILS_BLOCK_EXTRACT_RE = /<details\b[^>]*>([\s\S]*?)<\/details>/gi;
 var YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
 var THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
-var SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary>[\s\S]*?<\/details>/gi;
-var DIRECTOR_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Director.*?<\/summary>[\s\S]*?<\/details>/gi;
 var DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"[\s\S]*?\}\s*/gi;
 var PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
 var TOON_COMMENT_RE = /<!--\s*toon\b[\s\S]*?-->/gi;
 var TOON_BRACKET_RE = /\[toon\b[\s\S]*?\]/gi;
 function extractProse(rawContent) {
-  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(DIRECTOR_DETAILS_RE, "").replace(LEDGER_DETAILS_RE, "").replace(DIRECTOR_JSON_RE, "").replace(TOON_COMMENT_RE, "").replace(TOON_BRACKET_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
+  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(ALL_DETAILS_RE, "").replace(DIRECTOR_JSON_RE, "").replace(TOON_COMMENT_RE, "").replace(TOON_BRACKET_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
   return cleaned;
 }
 function extractParagraphs(prose) {
@@ -3340,10 +3339,32 @@ function detectSpeaker(paragraph, defaultSpeaker = "Narrator") {
   return { speaker: defaultSpeaker, text: paragraph };
 }
 function extractLedgerRaw(rawContent) {
-  const match = LEDGER_DETAILS_RE.exec(rawContent);
-  if (!match)
+  if (!rawContent)
     return null;
-  return match[1] || "";
+  const matches = [];
+  let m;
+  DETAILS_BLOCK_EXTRACT_RE.lastIndex = 0;
+  while ((m = DETAILS_BLOCK_EXTRACT_RE.exec(rawContent)) !== null) {
+    if (m[1])
+      matches.push(m[1]);
+  }
+  for (const block of matches) {
+    if (block.includes("actors:") || block.includes("scene:") || block.includes("clock:") || block.includes("passions:") || block.includes("combat:") || block.includes("relations:") || block.includes("world:")) {
+      return block.replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
+    }
+  }
+  for (const block of matches) {
+    if (block.includes("```yaml") || block.includes("```yml")) {
+      return block.replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
+    }
+  }
+  if (matches.length > 0) {
+    const candidate = matches[matches.length - 1];
+    if (!candidate.includes("director_note")) {
+      return candidate.replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
+    }
+  }
+  return null;
 }
 function parseLedgerYaml(rawLedgerText) {
   let combined = {};
@@ -3923,43 +3944,220 @@ ${resolvedNotes}` : resolvedNotes;
   }
   return activeDirective;
 }
-function formatLivingWorldContext(currentState) {
-  const clock = currentState.clock || {};
-  const date = clock.date || "Day 1";
-  const time = clock.t || "12:00";
-  const place = currentState.scene?.place || "Current Location";
-  const presentActors = [];
-  const participants = Array.isArray(currentState.scene?.participants) ? currentState.scene.participants : [];
-  const actors = currentState.actors || {};
-  for (const [id, a] of Object.entries(actors)) {
-    if (id.toLowerCase() === "user")
-      continue;
-    if (participants.includes(id) || !participants.length) {
-      const name = a.name || id;
-      const topPassion = a.passions ? Object.entries(a.passions).sort((x, y) => (y[1] ?? 0) - (x[1] ?? 0))[0] : undefined;
-      const moodStr = topPassion && (topPassion[1] ?? 0) > 15 ? `${topPassion[0]} (${topPassion[1]})` : "composed";
-      const attire = a.outfit?.top ? `${a.outfit.top}` : a.outfit?.state || "casual";
-      const want = a.agency?.want_now ? `wants: ${a.agency.want_now}` : "";
-      const secret = Array.isArray(a.knowledge?.secrets) && a.knowledge.secrets[0]?.truth ? `secret: ${a.knowledge.secrets[0].truth}` : "";
-      const relToUser = a.relations?.["user"]?.affinity !== undefined ? `affinity: ${a.relations["user"].affinity}` : "";
-      const details = [want, secret, relToUser].filter(Boolean).join(", ");
-      presentActors.push(`${name} (attire: ${attire}, mood: ${moodStr}${details ? ` | ${details}` : ""})`);
-    }
-  }
-  const user = actors["user"] || {};
-  const userAttire = user.outfit?.top ? `${user.outfit.top} / ${user.outfit.bottom || ""}` : user.outfit?.state || "casual";
-  const inHand = user.inventory?.in_hand?.R || user.inventory?.in_hand?.L ? `held: ${[user.inventory?.in_hand?.R, user.inventory?.in_hand?.L].filter(Boolean).join(", ")}` : "";
-  const activeBplots = (currentState.bplots || []).filter((b) => b.status !== "resolved").slice(0, 1);
-  const bplotStr = activeBplots.length ? `Offscreen: ${activeBplots[0].who || "Distant parties"} (${activeBplots[0].doing || "active"}) [ripple ${activeBplots[0].ripple ?? 1}]` : "";
-  return [
-    `[LumiVN Living World Context]`,
-    `⏰ Clock: ${date}, ${time} | Location: ${place}`,
-    presentActors.length ? `\uD83D\uDC65 Present: ${presentActors.slice(0, 3).join("; ")}` : "",
-    `\uD83D\uDC54 Player: ${userAttire}${inHand ? ` | ${inHand}` : ""}`,
-    bplotStr ? `\uD83C\uDFAD ${bplotStr}` : ""
-  ].filter(Boolean).join(`
-`);
-}
+var STATE_DETAILS_CONTRACT = `[STATE DETAILS CONTRACT & DELTA RULES]
+- TURN 1: Emit baseline dossier (appearance, money, combat, life_model, outfit, inventory, profile, relations).
+- ONGOING TURNS (COMPACT DELTA — ZERO STATIC LEAK):
+  * Omit ## World and ## Places unless location or rules shifted.
+  * The extension permanently stores and merges state. NEVER re-emit unchanged fields.
+  * \`user\` is strictly a delta after Turn 1. Omit unchanged user appearance, combat, life_model.
+  * Sub-dictionary deltas:
+    - Passions: Emit ONLY moved keys (e.g. passions: { anger: 20 }), never the full list.
+    - Combat: Omit entirely unless HP/MP moved (e.g. combat: { hp: "80/100" }).
+    - Outfit: Emit ONLY the slot that changed (e.g. outfit: { top: "none" }). Never re-emit unchanged bottom/shoes/underwear.
+    - Inventory: Emit only the specific hand slot or carried prop that moved.
+  * Journal: Along with everything Emit ONLY the new event(s) generated in THIS reply (\`EVT-n\`). Never re-print past records.
+  * Inactive actors: If an actor had no state or gear shifts this turn, OMIT their dossier entirely.
+- CONTAINERS & ZERO-SUM TRANSFERS:
+  * Props exist in exactly one place (hand slot, container, or local places.resources). Transfers are zero-sum.
+- MANDATORY COMPOUND PLACE KEYS: Places MUST use the format <unique_scope_name>:<room> (e.g. tendo_residence:kitchen, tendo_residence:foyer, nerima_high:classroom_2a) so backgrounds map accurately without room name collisions.
+- ALWAYS EMIT: clock, scene, roster, journal, open opportunities, bplots (id plus changed fields only; ripple, status and any due or carrier change count as changed).
+
+Always Append this below prose:
+<details><summary>State</summary>
+
+## World
+\`\`\`yaml
+world:
+  genre:
+  facts: []
+  calendar:
+  currency: "$"
+  time_scale:
+  tone_weights:
+  content_bounds:
+  special_rules: []
+  needs: []
+  capabilities: []
+  investigations: {} # authority: { alert_level: 0-3, clues: [], target_id: "" }
+clock:
+  date: "DD-MM-YY"
+  t: "D# HH:MM"
+  phase: "Morning" # Dawn | Morning | Afternoon | Dusk | Night | Late Night
+  location: "Building or Venue"
+  region: "District or City"
+  country: "Country or Realm"
+  step: N
+init: complete or pending
+\`\`\`
+
+## Places
+\`\`\`yaml
+places:
+  scope:place_id: (Use unique name before common locations)
+    function:
+    traffic: 0-3
+    privacy: 0-3
+    visibility: 0-3
+    access:
+    norm:
+    rhythm:
+    resources: []
+    population:
+    hazards:
+    barriers:
+    affordances: []
+    routes: [to: "scope:place_id", minutes: N]
+travel:
+  - {actor: , purpose: , from: , to: , depart: , eta: , status: }
+\`\`\`
+
+## Roster
+NPCs ONLY. {{user}} is NEVER in roster (player id is \`user\`).
+\`\`\`yaml
+roster:(Use only the roster npc name for display in extension)
+  - {id: , name: , lod: 0-3, status: , loc: , record: full, tick: }
+\`\`\`
+
+## Actor dossiers
+COMBAT TABLE (Lv0..10; copy directly):
+T1 HP 100-300 | MP 50-150 | PWR=AGI 15-45 (+20 HP, +10 MP, +3 stats/lv)
+T2 HP 400-1000 | MP 200-500 | PWR=AGI 50-150 (+60 HP, +30 MP, +10 stats/lv)
+T3 HP 1500-4500 | MP 800-2300 | PWR 200-650 | AGI 200-700 (+300 HP, +150 MP, +45 PWR, +50 AGI/lv)
+T4 HP 6000-18000 | MP 3000-9000 | PWR 800-2300 | AGI 800-2600 (+1200 HP, +600 MP, +150 PWR, +180 AGI/lv)
+T5 HP 25000-75000 | MP 15000-45000 | PWR 3000-9000 | AGI 3500-10500 (+5000 HP, +3000 MP, +600 PWR, +700 AGI/lv)
+Rules: hp="cur/max"; mp="cur/max"; underwear: underwear_top, underwear_bottom (or \`none\`).
+
+\`\`\`yaml
+* \`user\`: Feeds Companion 'You' tab. Delta after Turn 1. 
+Loadout: L:[Current|Empty] R:[Current|Empty] │ Pkt:[$Cash] │ Bnk:[$Bank] │ Carried:[Bags/Props]
+Attire: Top:[Shirt] Bot:[Pants] UW:[Top]/[Bottom] Shoes:[Footwear] Cond:[Clean/Disheveled]
+Body:[Build, traits, age, noticeable features]
+Agency: ONLY \`want_now\`.
+* NPCs: Full schema on Turn 1 debut; compact deltas ongoing.
+\`\`\`
+
+\`\`\`yaml
+actor_id:
+  appearance: {age: , traits: , appeal: 0-100, style: , condition: }
+  money: {in_hand: 0, in_bank: 0, currency: "$"}
+  combat: {tier: 1-10, lv: 0-10, exp: "0/100", hp: "cur/max", mp: "cur/max", eff_pwr: , eff_agi: , pwr: , agi: , int: , talent: []}
+  life_model: {orientation: , romantic_history: , upbringing: , family: [], occupation: , residence: , routines: [cue, act, place, time], worldview: , self_concept: }
+  wounds: {physical: [], psychological: []}
+  trauma: []
+  passions: {anger: 0-100, shame: 0-100, arousal: 0-100, fear: 0-100, stress: 0-100, pain: 0-100, exhaustion: 0-100, suspicion: 0-100, disgust: 0-100, sadness: 0-100, guilt: 0-100, joy: 0-100}
+  constraints: ""
+  outfit: {top: , bottom: , underwear_top: , underwear_bottom: , shoes: , accessories: [], state: }
+  inventory: {in_hand: {L: "Empty", R: "Empty"}, carried: [], room: [], room_location: ""}
+  profile:
+    public_roles: []
+    dispositions: {risk: , assertiveness: , empathy: , impulse_control: , curiosity: , sociability: , status_sensitivity: , acquisitiveness: , persistence: }
+    capabilities: {}
+    values: []
+    self_concept: []
+    boundaries: []
+    red_lines: []
+    defense: ""
+    blind_spot: ""
+    tells: {lying: "", hurt: "", shame: ""}
+    stress_default:
+  state: {condition: , needs: {name: urgency}, affect: {valence: , arousal: , control: , episodes: []}, resources: {}}
+  agency:
+    goals: [id, intent, priority, commitment, deadline, cause, progress, status]
+    plans: [goal, steps, now, preconditions, revisions]
+    policies: [id, when, effects, strength, origin]
+    commitments: []
+    want_now: want (source, cost)
+  relations:
+    other_id: {affinity: 0, trust: 0, respect: 0, attraction: 0, grudge: 0, fear: 0, familiarity: 0, attachment: 0, loyalty: 0-100, sacrifice_willingness: 0-100, betrayal_threshold: 50, shared_secrets: [], leverage: [], grievances: [], obligations: []}
+  knowledge:
+    beliefs: [p, conf, source, basis, t]
+    memories: [evt, interpretation, salience, imprint, with]
+    expectations: [situation, expect, conf]
+    secrets: [truth, knows, suspects, exposure, cover]
+    held_leverage: []
+    presents_as: {audience: face}
+  stats: {T, A, R, F, Fam, G, Integ, Stress, CAU, GRD, PRD, EMP, STB, BLD, RX, RC, Rig, Mask, MIS, WV, COMP}
+\`\`\`
+
+## Scene
+\`\`\`yaml
+scene:
+  player_intent:
+  place: "scope:place_id"
+  time:
+  participants: []
+  threads: []
+  pressures: []
+  recent_changes: []
+  recent_beats: []
+  constraints:
+  affordances: []
+  stall: N
+  streak: N
+  transients: [id, purpose, loc, want, exit_cause]
+  latents: [id, who, errand, route, window_opens, status]
+\`\`\`
+
+## Fronts
+\`\`\`yaml
+fronts:
+  - {id: , cause: , stage: , due: , pressure: 0-5, known_by: []}
+\`\`\`
+
+## Journal
+\`\`\`yaml
+journal:
+  - id: EVT-n
+    time:
+    place: "scope:place_id"
+    cause: []
+    actors: []
+    action:
+    outcome: full or partial or fail
+    sensory: only if it changes who perceives
+    witnesses: [actor: confidence]
+    effects: [target: change]
+    opp: [opportunity ids touched]
+    mutations: ["Actor.STAT@Target old->new | cause | D/R/I | GRV#", "user.money.in_hand -20 | vendor.money.in_hand +20"]
+    dice: ev, lane, flavor, intensity, cand, origin, d20
+    repetition_group:
+    cooldown_until:
+    novel: false
+\`\`\`
+
+## B-Plots
+Offscreen third parties on their own clock. Debut with all fields; afterwards emit only \`id\` plus changed fields.
+\`\`\`yaml
+bplots:
+  - id: "bp_id"
+    who: "Distant person, group, or institution outside the local cast"
+    want: "What they are after, in their own terms"
+    doing: "What they are doing now on their own routine, miles away"
+    knows: ["what they currently believe about the local cast; may be partial or wrong"]
+    next: {move: "what they do next if nothing interferes", due: "D# HH:MM"}
+    scope: "personal" # personal | household | neighborhood | city
+    hooks: ["npc_id, front id, secret, or opportunity this touches"]
+    carriers: [{what: "person, message, image, purchase, or record carrying local news outward", from: "npc_id or source", eta: "D# HH:MM"}]
+    vector: "ordinary way the ripple reaches the scene (call, bill, delivery, visit, remark, notice); must match ripple stage"
+    ripple: 1 # Stage 1 (isolated) | Stage 2 (ambient echo) | Stage 3 (collision); never lowered
+    status: "active" # active | dormant | resolved
+\`\`\`
+
+## Opportunities
+\`\`\`yaml
+opportunities:
+  - id: "opp_id"
+    what: "Description of contestable opening"
+    wanted_by: ["npc_id"]
+    noticed_by: ["npc_id"]
+    readings: {npc_id: ["verb", 80, "basis"]}
+    cost: {npc_id: "cost description"}
+    payoff: "payoff description"
+    claimed_by: []
+    status: lead
+    due: "expiry condition"
+\`\`\`
+</details>`;
 async function evaluateDirectorInterceptor(messages, context, getChatState, getDirectorSettings, onInjectedDirective) {
   const chatId = extractChatId(context);
   const genType = extractGenerationType(context);
@@ -4002,15 +4200,16 @@ async function evaluateDirectorInterceptor(messages, context, getChatState, getD
   if (messages.some((m) => typeof m.content === "string" && (m.content.includes(activeDirective) || m.content.includes("[LumiVN Living World Director Guidance]")))) {
     return messages;
   }
-  const livingContext = formatLivingWorldContext(currentState);
   const systemGuard = `[LumiVN Living World Director Guidance]
-${livingContext}
-
-[Director Guidance]
 ${activeDirective}
 
-[OUTPUT FORMAT]
-Respond with natural, vivid story narrative prose. No JSON or YAML codeblocks required.`;
+[OUTPUT FORMAT REQUIREMENT]
+Line 1: Return the director JSON object (optionally inside <details><summary>\uD83C\uDFAC Director</summary>...</details>):
+{"director_note":"FIRST BEAT: ... WORLD: ... OFFSCREEN: ... PRESSURE: ... PRESENT: ... VOICE: ... TEXTURE: ... CANON: ... END ON: ...","thread_label":"<3-6 words thread title>"}
+
+Follow immediately on Line 2 with natural narrative prose.
+Below the prose, append the State details block:
+${STATE_DETAILS_CONTRACT}`;
   const generationId = context?.generationId;
   if (onInjectedDirective) {
     if (generationId)
@@ -4200,444 +4399,6 @@ function processBPlots(ledger) {
   return { hasBPlotNotification, activeRipples, promotedActors };
 }
 
-// src/backend/out-of-band.ts
-function cleanJsonText(raw) {
-  let cleaned = raw.trim();
-  if (cleaned.startsWith("```json")) {
-    cleaned = cleaned.slice(7);
-  } else if (cleaned.startsWith("```")) {
-    cleaned = cleaned.slice(3);
-  }
-  if (cleaned.endsWith("```")) {
-    cleaned = cleaned.slice(0, -3);
-  }
-  return cleaned.trim();
-}
-async function generateCharacterDossier(spindle2, actorId, actorName, currentState, chatId) {
-  const currentScene = currentState.scene?.place || "Current Location";
-  const genre = currentState.world?.genre || "Visual Novel Roleplay";
-  const existingActor = currentState.actors?.[actorId] || {};
-  const systemPrompt = `You are a world simulation engine for an immersive visual novel life-sim (${genre}).
-Generate an authentic, grounded, comprehensive character dossier for "${actorName}" (ID: "${actorId}").
-The current scene is: ${currentScene}.
-
-Respond ONLY with a valid JSON object matching this schema (no preamble, no markdown fences):
-{
-  "appearance": {
-    "age": "string",
-    "traits": "key distinguishing traits and features",
-    "appeal": 50 to 95,
-    "style": "clothing / presentation style",
-    "condition": "Clean"
-  },
-  "combat": {
-    "tier": 1,
-    "lv": 1,
-    "hp": "150/150",
-    "mp": "80/80",
-    "eff_pwr": 25,
-    "eff_agi": 30,
-    "pwr": 25,
-    "agi": 30,
-    "int": 40,
-    "talent": ["signature skill or talent"]
-  },
-  "life_model": {
-    "orientation": "sexual/romantic orientation",
-    "romantic_history": "brief background",
-    "upbringing": "formative childhood / environment",
-    "family": ["family members or background"],
-    "occupation": "job, student status, or role",
-    "residence": "home location",
-    "routines": [
-      { "time": "08:00", "action": "Morning routine", "place": "Residence", "phase": "Morning" },
-      { "time": "13:00", "action": "Day routine", "place": "Work or Study", "phase": "Afternoon" },
-      { "time": "18:00", "action": "Evening leisure", "place": "Living Area", "phase": "Evening" },
-      { "time": "22:00", "action": "Rest", "place": "Bedroom", "phase": "Night" }
-    ],
-    "worldview": "core life philosophy",
-    "self_concept": "how they view themselves internally"
-  },
-  "passions": {
-    "anger": 10,
-    "shame": 5,
-    "arousal": 15,
-    "fear": 5,
-    "stress": 20,
-    "suspicion": 10,
-    "joy": 50
-  },
-  "profile": {
-    "values": ["core value 1", "core value 2"],
-    "boundaries": ["personal boundary"],
-    "red_lines": ["unacceptable line"],
-    "defense": "psychological defense mechanism",
-    "blind_spot": "key weakness or vulnerability",
-    "tells": { "lying": "physical tell", "hurt": "physical tell", "shame": "physical tell" }
-  },
-  "agency": {
-    "goals": [
-      { "id": "g1", "intent": "primary active goal", "priority": 1, "status": "active" }
-    ],
-    "want_now": "what they immediately want right now in the scene"
-  },
-  "knowledge": {
-    "secrets": [
-      { "truth": "guarded secret", "knows": ["${actorName}"], "exposure": 10, "cover": "cover story" }
-    ],
-    "held_leverage": []
-  }
-}`;
-  const userPrompt = `Generate the dossier for "${actorName}" who is currently situated in ${currentScene}. Context: ${JSON.stringify(existingActor.appearance || {})}`;
-  try {
-    const spindleAny = spindle2;
-    if (typeof spindleAny.generate?.quiet === "function") {
-      const res = await spindleAny.generate.quiet({
-        type: "quiet",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-        parameters: { temperature: 0.6, max_tokens: 2500 }
-      });
-      const content = typeof res === "string" ? res : res?.content || "";
-      const cleaned = cleanJsonText(content);
-      const parsed = JSON.parse(cleaned);
-      return {
-        id: actorId,
-        name: actorName,
-        ...parsed
-      };
-    }
-  } catch (err) {
-    spindle2.log.error(`[LumiVN] Out-of-band dossier generation failed for ${actorName}: ${String(err)}`);
-  }
-  return {
-    id: actorId,
-    name: actorName,
-    appearance: { age: "20", traits: "Noticeable presence", appeal: 65, style: "Casual", condition: "Clean" },
-    combat: { tier: 1, lv: 1, hp: "150/150", mp: "80/80", eff_pwr: 30, eff_agi: 30, int: 35, talent: ["Focus"] },
-    life_model: {
-      occupation: "Resident",
-      residence: currentScene,
-      routines: [
-        { time: "08:00", action: "Morning routine", place: currentScene, phase: "Morning" },
-        { time: "18:00", action: "Evening leisure", place: currentScene, phase: "Evening" }
-      ],
-      worldview: "Pragmatic",
-      self_concept: "Capable and watchful"
-    },
-    passions: { anger: 5, shame: 5, arousal: 10, fear: 5, stress: 15, suspicion: 10, joy: 40 },
-    agency: { want_now: "Engage with the present company" }
-  };
-}
-async function generateSurroundingPlaces(spindle2, currentPlaceId, currentState) {
-  const scope = currentPlaceId.includes(":") ? currentPlaceId.split(":")[0] : "local";
-  const genre = currentState.world?.genre || "Visual Novel";
-  const systemPrompt = `You are a world simulation engine for a visual novel (${genre}).
-Generate 2 adjacent places / rooms connected to current place "${currentPlaceId}".
-Return ONLY valid JSON (no markdown fences, no preamble):
-{
-  "${scope}:hallway": {
-    "function": "Transit corridor connecting main rooms",
-    "traffic": 2,
-    "privacy": 1,
-    "visibility": 2,
-    "norm": "casual",
-    "resources": ["notice board", "water dispenser"],
-    "routes": [{ "to": "${currentPlaceId}", "minutes": 1 }]
-  },
-  "${scope}:courtyard": {
-    "function": "Open-air gathering space",
-    "traffic": 2,
-    "privacy": 0,
-    "visibility": 3,
-    "norm": "public",
-    "resources": ["benches", "vending machine"],
-    "routes": [{ "to": "${currentPlaceId}", "minutes": 2 }]
-  }
-}`;
-  try {
-    const spindleAny = spindle2;
-    if (typeof spindleAny.generate?.quiet === "function") {
-      const res = await spindleAny.generate.quiet({
-        type: "quiet",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `Generate adjacent rooms for ${currentPlaceId}` }
-        ],
-        parameters: { temperature: 0.5, max_tokens: 1200 }
-      });
-      const content = typeof res === "string" ? res : res?.content || "";
-      return JSON.parse(cleanJsonText(content));
-    }
-  } catch (err) {
-    spindle2.log.error(`[LumiVN] Out-of-band places generation failed: ${String(err)}`);
-  }
-  return {
-    [`${scope}:adjoining_room`]: {
-      function: "Adjacent connected room",
-      traffic: 1,
-      privacy: 2,
-      visibility: 1,
-      norm: "casual",
-      resources: ["desk", "chairs"],
-      routes: [{ to: currentPlaceId, minutes: 1 }]
-    }
-  };
-}
-async function simulateOffscreenMoves(spindle2, currentState) {
-  const actors = Object.keys(currentState.actors || {}).filter((k) => k !== "user");
-  const time = currentState.clock?.t || "12:00";
-  const date = currentState.clock?.date || "Day 1";
-  if (actors.length < 2) {
-    return {
-      bulletin: {
-        id: `rumor_${Date.now()}`,
-        category: "Local Chatter",
-        title: "Quiet in Town",
-        body: `Things remain relatively calm around ${currentState.scene?.place || "the area"}.`,
-        source: "Town Word",
-        timestamp: `${date} ${time}`
-      }
-    };
-  }
-  const a1 = actors[0];
-  const a2 = actors[1];
-  const n1 = currentState.actors?.[a1]?.name || a1;
-  const n2 = currentState.actors?.[a2]?.name || a2;
-  const systemPrompt = `You are a life-sim world director.
-Simulate a minor offscreen interaction between ${n1} and ${n2} that happened elsewhere while the player was away.
-Return ONLY valid JSON (no markdown):
-{
-  "title": "Short catchy rumor headline (3-6 words)",
-  "body": "1-2 sentences of what someone noticed them doing or talking about.",
-  "category": "Rumor",
-  "affinityDelta": 2,
-  "note": "brief summary of relationship shift"
-}`;
-  try {
-    const spindleAny = spindle2;
-    if (typeof spindleAny.generate?.quiet === "function") {
-      const res = await spindleAny.generate.quiet({
-        type: "quiet",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `Generate offscreen interaction between ${n1} and ${n2}` }
-        ],
-        parameters: { temperature: 0.7, max_tokens: 400 }
-      });
-      const parsed = JSON.parse(cleanJsonText(typeof res === "string" ? res : res?.content || ""));
-      return {
-        bulletin: {
-          id: `rumor_${Date.now()}`,
-          category: parsed.category || "Rumor",
-          title: parsed.title || `${n1} and ${n2} Spotted`,
-          body: parsed.body || `${n1} and ${n2} were seen speaking in private earlier today.`,
-          source: "Heard Nearby",
-          timestamp: `${date} ${time}`,
-          hot: true
-        },
-        relationUpdates: [
-          {
-            from: a1,
-            to: a2,
-            affinityDelta: Number(parsed.affinityDelta || 2),
-            note: parsed.note || "Interacted offscreen"
-          }
-        ]
-      };
-    }
-  } catch (err) {
-    spindle2.log.error(`[LumiVN] Offscreen simulation error: ${String(err)}`);
-  }
-  return {
-    bulletin: {
-      id: `rumor_${Date.now()}`,
-      category: "Rumor",
-      title: `${n1} and ${n2} Spotted Nearby`,
-      body: `Witnesses mentioned seeing ${n1} and ${n2} having a quick discussion near the corridor.`,
-      source: "Hallway Chatter",
-      timestamp: `${date} ${time}`
-    },
-    relationUpdates: [{ from: a1, to: a2, affinityDelta: 1, note: "Brief conversation" }]
-  };
-}
-
-// src/backend/engine-actions.ts
-function advanceClock(clock, minutesToAdd, sleepUntilMorning = false) {
-  const c = { ...clock || {} };
-  let currentHour = 12;
-  let currentMin = 0;
-  if (c.t) {
-    const timeMatch = c.t.match(/(\d{1,2}):(\d{2})/);
-    if (timeMatch) {
-      currentHour = parseInt(timeMatch[1], 10);
-      currentMin = parseInt(timeMatch[2], 10);
-    }
-  }
-  let dayNum = 1;
-  if (c.date) {
-    const dayMatch = c.date.match(/Day\s*(\d+)/i) || c.date.match(/D(\d+)/i);
-    if (dayMatch) {
-      dayNum = parseInt(dayMatch[1], 10);
-    }
-  }
-  if (sleepUntilMorning) {
-    dayNum += 1;
-    currentHour = 7;
-    currentMin = 0;
-  } else {
-    currentMin += minutesToAdd;
-    while (currentMin >= 60) {
-      currentMin -= 60;
-      currentHour += 1;
-    }
-    while (currentHour >= 24) {
-      currentHour -= 24;
-      dayNum += 1;
-    }
-  }
-  const paddedH = String(currentHour).padStart(2, "0");
-  const paddedM = String(currentMin).padStart(2, "0");
-  c.t = `${paddedH}:${paddedM}`;
-  c.date = `Day ${dayNum}`;
-  if (currentHour >= 5 && currentHour < 12) {
-    c.phase = "Morning";
-  } else if (currentHour >= 12 && currentHour < 17) {
-    c.phase = "Afternoon";
-  } else if (currentHour >= 17 && currentHour < 21) {
-    c.phase = "Evening";
-  } else if (currentHour >= 21 || currentHour < 2) {
-    c.phase = "Night";
-  } else {
-    c.phase = "Late Night";
-  }
-  return c;
-}
-function updateActorLocationsByRoutines(actors, currentTime, currentPhase) {
-  const updated = { ...actors };
-  const targetHour = parseInt(currentTime.split(":")[0] || "12", 10);
-  for (const [id, actor] of Object.entries(updated)) {
-    if (id.toLowerCase() === "user")
-      continue;
-    const actorCopy = { ...actor };
-    const routines = actorCopy.life_model?.routines;
-    if (Array.isArray(routines) && routines.length > 0) {
-      let bestPlace = null;
-      for (const r of routines) {
-        if (!r)
-          continue;
-        const rTime = typeof r === "object" ? r.time || r.t : r[0];
-        const rPlace = typeof r === "object" ? r.place || r.loc : r[2];
-        const rPhase = typeof r === "object" ? r.phase : r[3];
-        if (rTime) {
-          const match = String(rTime).match(/(\d{1,2}):/);
-          if (match && parseInt(match[1], 10) <= targetHour) {
-            bestPlace = String(rPlace);
-          }
-        } else if (rPhase && String(rPhase).toLowerCase() === currentPhase.toLowerCase()) {
-          bestPlace = String(rPlace);
-        }
-      }
-      if (bestPlace) {
-        if (!actorCopy.inventory)
-          actorCopy.inventory = {};
-        actorCopy.inventory.room_location = bestPlace;
-      }
-    }
-    updated[id] = actorCopy;
-  }
-  return updated;
-}
-function giftItem(state, actorId, itemName) {
-  const next = JSON.parse(JSON.stringify(state));
-  if (!next.actors)
-    next.actors = {};
-  if (!next.actors.user)
-    next.actors.user = {};
-  if (!next.actors[actorId])
-    next.actors[actorId] = { id: actorId, name: actorId };
-  const user = next.actors.user;
-  const target = next.actors[actorId];
-  let found = false;
-  const userCarried = Array.isArray(user.inventory?.carried) ? user.inventory.carried : [];
-  const idx = userCarried.findIndex((i) => i.toLowerCase().includes(itemName.toLowerCase()));
-  if (idx >= 0) {
-    userCarried.splice(idx, 1);
-    found = true;
-  } else if (user.inventory?.in_hand?.R?.toLowerCase().includes(itemName.toLowerCase())) {
-    user.inventory.in_hand.R = "Empty";
-    found = true;
-  } else if (user.inventory?.in_hand?.L?.toLowerCase().includes(itemName.toLowerCase())) {
-    user.inventory.in_hand.L = "Empty";
-    found = true;
-  }
-  if (!found) {
-    return { success: false, state, message: `Item "${itemName}" was not found in your inventory.` };
-  }
-  if (!target.inventory)
-    target.inventory = {};
-  if (!Array.isArray(target.inventory.carried))
-    target.inventory.carried = [];
-  target.inventory.carried.push(itemName);
-  if (!target.relations)
-    target.relations = {};
-  if (!target.relations.user)
-    target.relations.user = { affinity: 50, trust: 50 };
-  const prevAff = Number(target.relations.user.affinity ?? 50);
-  target.relations.user.affinity = Math.min(100, prevAff + 10);
-  target.relations.user.favors_owed = Number(target.relations.user.favors_owed ?? 0) + 1;
-  if (!Array.isArray(next.journal))
-    next.journal = [];
-  next.journal.push({
-    id: `EVT-${Date.now()}`,
-    time: next.clock?.t || "12:00",
-    place: next.scene?.place || "Current Location",
-    action: `Player gave ${itemName} to ${target.name || actorId}`,
-    outcome: `Affinity rose to ${target.relations.user.affinity}. Social favor earned.`
-  });
-  return {
-    success: true,
-    state: next,
-    message: `Gifted ${itemName} to ${target.name || actorId}! Affinity increased (+10).`
-  };
-}
-function snoopRoom(state, placeId) {
-  const next = JSON.parse(JSON.stringify(state));
-  const place = next.places?.[placeId];
-  const privacy = Number(place?.privacy ?? 1);
-  let foundItem;
-  if (place?.resources && Array.isArray(place.resources) && place.resources.length > 0) {
-    foundItem = place.resources[Math.floor(Math.random() * place.resources.length)];
-  }
-  if (!next.actors)
-    next.actors = {};
-  if (!next.actors.user)
-    next.actors.user = {};
-  const user = next.actors.user;
-  if (!user.passions)
-    user.passions = {};
-  if (foundItem) {
-    if (!user.inventory)
-      user.inventory = {};
-    if (!Array.isArray(user.inventory.carried))
-      user.inventory.carried = [];
-    user.inventory.carried.push(foundItem);
-  }
-  if (privacy <= 1) {
-    const prevSusp = Number(user.passions.suspicion ?? 0);
-    user.passions.suspicion = Math.min(100, prevSusp + 15);
-  }
-  const msg = foundItem ? `Searched ${placeId}: Found "${foundItem}"!${privacy <= 1 ? " (Suspicion slightly increased)" : ""}` : `Searched ${placeId}: Nothing unusual discovered.${privacy <= 1 ? " (Suspicion slightly increased)" : ""}`;
-  return {
-    success: true,
-    state: next,
-    message: msg,
-    foundItem
-  };
-}
-
 // src/backend.ts
 var storage = new StorageManager(spindle);
 var resolver = new AssetResolver(spindle, storage);
@@ -4803,14 +4564,14 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
         }
       }
     } catch (e) {}
-    const rawToon = extractToonRaw(targetMessage.content);
-    const rawLedger = rawToon ? null : extractLedgerRaw(targetMessage.content);
+    const rawLedger = extractLedgerRaw(targetMessage.content);
+    const rawToon = rawLedger ? null : extractToonRaw(targetMessage.content);
     const prevLedger = cumulativeLedger ? JSON.parse(JSON.stringify(cumulativeLedger)) : null;
     let delta = null;
-    if (rawToon) {
-      delta = parseToonDelta(rawToon);
-    } else if (rawLedger) {
+    if (rawLedger) {
       delta = parseLedgerYaml(rawLedger);
+    } else if (rawToon) {
+      delta = parseToonDelta(rawToon);
     } else {
       const prose = extractProse(targetMessage.content);
       delta = inferProseEmotionDelta(prose, characterId || "char");
@@ -5039,133 +4800,6 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
           error: `Action dispatch failed: ${userNotice}`
         });
       }
-      break;
-    }
-    case "vn_unfold_dossier": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      const actorId = String(payload.actorId || "");
-      const actorName = String(payload.actorName || actorId);
-      if (!chatId || !actorId)
-        break;
-      const state = await storage.getChatState(chatId) || { scene: { place: "default" }, actors: {} };
-      spindle.sendToFrontend({ type: "vn_log", message: `Unfolding backstory and dossier for ${actorName}...`, level: "action" });
-      try {
-        const partialDossier = await generateCharacterDossier(spindle, actorId, actorName, state, chatId);
-        if (!state.actors)
-          state.actors = {};
-        state.actors[actorId] = {
-          ...state.actors[actorId] || {},
-          ...partialDossier,
-          appearance: { ...state.actors[actorId]?.appearance || {}, ...partialDossier.appearance || {} },
-          combat: { ...state.actors[actorId]?.combat || {}, ...partialDossier.combat || {} },
-          life_model: { ...state.actors[actorId]?.life_model || {}, ...partialDossier.life_model || {} },
-          passions: { ...state.actors[actorId]?.passions || {}, ...partialDossier.passions || {} },
-          profile: { ...state.actors[actorId]?.profile || {}, ...partialDossier.profile || {} },
-          agency: { ...state.actors[actorId]?.agency || {}, ...partialDossier.agency || {} },
-          knowledge: { ...state.actors[actorId]?.knowledge || {}, ...partialDossier.knowledge || {} }
-        };
-        await storage.saveChatState(chatId, state);
-        spindle.sendToFrontend({ type: "vn_state", ledger: state });
-        spindle.sendToFrontend({ type: "vn_log", message: `Dossier for ${actorName} complete!`, level: "action" });
-      } catch (err) {
-        spindle.sendToFrontend({ type: "vn_error", error: `Failed to unfold dossier: ${String(err?.message || err)}` });
-      }
-      break;
-    }
-    case "vn_skip_time": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      const minutes = Number(payload.minutes || 60);
-      const sleep = Boolean(payload.sleep);
-      if (!chatId)
-        break;
-      const state = await storage.getChatState(chatId) || { scene: { place: "default" }, actors: {} };
-      state.clock = advanceClock(state.clock, minutes, sleep);
-      if (state.actors) {
-        state.actors = updateActorLocationsByRoutines(state.actors, state.clock.t || "12:00", state.clock.phase || "Day");
-      }
-      await storage.saveChatState(chatId, state);
-      spindle.sendToFrontend({ type: "vn_state", ledger: state });
-      spindle.sendToFrontend({ type: "vn_log", message: `Time advanced to ${state.clock.date}, ${state.clock.t} (${state.clock.phase})`, level: "action" });
-      break;
-    }
-    case "vn_scout_places": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      const placeId = String(payload.placeId || "");
-      if (!chatId)
-        break;
-      const state = await storage.getChatState(chatId) || { scene: { place: "default" }, actors: {} };
-      const currentPlace = placeId || state.scene?.place || "local:room";
-      spindle.sendToFrontend({ type: "vn_log", message: `Scouting surrounding areas from ${currentPlace}...`, level: "action" });
-      try {
-        const newPlaces = await generateSurroundingPlaces(spindle, currentPlace, state);
-        if (!state.places)
-          state.places = {};
-        state.places = { ...state.places, ...newPlaces };
-        await storage.saveChatState(chatId, state);
-        spindle.sendToFrontend({ type: "vn_state", ledger: state });
-        spindle.sendToFrontend({ type: "vn_log", message: `Discovered ${Object.keys(newPlaces).length} connected places!`, level: "action" });
-      } catch (err) {
-        spindle.sendToFrontend({ type: "vn_error", error: `Failed to scout places: ${String(err?.message || err)}` });
-      }
-      break;
-    }
-    case "vn_simulate_offscreen": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      if (!chatId)
-        break;
-      const state = await storage.getChatState(chatId) || { scene: { place: "default" }, actors: {} };
-      spindle.sendToFrontend({ type: "vn_log", message: `Simulating offscreen cast movements and rumors...`, level: "action" });
-      try {
-        const sim = await simulateOffscreenMoves(spindle, state);
-        if (!Array.isArray(state.bulletins))
-          state.bulletins = [];
-        state.bulletins.unshift(sim.bulletin);
-        if (sim.relationUpdates && state.actors) {
-          for (const upd of sim.relationUpdates) {
-            if (state.actors[upd.from]) {
-              const rels = state.actors[upd.from].relations || {};
-              const cur = rels[upd.to]?.affinity ?? 50;
-              rels[upd.to] = { ...rels[upd.to] || {}, affinity: Math.min(100, cur + upd.affinityDelta) };
-              state.actors[upd.from].relations = rels;
-            }
-          }
-        }
-        await storage.saveChatState(chatId, state);
-        spindle.sendToFrontend({ type: "vn_state", ledger: state });
-        spindle.sendToFrontend({ type: "vn_log", message: `Offscreen move recorded: "${sim.bulletin.title}"`, level: "action" });
-      } catch (err) {
-        spindle.sendToFrontend({ type: "vn_error", error: `Failed offscreen simulation: ${String(err?.message || err)}` });
-      }
-      break;
-    }
-    case "vn_gift_item": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      const actorId = String(payload.actorId || "");
-      const itemName = String(payload.itemName || "");
-      if (!chatId || !actorId || !itemName)
-        break;
-      const state = await storage.getChatState(chatId) || { scene: { place: "default" }, actors: {} };
-      const res = giftItem(state, actorId, itemName);
-      if (res.success) {
-        await storage.saveChatState(chatId, res.state);
-        spindle.sendToFrontend({ type: "vn_state", ledger: res.state });
-        spindle.sendToFrontend({ type: "vn_log", message: res.message, level: "action" });
-      } else {
-        spindle.sendToFrontend({ type: "vn_error", error: res.message });
-      }
-      break;
-    }
-    case "vn_search_room": {
-      const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
-      const placeId = String(payload.placeId || "");
-      if (!chatId)
-        break;
-      const state = await storage.getChatState(chatId) || { scene: { place: "default" }, actors: {} };
-      const currentPlace = placeId || state.scene?.place || "current_room";
-      const res = snoopRoom(state, currentPlace);
-      await storage.saveChatState(chatId, res.state);
-      spindle.sendToFrontend({ type: "vn_state", ledger: res.state });
-      spindle.sendToFrontend({ type: "vn_log", message: res.message, level: "action" });
       break;
     }
     case "vn_get_manifest": {

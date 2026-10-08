@@ -10,12 +10,15 @@ import {
   extractProse,
   inferProseEmotionDelta,
   deepMergeLedger,
+  extractLedgerRaw,
+  parseLedgerYaml,
 } from "../src/backend/ledger-parser.js";
 import {
-  generateCharacterDossier,
-  generateSurroundingPlaces,
-  simulateOffscreenMoves,
-} from "../src/backend/out-of-band.js";
+  isRulesetBookName,
+  isRulesetEntryTitle,
+  ensureCharacterRulebook,
+  loadRulebookForCharacter,
+} from "../src/backend/rulebook.js";
 import type { LedgerData } from "../src/shared/types.js";
 
 describe("TOON Format & Preset Independence", () => {
@@ -127,54 +130,181 @@ actors[1]{id,mood,slot}:
   });
 });
 
-describe("Out-of-Band LLM Generation & World Simulation", () => {
-  test("generateCharacterDossier provides complete fallback dossier on missing LLM", async () => {
-    const mockSpindle: any = {
-      log: { error: () => {}, info: () => {} },
-    };
-    const dossier = await generateCharacterDossier(
-      mockSpindle,
-      "akane",
-      "Akane Tendo",
-      { scene: { place: "tendo_dojo" } }
-    );
+describe("State Details Block Extraction & Comprehensive Character Stats", () => {
+  test("extractLedgerRaw extracts from <details><summary>State</summary> block", () => {
+    const reply = `
+She stepped into the hallway, fixing her collar.
+"We should leave soon."
 
-    expect(dossier.id).toBe("akane");
-    expect(dossier.name).toBe("Akane Tendo");
-    expect(dossier.combat?.tier).toBe(1);
-    expect(dossier.combat?.hp).toBe("150/150");
-    expect(dossier.life_model?.routines?.length).toBeGreaterThan(0);
-    expect(dossier.passions?.joy).toBe(40);
+<details><summary>State</summary>
+\`\`\`yaml
+clock:
+  date: "14-04-26"
+  t: "D1 18:30"
+scene:
+  place: "nerima:hallway"
+  participants: [user, akane]
+actors:
+  akane:
+    name: "Akane Tendo"
+    passions:
+      anger: 15
+      shame: 45
+      arousal: 25
+      fear: 0
+      stress: 30
+      pain: 0
+      exhaustion: 10
+      suspicion: 20
+      disgust: 0
+      sadness: 5
+      guilt: 0
+      joy: 50
+    combat:
+      tier: "T2"
+      lv: 3
+      hp: "450/600"
+      mp: "200/300"
+      pwr: 80
+      agi: 95
+      int: 60
+      talent: ["Martial Arts Kata"]
+    relations:
+      user:
+        affinity: 65
+        trust: 55
+        loyalty: 70
+        betrayal_threshold: 40
+        shared_secrets: ["Secret Training"]
+    agency:
+      want_now: "Master the whirlwind technique"
+    knowledge:
+      secrets:
+        - truth: "Fears water"
+          exposure: 30
+\`\`\`
+</details>
+`;
+
+    const cleanProse = extractProse(reply);
+    expect(cleanProse).toBe(`She stepped into the hallway, fixing her collar.\n"We should leave soon."`);
+    expect(cleanProse).not.toContain("<details");
+    expect(cleanProse).not.toContain("State");
+    expect(cleanProse).not.toContain("akane:");
+
+    const raw = extractLedgerRaw(reply);
+    expect(raw).not.toBeNull();
+    const parsed = parseLedgerYaml(raw!);
+
+    expect(parsed.clock?.t).toBe("D1 18:30");
+    expect(parsed.scene?.place).toBe("nerima:hallway");
+
+    const akane = parsed.actors?.["akane"];
+    expect(akane).toBeDefined();
+    expect(akane?.name).toBe("Akane Tendo");
+
+    // Passions
+    expect(akane?.passions?.shame).toBe(45);
+    expect(akane?.passions?.joy).toBe(50);
+    expect(akane?.passions?.anger).toBe(15);
+
+    // Combat
+    expect(akane?.combat?.tier).toBe("T2");
+    expect(akane?.combat?.hp).toBe("450/600");
+    expect(akane?.combat?.pwr).toBe(80);
+
+    // Relations & Betrayal Threshold
+    const userRel = (akane?.relations as any)?.["user"];
+    expect(userRel).toBeDefined();
+    expect(userRel?.affinity).toBe(65);
+    expect(userRel?.betrayal_threshold).toBe(40);
+    expect(userRel?.shared_secrets).toEqual(["Secret Training"]);
+
+    // Agency & Secrets
+    expect(akane?.agency?.want_now).toBe("Master the whirlwind technique");
+    const secret = (akane?.knowledge as any)?.secrets?.[0];
+    expect(secret?.truth).toBe("Fears water");
+    expect(secret?.exposure).toBe(30);
   });
 
-  test("generateSurroundingPlaces returns adjoining room fallback", async () => {
-    const mockSpindle: any = {
-      log: { error: () => {}, info: () => {} },
-    };
-    const places = await generateSurroundingPlaces(
-      mockSpindle,
-      "tendo_dojo:hall",
-      { scene: { place: "tendo_dojo:hall" } }
-    );
+  test("extractLedgerRaw extracts from untagged <details> block with yaml", () => {
+    const reply = `
+The rain started drumming against the glass.
 
-    expect(Object.keys(places).length).toBeGreaterThan(0);
-    expect(Object.keys(places)[0]).toContain("tendo_dojo");
+<details>
+\`\`\`yaml
+clock:
+  t: "D2 09:00"
+scene:
+  place: "school:roof"
+actors:
+  ranma:
+    name: "Ranma Saotome"
+    passions:
+      anger: 50
+    relations:
+      user:
+        affinity: 30
+        betrayal_threshold: 75
+\`\`\`
+</details>
+`;
+
+    const clean = extractProse(reply);
+    expect(clean).toBe("The rain started drumming against the glass.");
+
+    const raw = extractLedgerRaw(reply);
+    expect(raw).not.toBeNull();
+    const parsed = parseLedgerYaml(raw!);
+    expect(parsed.scene?.place).toBe("school:roof");
+    expect((parsed.actors?.["ranma"]?.relations as any)?.["user"]?.betrayal_threshold).toBe(75);
+  });
+});
+
+describe("Character Rulebook Lorebook System", () => {
+  test("identifies ruleset book names and entry titles", () => {
+    expect(isRulesetBookName("lumivn-ruleset")).toBe(true);
+    expect(isRulesetBookName("lumivn-ruleset-v2")).toBe(true);
+    expect(isRulesetBookName("my_regular_lore")).toBe(false);
+
+    expect(isRulesetEntryTitle("lumivn-ruleset · Places")).toBe(true);
+    expect(isRulesetEntryTitle("[lumivn] Cast")).toBe(true);
+    expect(isRulesetEntryTitle("General Lore")).toBe(false);
   });
 
-  test("simulateOffscreenMoves produces bulletin post and rumor", async () => {
+  test("ensureCharacterRulebook creates and attaches world book when missing", async () => {
+    const createdEntries: any[] = [];
+    let updatedChar: any = null;
+
     const mockSpindle: any = {
-      log: { error: () => {}, info: () => {} },
-    };
-    const sim = await simulateOffscreenMoves(mockSpindle, {
-      clock: { t: "14:00", date: "Day 1" },
-      actors: {
-        akane: { name: "Akane" },
-        ranma: { name: "Ranma" },
+      characters: {
+        get: async () => ({ id: "char_1", name: "Akane", world_book_ids: [] }),
+        update: async (id: string, patch: any) => {
+          updatedChar = patch;
+        },
       },
-    });
+      world_books: {
+        create: async (data: any) => ({ id: "wb_999", name: data.name }),
+        entries: {
+          create: async (bookId: string, entry: any) => {
+            createdEntries.push(entry);
+            return { id: `entry_${createdEntries.length}`, ...entry };
+          },
+        },
+      },
+      log: { info: () => {}, warn: () => {} },
+    };
 
-    expect(sim.bulletin).toBeDefined();
-    expect(sim.bulletin.title).toContain("Spotted");
-    expect(sim.relationUpdates?.length).toBe(1);
+    const bookId = await ensureCharacterRulebook(
+      mockSpindle,
+      "char_1",
+      { places: { tendo_dojo: "url1" }, characters: { akane: {} as any } }
+    );
+
+    expect(bookId).toBe("wb_999");
+    expect(createdEntries.length).toBe(2);
+    expect(createdEntries[0].comment).toContain("Places");
+    expect(createdEntries[1].comment).toContain("Cast");
+    expect(updatedChar?.world_book_ids).toEqual(["wb_999"]);
   });
 });

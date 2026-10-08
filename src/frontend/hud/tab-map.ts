@@ -1,10 +1,8 @@
-import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { LedgerData, PlaceRoute, PlaceNode } from "../../shared/types.js";
 
 export class MapTab {
   public root: HTMLElement;
   private onAction: (actionText: string) => void;
-  private ctx?: SpindleFrontendContext;
   private viewMode: "indoor" | "outdoor" = "indoor";
 
   // Pan & Zoom state
@@ -16,9 +14,8 @@ export class MapTab {
   private startPointerY = 0;
   private selectedNodeId: string | null = null;
 
-  constructor(onAction: (actionText: string) => void, ctx?: SpindleFrontendContext) {
+  constructor(onAction: (actionText: string) => void) {
     this.onAction = onAction;
-    this.ctx = ctx;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-map";
   }
@@ -589,25 +586,9 @@ export class MapTab {
             ${isGated ? "🔒 Travel Gated" : `Travel to ${cleanName.replace(/_/g, " ")}`}
           </button>
         ` : `
-          <div style="display: flex; flex-direction: column; gap: 6px;">
-            <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase;">Room Interactions</div>
-            <button id="vn-sidebar-search-btn" class="vn-btn" style="width: 100%; padding: 6px; font-size: 11px; font-weight: 600; background: #334155; color: #f8fafc; border: 1px solid #475569; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;">
-              <span>🔍</span> <span>Snoop / Search Room</span>
-            </button>
-            <button id="vn-sidebar-scout-btn" class="vn-btn" style="width: 100%; padding: 6px; font-size: 11px; font-weight: 600; background: #1e293b; color: #38bdf8; border: 1px solid rgba(56,189,248,0.4); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;">
-              <span>🗺️</span> <span>Scout Connected Areas</span>
-            </button>
-            ${cleanName.includes("bath") || cleanName.includes("wash") ? `
-              <button id="vn-sidebar-wash-btn" class="vn-btn" style="width: 100%; padding: 6px; font-size: 11px; background: #0f766e; color: #ccfbf1; border: none; cursor: pointer;">
-                🚿 Refresh / Wash Face
-              </button>
-            ` : ""}
-            ${cleanName.includes("kitchen") || cleanName.includes("bar") || cleanName.includes("cafe") ? `
-              <button id="vn-sidebar-snack-btn" class="vn-btn" style="width: 100%; padding: 6px; font-size: 11px; background: #b45309; color: #fef3c7; border: none; cursor: pointer;">
-                ☕ Snack / Grab Coffee
-              </button>
-            ` : ""}
-          </div>
+          <button class="vn-btn" style="width: 100%; padding: 8px; font-size: 12px; background: #0284c7; cursor: default;" disabled>
+            ✓ Already Present Here
+          </button>
         `}
       </div>
     `;
@@ -615,18 +596,6 @@ export class MapTab {
     sidebar.querySelector("#vn-sidebar-navigate-btn")?.addEventListener("click", () => {
       if (isGated) return;
       this.onAction(`*Travels to the ${cleanName.replace(/_/g, " ")}*`);
-    });
-    sidebar.querySelector("#vn-sidebar-search-btn")?.addEventListener("click", () => {
-      this.ctx?.sendToBackend({ type: "vn_search_room", placeId: selected });
-    });
-    sidebar.querySelector("#vn-sidebar-scout-btn")?.addEventListener("click", () => {
-      this.ctx?.sendToBackend({ type: "vn_scout_places", placeId: selected });
-    });
-    sidebar.querySelector("#vn-sidebar-wash-btn")?.addEventListener("click", () => {
-      this.onAction(`*Washes face and freshens up in the ${cleanName.replace(/_/g, " ")}*`);
-    });
-    sidebar.querySelector("#vn-sidebar-snack-btn")?.addEventListener("click", () => {
-      this.onAction(`*Prepares a light snack and drink in the ${cleanName.replace(/_/g, " ")}*`);
     });
   }
 }

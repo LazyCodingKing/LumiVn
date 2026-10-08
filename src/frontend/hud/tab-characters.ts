@@ -1,5 +1,4 @@
-import type { SpindleFrontendContext } from "lumiverse-spindle-types";
-import type { LedgerData, ActorDossier, AssetManifest, RosterCharacter, ActorPassions } from "../../shared/types.js";
+import type { LedgerData, ActorDossier, AssetManifest, RosterCharacter } from "../../shared/types.js";
 
 // Helper normalizers for tuples vs objects emitted by LLM My World 1.85 ledger
 function normalizeGoal(g: any): {
@@ -177,41 +176,11 @@ function normalizeRoutine(r: any): {
   };
 }
 
-export function getActorMoodBadge(passions?: ActorPassions): { label: string; color: string; icon: string } {
-  if (!passions) return { label: "Composed", color: "#94a3b8", icon: "😐" };
-  const map: Record<string, { label: string; color: string; icon: string }> = {
-    arousal: { label: "Flustered", color: "#f43f5e", icon: "😳" },
-    anger: { label: "Irritated", color: "#ef4444", icon: "😠" },
-    fear: { label: "Guarded", color: "#a855f7", icon: "😨" },
-    suspicion: { label: "Suspicious", color: "#eab308", icon: "🤨" },
-    stress: { label: "Stressed", color: "#f97316", icon: "😰" },
-    joy: { label: "Pleased", color: "#10b981", icon: "😊" },
-    sadness: { label: "Pensive", color: "#38bdf8", icon: "😔" },
-    shame: { label: "Embarrassed", color: "#ec4899", icon: "🫣" },
-  };
-  let topKey = "";
-  let topVal = 0;
-  for (const [k, v] of Object.entries(passions)) {
-    if (typeof v === "number" && v > topVal) {
-      topVal = v;
-      topKey = k;
-    }
-  }
-  if (topVal >= 20 && map[topKey]) {
-    return map[topKey]!;
-  }
-  return { label: "Composed", color: "#64748b", icon: "😐" };
-}
-
 export class CharactersTab {
   public root: HTMLElement;
   private selectedActorId: string | null = null;
-  private ctx?: SpindleFrontendContext;
-  private onAction?: (text: string) => void;
 
-  constructor(ctx?: SpindleFrontendContext, onAction?: (text: string) => void) {
-    this.ctx = ctx;
-    this.onAction = onAction;
+  constructor() {
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-characters";
   }
@@ -313,7 +282,6 @@ export class CharactersTab {
       item.style.cssText = `display: flex; flex-direction: column; align-items: center; cursor: pointer; min-width: 68px; transition: transform 0.15s ease;`;
       const displayName = id.toLowerCase() === "user" ? "Player (You)" : actor.name || id;
 
-      const moodBadge = getActorMoodBadge(actor.passions);
       item.innerHTML = `
         <div style="width: 52px; height: 52px; border-radius: 50%; overflow: hidden; border: 2px solid ${isSelected ? "#818cf8" : "#475569"}; box-shadow: ${isSelected ? "0 0 10px rgba(99,102,241,0.6)" : "none"}; background: #1e293b; display: flex; align-items: center; justify-content: center; position: relative;">
           ${avatarUrl ? `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="${displayName}" />` : `<span style="font-size: 22px;">👤</span>`}
@@ -321,9 +289,6 @@ export class CharactersTab {
         </div>
         <span style="font-size: 11px; margin-top: 5px; color: ${isSelected ? "#f8fafc" : "#94a3b8"}; font-weight: ${isSelected ? "700" : "500"}; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
           ${displayName}
-        </span>
-        <span style="font-size: 9px; margin-top: 2px; padding: 1px 4px; border-radius: 4px; background: #0f172a; border: 1px solid ${moodBadge.color}; color: ${moodBadge.color}; font-weight: 600; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-          ${moodBadge.icon} ${moodBadge.label}
         </span>
         ${rosterItem?.loc ? `<span style="font-size: 9px; color: #64748b; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${rosterItem.loc}</span>` : ""}
       `;
@@ -425,94 +390,6 @@ export class CharactersTab {
         </div>
       ` : ""}
     `;
-
-    if (!isUser) {
-      const actionsBar = document.createElement("div");
-      actionsBar.style.cssText = "display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 8px; border-top: 1px solid #334155;";
-
-      const unfoldBtn = document.createElement("button");
-      unfoldBtn.className = "vn-btn";
-      unfoldBtn.style.cssText = "font-size: 11px; padding: 5px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px; background: #4f46e5; color: white; border: none; cursor: pointer; font-weight: 600;";
-      unfoldBtn.innerHTML = `<span>📖</span> <span>Unfold Backstory & Dossier</span>`;
-      unfoldBtn.addEventListener("click", () => {
-        unfoldBtn.disabled = true;
-        unfoldBtn.innerHTML = `<span>⏳</span> <span>Generating Dossier...</span>`;
-        this.ctx?.sendToBackend({
-          type: "vn_unfold_dossier",
-          actorId: actor.id || displayName,
-          actorName: displayName,
-        });
-      });
-      actionsBar.appendChild(unfoldBtn);
-
-      const giftBtn = document.createElement("button");
-      giftBtn.className = "vn-btn";
-      giftBtn.style.cssText = "font-size: 11px; padding: 5px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px; background: #0f172a; color: #f8fafc; border: 1px solid #475569; cursor: pointer; font-weight: 600;";
-      giftBtn.innerHTML = `<span>🎁</span> <span>Give Gift</span>`;
-      giftBtn.addEventListener("click", () => {
-        const userCarried = ledger.actors?.user?.inventory?.carried || [];
-        if (!userCarried.length) {
-          alert("You have no carried items to give as a gift.");
-          return;
-        }
-        const itemToGift = prompt(`Select item to gift to ${displayName}:\nAvailable: ${userCarried.join(", ")}`, userCarried[0]);
-        if (itemToGift && itemToGift.trim()) {
-          this.ctx?.sendToBackend({
-            type: "vn_gift_item",
-            actorId: actor.id || displayName,
-            itemName: itemToGift.trim(),
-          });
-        }
-      });
-      actionsBar.appendChild(giftBtn);
-
-      banner.appendChild(actionsBar);
-
-      // Triple Relationship Dynamics & Favors
-      const userRel = (rels.user as Record<string, any>) || {};
-      const aff = Math.min(100, Math.max(0, Number(userRel.affinity ?? 50)));
-      const dom = Math.min(100, Math.max(0, Number(userRel.respect ?? userRel.trust ?? 50)));
-      const att = Math.min(100, Math.max(0, Number(userRel.attraction ?? 20)));
-
-      const relSection = document.createElement("div");
-      relSection.style.cssText = "margin-top: 10px; padding: 10px; background: #0f172a; border-radius: 6px; border: 1px solid #334155;";
-      relSection.innerHTML = `
-        <div style="font-size: 11px; font-weight: 700; color: #f8fafc; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
-          <span>Dynamic Relationship Metrics</span>
-          <span style="color: #94a3b8; font-size: 10px; font-weight: normal;">Favors Owed: <strong style="color: #fbbf24;">${userRel.favors_owed ?? 0}</strong></span>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 10px;">
-          <div>
-            <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
-              <span style="color: #f43f5e; font-weight: 600;">❤️ Affection / Trust</span>
-              <span><strong>${aff}%</strong></span>
-            </div>
-            <div style="height: 6px; background: #334155; border-radius: 3px; overflow: hidden;">
-              <div style="height: 100%; width: ${aff}%; background: linear-gradient(90deg, #f43f5e, #fb7185); border-radius: 3px;"></div>
-            </div>
-          </div>
-          <div>
-            <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
-              <span style="color: #38bdf8; font-weight: 600;">⚡ Dominance / Influence</span>
-              <span><strong>${dom}%</strong></span>
-            </div>
-            <div style="height: 6px; background: #334155; border-radius: 3px; overflow: hidden;">
-              <div style="height: 100%; width: ${dom}%; background: linear-gradient(90deg, #0284c7, #38bdf8); border-radius: 3px;"></div>
-            </div>
-          </div>
-          <div>
-            <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
-              <span style="color: #a855f7; font-weight: 600;">💜 Attraction / Chemistry</span>
-              <span><strong>${att}%</strong></span>
-            </div>
-            <div style="height: 6px; background: #334155; border-radius: 3px; overflow: hidden;">
-              <div style="height: 100%; width: ${att}%; background: linear-gradient(90deg, #9333ea, #c084fc); border-radius: 3px;"></div>
-            </div>
-          </div>
-        </div>
-      `;
-      banner.appendChild(relSection);
-    }
 
     // Passions Snapshot Badges
     const rawPassions = actor.passions;
