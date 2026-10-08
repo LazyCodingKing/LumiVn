@@ -33085,9 +33085,10 @@ var LEDGER_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Ledger.*?<\/summary>(
 var YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
 var THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
 var SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary>[\s\S]*?<\/details>/gi;
+var DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"\s*:\s*[\s\S]*?\}/gi;
 var PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
 function extractProse(rawContent) {
-  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(LEDGER_DETAILS_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
+  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(LEDGER_DETAILS_RE, "").replace(DIRECTOR_JSON_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
   return cleaned;
 }
 function extractParagraphs(prose) {
@@ -34196,12 +34197,16 @@ class DiagnosticsTab {
     header.querySelector("#vn-copy-director-btn")?.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
       const note = diagBus.getDirectorNote();
-      const text = note ? note.directorNote ? `[${note.threadLabel}]
-${note.directorNote}` : JSON.stringify(note, null, 2) : "No active director note";
-      await navigator.clipboard.writeText(text).catch(() => {
-        return;
-      });
-      showToast(btn, "Copy Director Note");
+      if (note && note.directorNote) {
+        const textToCopy = `[${note.threadLabel || "Active Thread"}]
+${note.directorNote}`;
+        await navigator.clipboard.writeText(textToCopy).catch(() => {
+          return;
+        });
+        showToast(btn, "Copy Director Note");
+      } else {
+        showToast(btn, "No Note Available");
+      }
     });
     header.querySelector("#vn-copy-json-btn")?.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
@@ -36594,13 +36599,6 @@ function setup(ctx) {
       diagBus.setDirectorNote(payload.data);
     } else if (payload?.type === "vn_director_log" && payload.log) {
       diagDrawer?.pushDirectorLog?.(payload.log);
-      if (payload.log.directive) {
-        diagBus.setDirectorNote({
-          directorNote: payload.log.directive,
-          threadLabel: "Turn Guidance",
-          timestamp: payload.log.timestamp
-        });
-      }
     } else if (payload?.type === "vn_director_logs" && Array.isArray(payload.logs)) {
       diagDrawer?.setDirectorLogs?.(payload.logs);
     } else if (payload?.type === "vn_error") {

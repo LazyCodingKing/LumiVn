@@ -4,14 +4,28 @@ var DEFAULT_MANIFEST = {
   characters: {}
 };
 var DEFAULT_DIRECTOR_SETTINGS = {
-  systemPrompt: [
-    "[LumiVN Living World Director]",
-    "- PLAYER AGENCY GUARD: Never write dialogue, physical reactions, or internal choices for the player character.",
-    "- NPC AUTONOMY: Present NPCs must act on their own active want_now before accommodating {{user}}.",
-    "- PERSISTENT SECRETS: NPCs must conceal guarded secrets until direct witnessed evidence forces exposure.",
-    "- UNRESOLVED TENSION: Keep current scene friction active; do not rush to polite consensus."
-  ].join(`
-`),
+  systemPrompt: `You are LumiWorld, a private world-state director for an interactive Lumiverse chat.
+
+Your job is to advance the world behind the next visible reply.
+
+Do not recap what already happened. Do not restate recent dialogue. Do not explain lore. Do not open with character names or summaries.
+
+Write only the next world-state directive:
+- what changes in the environment, situation, systems, factions, observers, or hidden risk
+- how that pressure forces NPCs to act now
+- what the main model should show in the next reply
+- what must remain unresolved or unrevealed
+
+Use imperative language. Start with a verb such as "Make", "Let", "Have", "Keep", "Escalate", "Pressure", or "Treat".
+
+The directive should feel like the world moving forward, not a recap of the scene.
+
+Return only one private directive for the next visible reply. Do not write the visible assistant reply. Do not address the user. Do not mention LumiWorld, the controller, this prompt, or the directive.
+
+Prefer JSON exactly like:
+{"director_note":"...","thread_label":"optional short name of the specific story thread developed"}
+
+Omit thread_label when no specific thread can be named. Plain text is acceptable if needed.`,
   userNotes: "",
   enabled: true
 };
@@ -3282,9 +3296,10 @@ var LEDGER_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Ledger.*?<\/summary>(
 var YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
 var THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
 var SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary>[\s\S]*?<\/details>/gi;
+var DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"\s*:\s*[\s\S]*?\}/gi;
 var PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
 function extractProse(rawContent) {
-  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(LEDGER_DETAILS_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
+  let cleaned = (rawContent || "").replace(THINK_TAGS_RE, "").replace(SCENE_LOGIC_RE, "").replace(LEDGER_DETAILS_RE, "").replace(DIRECTOR_JSON_RE, "").replace(PLAYER_TRACKING_RE, "").trim();
   return cleaned;
 }
 function extractParagraphs(prose) {
@@ -4065,62 +4080,21 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     if (!targetMessage || !targetMessage.content)
       return;
     try {
-      let parsedJson = null;
-      const contentStr = targetMessage.content.trim();
-      if (contentStr.startsWith("{") && contentStr.endsWith("}")) {
-        try {
-          parsedJson = JSON.parse(contentStr);
-        } catch {}
-      }
-      if (!parsedJson) {
-        const jsonBlockMatch = contentStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-        if (jsonBlockMatch) {
-          try {
-            parsedJson = JSON.parse(jsonBlockMatch[1].trim());
-          } catch {}
+      const jsonMatch = targetMessage.content.match(/\{[\s\S]*?"director_note"[\s\S]*?\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed && typeof parsed.director_note === "string") {
+          spindle.sendToFrontend({
+            type: "vn_director_note",
+            data: {
+              directorNote: parsed.director_note.trim(),
+              threadLabel: (parsed.thread_label || "Active Thread").trim(),
+              timestamp: new Date().toLocaleTimeString()
+            }
+          });
         }
       }
-      if (!parsedJson && (contentStr.includes("director_note") || contentStr.includes("thread_label"))) {
-        const objMatch = contentStr.match(/\{[\s\S]*?"(?:director_note|thread_label)"[\s\S]*?\}/);
-        if (objMatch) {
-          try {
-            parsedJson = JSON.parse(objMatch[0]);
-          } catch {}
-        }
-      }
-      if (parsedJson && (parsedJson.director_note || parsedJson.thread_label)) {
-        const noteData = {
-          directorNote: String(parsedJson.director_note || ""),
-          threadLabel: String(parsedJson.thread_label || "Active Thread"),
-          timestamp: new Date().toLocaleTimeString()
-        };
-        spindle.sendToFrontend({
-          type: "vn_director_note",
-          data: noteData
-        });
-        const recoveredLogEntry = {
-          timestamp: noteData.timestamp || new Date().toLocaleTimeString(),
-          directive: `[Director Note: ${noteData.threadLabel}] ${noteData.directorNote}`,
-          worldChanges: [],
-          npcChanges: [],
-          mutations: ["Recovered JSON director note from assistant output"]
-        };
-        let logBuffer = directorLogBuffers.get(chatId);
-        if (!logBuffer) {
-          logBuffer = await storage.getDirectorLogs(chatId);
-        }
-        logBuffer.push(recoveredLogEntry);
-        if (logBuffer.length > 20) {
-          logBuffer = logBuffer.slice(logBuffer.length - 20);
-        }
-        directorLogBuffers.set(chatId, logBuffer);
-        await storage.saveDirectorLogs(chatId, logBuffer);
-        spindle.sendToFrontend({
-          type: "vn_director_log",
-          log: recoveredLogEntry
-        });
-      }
-    } catch {}
+    } catch (e) {}
     const rawLedger = extractLedgerRaw(targetMessage.content);
     let cumulativeLedger = await storage.getChatState(chatId);
     const prevLedger = cumulativeLedger ? JSON.parse(JSON.stringify(cumulativeLedger)) : null;

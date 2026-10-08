@@ -85,9 +85,13 @@ export class DiagnosticsTab {
     header.querySelector("#vn-copy-director-btn")?.addEventListener("click", async (e) => {
       const btn = e.currentTarget as HTMLButtonElement;
       const note = diagBus.getDirectorNote();
-      const text = note ? (note.directorNote ? `[${note.threadLabel}]\n${note.directorNote}` : JSON.stringify(note, null, 2)) : "No active director note";
-      await navigator.clipboard.writeText(text).catch(() => undefined);
-      showToast(btn, "Copy Director Note");
+      if (note && note.directorNote) {
+        const textToCopy = `[${note.threadLabel || "Active Thread"}]\n${note.directorNote}`;
+        await navigator.clipboard.writeText(textToCopy).catch(() => undefined);
+        showToast(btn, "Copy Director Note");
+      } else {
+        showToast(btn, "No Note Available");
+      }
     });
 
     header.querySelector("#vn-copy-json-btn")?.addEventListener("click", async (e) => {

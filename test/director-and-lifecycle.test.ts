@@ -128,10 +128,8 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       expect(directorMsg.role).toBe("system");
       expect(directorMsg.content).toContain("[LumiVN Living World Director Guidance]");
       expect(directorMsg.content).toContain("CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON.");
-      expect(directorMsg.content).toContain("PLAYER AGENCY GUARD");
-      expect(directorMsg.content).toContain("NPC AUTONOMY");
-      expect(directorMsg.content).toContain("PERSISTENT SECRETS");
-      expect(directorMsg.content).toContain("UNRESOLVED TENSION");
+      expect(directorMsg.content).toContain("You are LumiWorld, a private world-state director");
+      expect(directorMsg.content).toContain("advance the world behind the next visible reply");
       expect(directorMsg.content).toContain("Stay cautious.");
 
       // Injected directive cached for post-turn diff logging

@@ -5,6 +5,7 @@ const LEDGER_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Ledger.*?<\/summary
 const YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
 const THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
 const SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary>[\s\S]*?<\/details>/gi;
+const DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"\s*:\s*[\s\S]*?\}/gi;
 const PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
 
 /**
@@ -15,6 +16,7 @@ export function extractProse(rawContent: string): string {
     .replace(THINK_TAGS_RE, "")
     .replace(SCENE_LOGIC_RE, "")
     .replace(LEDGER_DETAILS_RE, "")
+    .replace(DIRECTOR_JSON_RE, "")
     .replace(PLAYER_TRACKING_RE, "")
     .trim();
 

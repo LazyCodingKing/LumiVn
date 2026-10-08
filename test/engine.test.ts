@@ -110,6 +110,13 @@ describe("LumiVN Deterministic Ledger Parser", () => {
     expect(prose).not.toContain('Loadout:');
   });
 
+  test("extracts narrative prose cleanly stripping director_note JSON block", () => {
+    const rawWithDirector = `{"director_note": "Escalate tension immediately.", "thread_label": "Tension Arc"}\n\nAlethea stepped back, holding her breath. "Who is there?"`;
+    const cleaned = extractProse(rawWithDirector);
+    expect(cleaned).toBe('Alethea stepped back, holding her breath. "Who is there?"');
+    expect(cleaned).not.toContain("director_note");
+  });
+
   test("parses paragraphs and detects active speaker", () => {
     const prose = extractProse(SAMPLE_MY_WORLD_MESSAGE);
     const paras = extractParagraphs(prose);

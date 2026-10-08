@@ -224,73 +224,24 @@ async function processChatTurn(
 
     if (!targetMessage || !targetMessage.content) return;
 
-    // Fallback JSON recovery for hijacked assistant responses
+    // Extract and broadcast AI-generated Director Note
     try {
-      let parsedJson: Record<string, any> | null = null;
-      const contentStr = targetMessage.content.trim();
-
-      if (contentStr.startsWith("{") && contentStr.endsWith("}")) {
-        try {
-          parsedJson = JSON.parse(contentStr);
-        } catch {}
-      }
-
-      if (!parsedJson) {
-        const jsonBlockMatch = contentStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-        if (jsonBlockMatch) {
-          try {
-            parsedJson = JSON.parse(jsonBlockMatch[1].trim());
-          } catch {}
+      const jsonMatch = targetMessage.content.match(/\{[\s\S]*?"director_note"[\s\S]*?\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed && typeof parsed.director_note === "string") {
+          spindle.sendToFrontend({
+            type: "vn_director_note",
+            data: {
+              directorNote: parsed.director_note.trim(),
+              threadLabel: (parsed.thread_label || "Active Thread").trim(),
+              timestamp: new Date().toLocaleTimeString(),
+            },
+          });
         }
       }
-
-      if (!parsedJson && (contentStr.includes("director_note") || contentStr.includes("thread_label"))) {
-        const objMatch = contentStr.match(/\{[\s\S]*?"(?:director_note|thread_label)"[\s\S]*?\}/);
-        if (objMatch) {
-          try {
-            parsedJson = JSON.parse(objMatch[0]);
-          } catch {}
-        }
-      }
-
-      if (parsedJson && (parsedJson.director_note || parsedJson.thread_label)) {
-        const noteData: DirectorNoteData = {
-          directorNote: String(parsedJson.director_note || ""),
-          threadLabel: String(parsedJson.thread_label || "Active Thread"),
-          timestamp: new Date().toLocaleTimeString(),
-        };
-
-        spindle.sendToFrontend({
-          type: "vn_director_note",
-          data: noteData,
-        });
-
-        const recoveredLogEntry: DirectorLogEntry = {
-          timestamp: noteData.timestamp || new Date().toLocaleTimeString(),
-          directive: `[Director Note: ${noteData.threadLabel}] ${noteData.directorNote}`,
-          worldChanges: [],
-          npcChanges: [],
-          mutations: ["Recovered JSON director note from assistant output"],
-        };
-
-        let logBuffer = directorLogBuffers.get(chatId);
-        if (!logBuffer) {
-          logBuffer = await storage.getDirectorLogs(chatId);
-        }
-        logBuffer.push(recoveredLogEntry);
-        if (logBuffer.length > 20) {
-          logBuffer = logBuffer.slice(logBuffer.length - 20);
-        }
-        directorLogBuffers.set(chatId, logBuffer);
-        await storage.saveDirectorLogs(chatId, logBuffer);
-
-        spindle.sendToFrontend({
-          type: "vn_director_log",
-          log: recoveredLogEntry,
-        });
-      }
-    } catch {
-      // JSON recovery fallback error ignored
+    } catch (e) {
+      // Ignore malformed JSON chunks
     }
 
     // Extract Ledger YAML
@@ -1500,6 +1451,7 @@ const LEDGER_DETAILS_RE = /<details[^>]*>\s*<summary[^>]*>.*?Ledger.*?<\/summary
 const YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
 const THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
 const SCENE_LOGIC_RE = /<details[^>]*>\s*<summary[^>]*>.*?Scene Logic.*?<\/summary>[\s\S]*?<\/details>/gi;
+const DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"\s*:\s*[\s\S]*?\}/gi;
 const PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
 
 /**
@@ -1510,6 +1462,7 @@ export function extractProse(rawContent: string): string {
     .replace(THINK_TAGS_RE, "")
     .replace(SCENE_LOGIC_RE, "")
     .replace(LEDGER_DETAILS_RE, "")
+    .replace(DIRECTOR_JSON_RE, "")
     .replace(PLAYER_TRACKING_RE, "")
     .trim();
 
@@ -1789,13 +1742,28 @@ const DEFAULT_MANIFEST: AssetManifest = {
 };
 
 export const DEFAULT_DIRECTOR_SETTINGS: DirectorSettings = {
-  systemPrompt: [
-    "[LumiVN Living World Director]",
-    "- PLAYER AGENCY GUARD: Never write dialogue, physical reactions, or internal choices for the player character.",
-    "- NPC AUTONOMY: Present NPCs must act on their own active want_now before accommodating {{user}}.",
-    "- PERSISTENT SECRETS: NPCs must conceal guarded secrets until direct witnessed evidence forces exposure.",
-    "- UNRESOLVED TENSION: Keep current scene friction active; do not rush to polite consensus.",
-  ].join("\n"),
+  systemPrompt: `You are LumiWorld, a private world-state director for an interactive Lumiverse chat.
+
+Your job is to advance the world behind the next visible reply.
+
+Do not recap what already happened. Do not restate recent dialogue. Do not explain lore. Do not open with character names or summaries.
+
+Write only the next world-state directive:
+- what changes in the environment, situation, systems, factions, observers, or hidden risk
+- how that pressure forces NPCs to act now
+- what the main model should show in the next reply
+- what must remain unresolved or unrevealed
+
+Use imperative language. Start with a verb such as "Make", "Let", "Have", "Keep", "Escalate", "Pressure", or "Treat".
+
+The directive should feel like the world moving forward, not a recap of the scene.
+
+Return only one private directive for the next visible reply. Do not write the visible assistant reply. Do not address the user. Do not mention LumiWorld, the controller, this prompt, or the directive.
+
+Prefer JSON exactly like:
+{"director_note":"...","thread_label":"optional short name of the specific story thread developed"}
+
+Omit thread_label when no specific thread can be named. Plain text is acceptable if needed.`,
   userNotes: "",
   enabled: true,
 };
@@ -2192,13 +2160,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       diagBus.setDirectorNote(payload.data as any);
     } else if (payload?.type === "vn_director_log" && payload.log) {
       diagDrawer?.pushDirectorLog?.(payload.log as DirectorLogEntry);
-      if ((payload.log as any).directive) {
-        diagBus.setDirectorNote({
-          directorNote: (payload.log as any).directive,
-          threadLabel: "Turn Guidance",
-          timestamp: (payload.log as any).timestamp,
-        });
-      }
     } else if (payload?.type === "vn_director_logs" && Array.isArray(payload.logs)) {
       diagDrawer?.setDirectorLogs?.(payload.logs as DirectorLogEntry[]);
     } else if (payload?.type === "vn_error") {
@@ -3156,9 +3117,13 @@ export class DiagnosticsTab {
     header.querySelector("#vn-copy-director-btn")?.addEventListener("click", async (e) => {
       const btn = e.currentTarget as HTMLButtonElement;
       const note = diagBus.getDirectorNote();
-      const text = note ? (note.directorNote ? `[${note.threadLabel}]\n${note.directorNote}` : JSON.stringify(note, null, 2)) : "No active director note";
-      await navigator.clipboard.writeText(text).catch(() => undefined);
-      showToast(btn, "Copy Director Note");
+      if (note && note.directorNote) {
+        const textToCopy = `[${note.threadLabel || "Active Thread"}]\n${note.directorNote}`;
+        await navigator.clipboard.writeText(textToCopy).catch(() => undefined);
+        showToast(btn, "Copy Director Note");
+      } else {
+        showToast(btn, "No Note Available");
+      }
     });
 
     header.querySelector("#vn-copy-json-btn")?.addEventListener("click", async (e) => {
@@ -10552,10 +10517,8 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       expect(directorMsg.role).toBe("system");
       expect(directorMsg.content).toContain("[LumiVN Living World Director Guidance]");
       expect(directorMsg.content).toContain("CRITICAL INSTRUCTION: Execute this guidance as internal steering. Do NOT output JSON.");
-      expect(directorMsg.content).toContain("PLAYER AGENCY GUARD");
-      expect(directorMsg.content).toContain("NPC AUTONOMY");
-      expect(directorMsg.content).toContain("PERSISTENT SECRETS");
-      expect(directorMsg.content).toContain("UNRESOLVED TENSION");
+      expect(directorMsg.content).toContain("You are LumiWorld, a private world-state director");
+      expect(directorMsg.content).toContain("advance the world behind the next visible reply");
       expect(directorMsg.content).toContain("Stay cautious.");
 
       // Injected directive cached for post-turn diff logging
@@ -11086,6 +11049,13 @@ describe("LumiVN Deterministic Ledger Parser", () => {
     expect(prose).not.toContain('Scene Logic');
     expect(prose).not.toContain('Ledger');
     expect(prose).not.toContain('Loadout:');
+  });
+
+  test("extracts narrative prose cleanly stripping director_note JSON block", () => {
+    const rawWithDirector = `{"director_note": "Escalate tension immediately.", "thread_label": "Tension Arc"}\n\nAlethea stepped back, holding her breath. "Who is there?"`;
+    const cleaned = extractProse(rawWithDirector);
+    expect(cleaned).toBe('Alethea stepped back, holding her breath. "Who is there?"');
+    expect(cleaned).not.toContain("director_note");
   });
 
   test("parses paragraphs and detects active speaker", () => {

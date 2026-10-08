@@ -244,13 +244,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       diagBus.setDirectorNote(payload.data as any);
     } else if (payload?.type === "vn_director_log" && payload.log) {
       diagDrawer?.pushDirectorLog?.(payload.log as DirectorLogEntry);
-      if ((payload.log as any).directive) {
-        diagBus.setDirectorNote({
-          directorNote: (payload.log as any).directive,
-          threadLabel: "Turn Guidance",
-          timestamp: (payload.log as any).timestamp,
-        });
-      }
     } else if (payload?.type === "vn_director_logs" && Array.isArray(payload.logs)) {
       diagDrawer?.setDirectorLogs?.(payload.logs as DirectorLogEntry[]);
     } else if (payload?.type === "vn_error") {
