@@ -130,7 +130,7 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       expect(directorMsg.content).toContain("[LumiVN Living World Director Guidance]");
       expect(directorMsg.content).toContain("[OUTPUT FORMAT REQUIREMENT]");
       expect(directorMsg.content).toContain("Line 1: Return the director JSON object");
-      expect(directorMsg.content).toContain("STATE DETAILS CONTRACT");
+      expect(directorMsg.content).not.toContain("STATE DETAILS CONTRACT");
       expect(directorMsg.content).toContain("Stay cautious.");
 
       // Injected directive cached for post-turn diff logging

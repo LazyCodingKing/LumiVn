@@ -386,9 +386,7 @@ ${activeDirective}
 Line 1: Return the director JSON object (optionally inside <details><summary>🎬 Director</summary>...</details>):
 {"director_note":"FIRST BEAT: ... WORLD: ... OFFSCREEN: ... PRESSURE: ... PRESENT: ... VOICE: ... TEXTURE: ... CANON: ... END ON: ...","thread_label":"<3-6 words thread title>"}
 
-Follow immediately on Line 2 with natural narrative prose.
-Below the prose, append the State details block:
-${STATE_DETAILS_CONTRACT}`;
+Follow immediately on Line 2 with natural narrative prose.`;
 
   // Cache injected directive
   const generationId = (context as any)?.generationId;
