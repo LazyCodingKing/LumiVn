@@ -28,6 +28,7 @@ export interface MenuBarOptions {
   ctx: SpindleFrontendContext;
   onAction: (actionText: string) => void;
   onTransformChange?: (actorId: string, transform: SpriteTransform) => void;
+  isOverlayActive?: () => boolean;
 }
 
 export class MenuBar {
@@ -85,7 +86,7 @@ export class MenuBar {
     this.statsTab = new StatsTab();
     this.inventoryTab = new InventoryTab(options.onAction);
     this.mapTab = new MapTab(options.onAction);
-    this.phoneTab = new PhoneTab(options.ctx, options.onAction);
+    this.phoneTab = new PhoneTab(options.ctx, options.onAction, options.isOverlayActive);
     this.journalTab = new JournalTab();
     this.sceneTab = new SceneTab(options.ctx, options.onTransformChange);
     this.diagnosticsTab = new DiagnosticsTab();

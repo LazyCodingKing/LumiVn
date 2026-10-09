@@ -10,10 +10,16 @@ export class PhoneTab {
   private selectedGame: "menu" | "shooter" | "racer" | "snake" = "menu";
   private selectedChatActor: string | null = null;
   private stopCurrentGame: (() => void) | null = null;
+  private isOverlayActive?: () => boolean;
 
-  constructor(ctx: SpindleFrontendContext, onAction: (actionText: string) => void) {
+  constructor(
+    ctx: SpindleFrontendContext,
+    onAction: (actionText: string) => void,
+    isOverlayActive?: () => boolean
+  ) {
     this.ctx = ctx;
     this.onAction = onAction;
+    this.isOverlayActive = isOverlayActive;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-phone";
   }
@@ -398,36 +404,38 @@ export class PhoneTab {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (this.isOverlayActive && !this.isOverlayActive()) return;
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      ) {
+        return;
+      }
       if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
         e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         moveLeft = true;
       }
       if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
         e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         moveRight = true;
       }
       if (e.key === " " || e.key === "Enter") {
         e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         fireBullet();
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
+      if (this.isOverlayActive && !this.isOverlayActive()) return;
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      ) {
+        return;
+      }
       if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         moveLeft = false;
       }
       if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         moveRight = false;
       }
     };
@@ -629,30 +637,35 @@ export class PhoneTab {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (this.isOverlayActive && !this.isOverlayActive()) return;
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      ) {
+        return;
+      }
       if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
         e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         steerLeft();
       }
       if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
         e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         steerRight();
       }
       if (e.key === "ArrowUp" || e.key === " ") {
         e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         nitro = true;
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
+      if (this.isOverlayActive && !this.isOverlayActive()) return;
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      ) {
+        return;
+      }
       if (e.key === "ArrowUp" || e.key === " ") {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         nitro = false;
       }
     };
@@ -863,28 +876,27 @@ export class PhoneTab {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (this.isOverlayActive && !this.isOverlayActive()) return;
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      ) {
+        return;
+      }
       if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
         e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         setDir(0, -1);
       }
       if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") {
         e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         setDir(0, 1);
       }
       if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
         e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         setDir(-1, 0);
       }
       if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
         e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
         setDir(1, 0);
       }
     };

@@ -360,3 +360,14 @@ export interface DirectorLogEntry {
   mutations: string[];
 }
 
+export interface DiagnosticData {
+  timestamp: string;
+  chatId: string;
+  messageId?: string;
+  hasLedger: boolean;
+  placeId: string;
+  participants: string[];
+  bgUrl: string;
+}
+
+

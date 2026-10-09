@@ -1,5 +1,4 @@
-import type { LedgerData, AssetManifest, DirectorNoteData } from "../../shared/types.js";
-import type { DiagnosticData } from "../studio/diagnostics-drawer.js";
+import type { LedgerData, AssetManifest, DirectorNoteData, DiagnosticData } from "../../shared/types.js";
 
 export interface LogEntry {
   timestamp: string;

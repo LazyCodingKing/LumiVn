@@ -89,6 +89,7 @@ export class StageOverlay {
       onTransformChange: (actorId, transform) => {
         this.stageRenderer.setActorTransform(actorId, transform);
       },
+      isOverlayActive: () => this.isActive(),
     });
 
     // Toast Container
@@ -108,6 +109,10 @@ export class StageOverlay {
 
   public setTheme(themeId: string): void {
     applyVnTheme(this.root, themeId);
+  }
+
+  public openHudTab(tabId: any): void {
+    this.menuBar.openTab(tabId);
   }
 
   public getCurrentChatId(): string | null {
@@ -171,16 +176,27 @@ export class StageOverlay {
 
     // Register component overrides (priority 10 replace)
     const ctxAny = this.ctx as any;
-    if (typeof ctxAny.ui?.registerComponentOverride === "function") {
+    const regOverride =
+      typeof ctxAny.registerComponentOverride === "function"
+        ? ctxAny.registerComponentOverride.bind(ctxAny)
+        : typeof ctxAny.ui?.registerComponentOverride === "function"
+        ? ctxAny.ui.registerComponentOverride.bind(ctxAny.ui)
+        : null;
+
+    if (regOverride) {
       try {
         const dummyComponent = () => null;
         this.overrideHandles = (["BubbleMessage", "MinimalMessage", "InputArea"] as const).map(
           (host) =>
-            ctxAny.ui.registerComponentOverride({
+            regOverride({
               host,
+              componentId: host,
               mode: "replace",
               priority: 10,
               component: dummyComponent,
+              render: (target: HTMLElement) => {
+                target.style.display = "none";
+              },
             })
         );
       } catch (e) {

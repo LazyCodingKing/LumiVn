@@ -28,7 +28,7 @@ import {
   computeDirectorImpactDiff,
   extractChatId,
 } from "./backend/director.js";
-import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry, DirectorNoteData } from "./shared/types.js";
+import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry } from "./shared/types.js";
 
 declare const spindle: SpindleAPI;
 
@@ -36,8 +36,9 @@ const storage = new StorageManager(spindle);
 const resolver = new AssetResolver(spindle, storage);
 
 let lastActiveChatId: string | null = null;
-let isStageOpen = false;
-let activeVnChatId: string | null = null;
+
+// View Registry: Track active visual novel stage presence per chat
+const activeVnChats = new Set<string>();
 
 // LumiWorld Two-Stage Commit Lifecycle & Injected Directives Tracking
 const activeGenerationIds = new Map<string, string>(); // chatId -> generationId
@@ -64,10 +65,12 @@ async function handleInterceptor(
     messages,
     effectiveContext,
     async (cid) => {
-      const state = await storage.getChatState(cid);
-      return state || { scene: { place: "default" }, actors: {} };
+      // Memory cached access first to guarantee zero-overhead synchronous execution
+      const cached = storage.getCachedChatState(cid);
+      if (cached) return cached;
+      return (await storage.getChatState(cid)) || { scene: { place: "default" }, actors: {} };
     },
-    () => storage.getDirectorSettings(),
+    async () => storage.getDirectorSettings(),
     (key, directive) => injectedDirectives.set(key, directive)
   );
 }
@@ -80,9 +83,8 @@ if (typeof (spindle as any).registerInterceptor === "function") {
 function onHostChatSwitched(chatId: string | null) {
   if (!chatId) return;
   lastActiveChatId = chatId;
-  activeVnChatId = chatId;
   spindle.log.info("[LumiVN] Active chat switched to: " + chatId);
-  if (isStageOpen) {
+  if (activeVnChats.has(chatId)) {
     void processChatTurn(chatId, undefined, undefined, true);
   }
 }
@@ -135,8 +137,7 @@ async function resolveEffectiveChatId(suppliedChatId?: string): Promise<string |
   return null;
 }
 
-
-// ── 1. Register Command Palette Commands ──
+// ── Command Palette Commands ──
 spindle.commands.register([
   {
     id: "lumivn_launch",
@@ -156,10 +157,9 @@ spindle.commands.register([
 
 spindle.commands.onInvoked(async (commandId) => {
   if (commandId === "lumivn_launch") {
-    isStageOpen = true;
     spindle.sendToFrontend({ type: "vn_force_open" });
   } else if (commandId === "lumivn_diagnostics") {
-    await spindle.ui.openDrawerTab("vn_diagnostics");
+    spindle.sendToFrontend({ type: "vn_force_open", tab: "diagnostics" });
   }
 });
 
@@ -168,14 +168,14 @@ async function processChatTurn(
   messageId?: string,
   overrideContent?: string,
   force = false,
-  generationId?: string
+  generationId?: string,
+  swipeId?: string | number
 ): Promise<void> {
   if (!chatId) return;
 
-  // View-Gating: Guard background chats when VN stage is not active
-  if (!isStageOpen && !force) return;
+  // View-Gating: Guard background chats when VN stage is not active for this chat
+  if (!activeVnChats.has(chatId) && !force) return;
 
-  activeVnChatId = chatId;
   lastActiveChatId = chatId;
 
   try {
@@ -199,9 +199,10 @@ async function processChatTurn(
         created_at: new Date().toISOString(),
       } as unknown as ChatMessageDTO;
     } else {
+      // Bounded Message Ingestion: limit to 5 messages to prevent event-loop stalls
       let messages: ChatMessageDTO[] = [];
       try {
-        messages = await (spindle.chat as any).getMessages(chatId);
+        messages = await (spindle.chat as any).getMessages(chatId, { limit: 5 });
       } catch {}
       const boundedMessages = Array.isArray(messages) ? messages : [];
 
@@ -215,7 +216,8 @@ async function processChatTurn(
       }
     }
 
-    let cumulativeLedger = await storage.getChatState(chatId);
+    // Load state isolated by turn/swipe snapshot or active chat snapshot
+    let cumulativeLedger = await storage.getChatState(chatId, targetMessage?.id, swipeId);
 
     // If chat is new / empty / has no assistant message yet:
     if (!targetMessage || !targetMessage.content) {
@@ -252,7 +254,7 @@ async function processChatTurn(
           });
         }
       }
-    } catch (e) {
+    } catch {
       // Ignore malformed JSON chunks
     }
 
@@ -276,11 +278,10 @@ async function processChatTurn(
     if (delta) {
       cumulativeLedger = deepMergeLedger(cumulativeLedger, delta);
     } else if (!cumulativeLedger) {
-      // Create empty baseline
       cumulativeLedger = deepMergeLedger(null, {});
     }
 
-    // Phase 4: B-Plot State Monitor & Collision Roster Promotion
+    // B-Plot State Monitor & Collision Roster Promotion
     const bplotResult = processBPlots(cumulativeLedger);
     if (bplotResult.hasBPlotNotification) {
       spindle.sendToFrontend({
@@ -295,14 +296,15 @@ async function processChatTurn(
       });
     }
 
-    // Phase 2: Transactional State Merging
+    // Two-Stage Commit Lifecycle: Staged until successful generation completion
     const effectiveGenId = generationId || activeGenerationIds.get(chatId);
     const commitKey = effectiveGenId ? `${chatId}:${effectiveGenId}` : null;
     if (commitKey) {
       pendingCommits.set(commitKey, cumulativeLedger);
     }
 
-    await storage.saveChatState(chatId, cumulativeLedger);
+    // Persist active snapshot and isolated turn branch
+    await storage.saveChatState(chatId, cumulativeLedger, targetMessage.id, swipeId);
 
     if (commitKey) {
       pendingCommits.delete(commitKey);
@@ -392,7 +394,6 @@ spindle.on("GENERATION_STARTED", async (payload: GenerationStartedPayloadDTO) =>
   const { chatId, generationId } = payload || {};
   if (!chatId || !generationId) return;
 
-  activeVnChatId = chatId;
   lastActiveChatId = chatId;
 
   const previousGenId = activeGenerationIds.get(chatId);
@@ -403,10 +404,10 @@ spindle.on("GENERATION_STARTED", async (payload: GenerationStartedPayloadDTO) =>
   }
   activeGenerationIds.set(chatId, generationId);
 
-  // Notify frontend that generation started; extract user message to display under user nameplate
-  if (isStageOpen) {
+  // Notify frontend if visual novel stage is open for this chat
+  if (activeVnChats.has(chatId)) {
     try {
-      const messages: any[] = await (spindle.chat as any).getMessages(chatId);
+      const messages: any[] = await (spindle.chat as any).getMessages(chatId, { limit: 5 });
       const bounded = Array.isArray(messages) ? messages : [];
       let latestUserMsg: any = null;
       for (let i = bounded.length - 1; i >= 0; i--) {
@@ -466,33 +467,38 @@ spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
     activeGenerationIds.delete(chatId);
   }
 
-  if (!isStageOpen) return;
+  // View-Gating: abort in < 1ms if stage not open for this chat
+  if (!activeVnChats.has(chatId)) return;
   await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
 });
 
 spindle.on("MESSAGE_SWIPED", async (payload: MessageSwipedPayloadDTO) => {
-  if (!isStageOpen) return;
-  const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
-  if (cid) await processChatTurn(cid, payload.message?.id);
+  const cid = payload?.chatId || lastActiveChatId;
+  // View-Gating: abort in < 1ms if stage not active for this chat
+  if (!cid || !activeVnChats.has(cid)) return;
+  const swipeIndex = (payload as any)?.swipeIndex ?? (payload as any)?.swipe_index;
+  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex);
 });
 
 spindle.on("SWIPE_EDITED", async (payload: SwipeEditedPayloadDTO) => {
-  if (!isStageOpen) return;
-  const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
-  if (cid) await processChatTurn(cid, payload.message?.id);
+  const cid = payload?.chatId || lastActiveChatId;
+  // View-Gating: abort in < 1ms if stage not active for this chat
+  if (!cid || !activeVnChats.has(cid)) return;
+  const swipeIndex = (payload as any)?.swipeIndex ?? (payload as any)?.swipe_index;
+  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex);
 });
 
 const spindleAny = spindle as any;
 if (typeof spindleAny.on === "function") {
   spindleAny.on("MESSAGE_EDITED", async (payload: { chatId?: string; messageId?: string }) => {
-    if (!isStageOpen) return;
-    const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
-    if (cid) await processChatTurn(cid, payload.messageId);
+    const cid = payload?.chatId || lastActiveChatId;
+    if (!cid || !activeVnChats.has(cid)) return;
+    await processChatTurn(cid, payload.messageId);
   });
   spindleAny.on("MESSAGE_DELETED", async (payload: { chatId?: string }) => {
-    if (!isStageOpen) return;
-    const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
-    if (cid) await processChatTurn(cid);
+    const cid = payload?.chatId || lastActiveChatId;
+    if (!cid || !activeVnChats.has(cid)) return;
+    await processChatTurn(cid);
   });
 }
 
@@ -505,26 +511,29 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
 
   switch (type) {
     case "vn_stage_opened": {
-      isStageOpen = true;
       const cid = String(payload.chatId || "");
       if (cid) {
-        activeVnChatId = cid;
+        activeVnChats.add(cid);
         lastActiveChatId = cid;
       }
       break;
     }
 
     case "vn_stage_closed": {
-      isStageOpen = false;
+      const cid = String(payload.chatId || "");
+      if (cid) {
+        activeVnChats.delete(cid);
+      } else if (lastActiveChatId) {
+        activeVnChats.delete(lastActiveChatId);
+      }
       break;
     }
 
     case "vn_get_state":
     case "vn_init": {
-      isStageOpen = true;
       const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       if (chatId) {
-        activeVnChatId = chatId;
+        activeVnChats.add(chatId);
         lastActiveChatId = chatId;
         await processChatTurn(chatId, undefined, undefined, true);
       } else {
@@ -585,6 +594,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
       }
       break;
     }
+
     case "vn_get_manifest": {
       const manifest = await storage.getManifest();
       spindle.sendToFrontend({ type: "vn_manifest", manifest });
@@ -673,65 +683,70 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         const expression = String(payload.expression || "neutral").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
         const actionName = String(payload.actionName || "").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
         const filename = String(payload.filename || "asset.png");
-        const dataUrl = String(payload.dataUrl || "");
+        const directUrl = typeof payload.url === "string" ? payload.url : "";
+        const dataUrl = typeof payload.dataUrl === "string" ? payload.dataUrl : "";
         const chatId = String(payload.chatId || "");
-
-        if (!dataUrl) throw new Error("No image data provided");
 
         // Format compound place key if scope is present
         const finalPlaceKey = scope ? `${scope}:${placeId}` : placeId;
 
-        // Resolve userId for operator-scoped call
-        let resolvedUserId = senderUserId || (payload.userId as string | undefined);
-        if (!resolvedUserId && chatId) {
-          try {
-            const chat = await spindle.chats.get(chatId);
-            resolvedUserId = (chat as any)?.user_id || (chat as any)?.userId;
-          } catch {}
-        }
-        if (!resolvedUserId) {
-          try {
-            const chatList = await (spindle.chats as any).list?.({ limit: 1 });
-            const first = chatList?.data?.[0];
-            resolvedUserId = first?.user_id || first?.userId;
-          } catch {}
+        let finalUrl = directUrl;
+
+        // Fallback: If no direct URL provided, decode dataUrl and upload through spindle.images
+        if (!finalUrl && dataUrl) {
+          let resolvedUserId = senderUserId || (payload.userId as string | undefined);
+          if (!resolvedUserId && chatId) {
+            try {
+              const chat = await spindle.chats.get(chatId);
+              resolvedUserId = (chat as any)?.user_id || (chat as any)?.userId;
+            } catch {}
+          }
+          if (!resolvedUserId) {
+            try {
+              const chatList = await (spindle.chats as any).list?.({ limit: 1 });
+              const first = chatList?.data?.[0];
+              resolvedUserId = first?.user_id || first?.userId;
+            } catch {}
+          }
+
+          let base64 = dataUrl;
+          let mimeType = "image/png";
+          if (base64.includes(",")) {
+            const match = base64.match(/data:([^;]+);base64,/);
+            if (match) mimeType = match[1]!;
+            base64 = base64.split(",")[1] ?? "";
+          }
+          const binaryString = atob(base64);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+
+          const upload = await spindle.images.upload({
+            data: bytes,
+            filename,
+            mime_type: mimeType,
+            userId: resolvedUserId,
+            user_id: resolvedUserId,
+          } as any, resolvedUserId);
+          finalUrl = upload.url;
         }
 
-        // Decode Base64 to Uint8Array
-        let base64 = dataUrl;
-        let mimeType = "image/png";
-        if (base64.includes(",")) {
-          const match = base64.match(/data:([^;]+);base64,/);
-          if (match) mimeType = match[1]!;
-          base64 = base64.split(",")[1] ?? "";
-        }
-        const binaryString = atob(base64);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-
-        const upload = await spindle.images.upload({
-          data: bytes,
-          filename,
-          mime_type: mimeType,
-          userId: resolvedUserId,
-          user_id: resolvedUserId,
-        } as any, resolvedUserId);
+        if (!finalUrl) throw new Error("No image URL or data provided");
 
         const manifest = await storage.getManifest();
 
         if (category === "places" && finalPlaceKey) {
-          manifest.places[finalPlaceKey] = upload.url;
+          manifest.places[finalPlaceKey] = finalUrl;
         } else if (category === "characters" && actorId) {
           if (!manifest.characters[actorId]) manifest.characters[actorId] = {};
           if (!manifest.characters[actorId].outfits) manifest.characters[actorId].outfits = {};
           if (!manifest.characters[actorId].outfits[outfit]) manifest.characters[actorId].outfits[outfit] = {};
-          manifest.characters[actorId].outfits[outfit][expression] = upload.url;
+          manifest.characters[actorId].outfits[outfit][expression] = finalUrl;
         } else if (category === "actions" && actorId && actionName) {
           if (!manifest.characters[actorId]) manifest.characters[actorId] = {};
           if (!manifest.characters[actorId].actions) manifest.characters[actorId].actions = {};
-          manifest.characters[actorId].actions[actionName] = upload.url;
+          manifest.characters[actorId].actions[actionName] = finalUrl;
         }
 
         await storage.saveManifest(manifest);

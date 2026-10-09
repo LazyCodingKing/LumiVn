@@ -2,7 +2,6 @@ import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { LedgerData, AssetManifest } from "../../shared/types.js";
 import { resolveOutfitName } from "../../backend/asset-resolver.js";
 import { getSpriteTransform, type SpriteTransform } from "../stage/sprite-transform.js";
-import { removeImageBackground } from "../utils/bg-remover.js";
 
 export class SceneTab {
   public root: HTMLElement;
@@ -28,6 +27,34 @@ export class SceneTab {
 
   public setManifest(manifest: AssetManifest): void {
     this.currentManifest = manifest;
+  }
+
+  private async uploadImageFile(file: { name: string; bytes: Uint8Array; mimeType?: string }): Promise<string | null> {
+    // Attempt direct HTTP upload to avoid multi-megabyte WebSocket IPC serialization
+    try {
+      const formData = new FormData();
+      formData.append("file", new Blob([file.bytes as any], { type: file.mimeType || "image/png" }), file.name);
+      const resp = await fetch("/api/v1/images", {
+        method: "POST",
+        body: formData,
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const url = data.url || data.image_url || (data.id ? `/api/v1/images/${data.id}` : "");
+        if (url) return url;
+      }
+    } catch {
+      // Fallback if host direct fetch is unavailable
+    }
+    return null;
+  }
+
+  private async fileToDataUrl(file: { bytes: Uint8Array; mimeType?: string }): Promise<string> {
+    let binary = "";
+    for (let i = 0; i < file.bytes.byteLength; i++) {
+      binary += String.fromCharCode(file.bytes[i]!);
+    }
+    return `data:${file.mimeType || "image/png"};base64,${btoa(binary)}`;
   }
 
   public render(ledger: LedgerData, manifest?: AssetManifest): void {
@@ -77,18 +104,32 @@ export class SceneTab {
         const file = files[0]!;
 
         const { chatId, userId } = this.getContextIds();
-        const dataUrl = await this.fileToDataUrl(file);
+        const directUrl = await this.uploadImageFile(file);
 
-        this.ctx.sendToBackend({
-          type: "vn_upload_asset",
-          category: "places",
-          scope,
-          placeId: place,
-          filename: file.name,
-          dataUrl,
-          chatId,
-          userId,
-        });
+        if (directUrl) {
+          this.ctx.sendToBackend({
+            type: "vn_upload_asset",
+            category: "places",
+            scope,
+            placeId: place,
+            filename: file.name,
+            url: directUrl,
+            chatId,
+            userId,
+          });
+        } else {
+          const dataUrl = await this.fileToDataUrl(file);
+          this.ctx.sendToBackend({
+            type: "vn_upload_asset",
+            category: "places",
+            scope,
+            placeId: place,
+            filename: file.name,
+            dataUrl,
+            chatId,
+            userId,
+          });
+        }
       } catch (err) {
         console.error("[LumiVN] Background upload failed:", err);
       }
@@ -151,81 +192,40 @@ export class SceneTab {
             const file = files[0]!;
 
             const { chatId, userId } = this.getContextIds();
-            const dataUrl = await this.fileToDataUrl(file);
+            const directUrl = await this.uploadImageFile(file);
 
-            this.ctx.sendToBackend({
-              type: "vn_upload_asset",
-              category: "characters",
-              actorId,
-              outfit,
-              expression,
-              filename: file.name,
-              dataUrl,
-              chatId,
-              userId,
-            });
-          } catch (e) {
-            console.error("[LumiVN] Sprite upload failed:", e);
-          }
-        });
-
-        const uploadNoBgBtn = document.createElement("button");
-        uploadNoBgBtn.className = "vn-btn vn-btn-sm vn-btn-secondary";
-        uploadNoBgBtn.innerHTML = `✨ Upload Sprite (Remove BG)`;
-        uploadNoBgBtn.title = "Automatically isolates character by removing solid background";
-        uploadNoBgBtn.addEventListener("click", async () => {
-          const outfit = (card.querySelector(".vn-input-outfit") as HTMLInputElement).value.trim().toLowerCase();
-          const expression = (card.querySelector(".vn-input-expr") as HTMLInputElement).value.trim().toLowerCase() || "neutral";
-
-          try {
-            const files = await this.ctx.uploads.pickFile({
-              accept: ["image/png", "image/webp", "image/jpeg"],
-              multiple: false,
-            });
-            if (!files || files.length === 0) return;
-            const file = files[0]!;
-
-            const originalText = uploadNoBgBtn.innerHTML;
-            uploadNoBgBtn.disabled = true;
-            uploadNoBgBtn.textContent = "Removing background... 0%";
-
-            try {
-              const dataUrl = await removeImageBackground(
-                file.bytes,
-                file.mimeType || "image/png",
-                (pct) => {
-                  uploadNoBgBtn.textContent = `Removing background... ${pct}%`;
-                }
-              );
-
-              const { chatId, userId } = this.getContextIds();
-              const baseName = file.name.replace(/\.[^.]+$/, "");
-
+            if (directUrl) {
               this.ctx.sendToBackend({
                 type: "vn_upload_asset",
                 category: "characters",
                 actorId,
                 outfit,
                 expression,
-                filename: `${baseName}_nobg.png`,
+                filename: file.name,
+                url: directUrl,
+                chatId,
+                userId,
+              });
+            } else {
+              const dataUrl = await this.fileToDataUrl(file);
+              this.ctx.sendToBackend({
+                type: "vn_upload_asset",
+                category: "characters",
+                actorId,
+                outfit,
+                expression,
+                filename: file.name,
                 dataUrl,
                 chatId,
                 userId,
               });
-            } catch (err) {
-              console.error("[LumiVN] Background removal failed:", err);
-              alert(`Background removal failed: ${err instanceof Error ? err.message : String(err)}`);
-            } finally {
-              uploadNoBgBtn.disabled = false;
-              uploadNoBgBtn.innerHTML = originalText;
             }
           } catch (e) {
-            console.error("[LumiVN] File pick failed:", e);
+            console.error("[LumiVN] Sprite upload failed:", e);
           }
         });
 
         btnRow.appendChild(uploadSpriteBtn);
-        btnRow.appendChild(uploadNoBgBtn);
         card.appendChild(btnRow);
 
         // ── Sprite Size & Positioning Alignment ──
@@ -298,18 +298,18 @@ export class SceneTab {
     const actionSec = document.createElement("div");
     actionSec.className = "vn-section";
     actionSec.innerHTML = `
-      <h4>Custom Actions & Event Poses</h4>
+      <h4>Custom Actions & Poses</h4>
       <p style="font-size:12px; color:#94a3b8; margin-bottom:10px;">
-        Upload sprites for specific actions (e.g. cooking, sleeping, training). Displayed when the narrative mentions the action.
+        Register unique sprites for specific verbs/actions (e.g. hug, punch, sword, blush).
       </p>
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:10px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
         <div>
           <label style="font-size:11px; color:#94a3b8; display:block; margin-bottom:2px;">Actor ID:</label>
-          <input id="vn-action-actor" type="text" placeholder="e.g. tessa" value="${participants[0] || ""}" style="width:100%; box-sizing:border-box; background:#0f172a; border:1px solid #475569; border-radius:4px; padding:6px; color:#fff; font-size:12px;" />
+          <input id="vn-action-actor" type="text" placeholder="e.g. alethea" style="width:100%; box-sizing:border-box; background:#0f172a; border:1px solid #475569; border-radius:4px; padding:6px; color:#fff; font-size:12px;" />
         </div>
         <div>
           <label style="font-size:11px; color:#94a3b8; display:block; margin-bottom:2px;">Action Keyword:</label>
-          <input id="vn-action-name" type="text" placeholder="e.g. cooking, sleeping" style="width:100%; box-sizing:border-box; background:#0f172a; border:1px solid #475569; border-radius:4px; padding:6px; color:#fff; font-size:12px;" />
+          <input id="vn-action-name" type="text" placeholder="e.g. cast_spell, smile, hug" style="width:100%; box-sizing:border-box; background:#0f172a; border:1px solid #475569; border-radius:4px; padding:6px; color:#fff; font-size:12px;" />
         </div>
       </div>
     `;
@@ -318,7 +318,7 @@ export class SceneTab {
     actionBtnRow.style.cssText = "display: flex; gap: 8px; flex-wrap: wrap;";
 
     const uploadActionBtn = document.createElement("button");
-    uploadActionBtn.className = "vn-btn vn-btn-secondary";
+    uploadActionBtn.className = "vn-btn vn-btn-primary";
     uploadActionBtn.textContent = `📁 Upload Action Pose Sprite`;
     uploadActionBtn.addEventListener("click", async () => {
       const actorId = (actionSec.querySelector("#vn-action-actor") as HTMLInputElement).value.trim().toLowerCase();
@@ -338,84 +338,38 @@ export class SceneTab {
         const file = files[0]!;
 
         const { chatId, userId } = this.getContextIds();
-        const dataUrl = await this.fileToDataUrl(file);
+        const directUrl = await this.uploadImageFile(file);
 
-        this.ctx.sendToBackend({
-          type: "vn_upload_asset",
-          category: "actions",
-          actorId,
-          actionName,
-          filename: file.name,
-          dataUrl,
-          chatId,
-          userId,
-        });
-      } catch (err) {
-        console.error("[LumiVN] Action upload failed:", err);
-      }
-    });
-
-    const uploadActionNoBgBtn = document.createElement("button");
-    uploadActionNoBgBtn.className = "vn-btn vn-btn-secondary";
-    uploadActionNoBgBtn.innerHTML = `✨ Upload Action (Remove BG)`;
-    uploadActionNoBgBtn.title = "Automatically isolates character by removing solid background";
-    uploadActionNoBgBtn.addEventListener("click", async () => {
-      const actorId = (actionSec.querySelector("#vn-action-actor") as HTMLInputElement).value.trim().toLowerCase();
-      const actionName = (actionSec.querySelector("#vn-action-name") as HTMLInputElement).value.trim().toLowerCase();
-
-      if (!actorId || !actionName) {
-        alert("Please specify both an Actor ID and Action Keyword.");
-        return;
-      }
-
-      try {
-        const files = await this.ctx.uploads.pickFile({
-          accept: ["image/png", "image/webp", "image/jpeg"],
-          multiple: false,
-        });
-        if (!files || files.length === 0) return;
-        const file = files[0]!;
-
-        const originalText = uploadActionNoBgBtn.innerHTML;
-        uploadActionNoBgBtn.disabled = true;
-        uploadActionNoBgBtn.textContent = "Removing background... 0%";
-
-        try {
-          const dataUrl = await removeImageBackground(
-            file.bytes,
-            file.mimeType || "image/png",
-            (pct) => {
-              uploadActionNoBgBtn.textContent = `Removing background... ${pct}%`;
-            }
-          );
-
-          const { chatId, userId } = this.getContextIds();
-          const baseName = file.name.replace(/\.[^.]+$/, "");
-
+        if (directUrl) {
           this.ctx.sendToBackend({
             type: "vn_upload_asset",
             category: "actions",
             actorId,
             actionName,
-            filename: `${baseName}_nobg.png`,
+            filename: file.name,
+            url: directUrl,
+            chatId,
+            userId,
+          });
+        } else {
+          const dataUrl = await this.fileToDataUrl(file);
+          this.ctx.sendToBackend({
+            type: "vn_upload_asset",
+            category: "actions",
+            actorId,
+            actionName,
+            filename: file.name,
             dataUrl,
             chatId,
             userId,
           });
-        } catch (err) {
-          console.error("[LumiVN] Action background removal failed:", err);
-          alert(`Background removal failed: ${err instanceof Error ? err.message : String(err)}`);
-        } finally {
-          uploadActionNoBgBtn.disabled = false;
-          uploadActionNoBgBtn.innerHTML = originalText;
         }
-      } catch (e) {
-        console.error("[LumiVN] File pick failed:", e);
+      } catch (err) {
+        console.error("[LumiVN] Action upload failed:", err);
       }
     });
 
     actionBtnRow.appendChild(uploadActionBtn);
-    actionBtnRow.appendChild(uploadActionNoBgBtn);
     actionSec.appendChild(actionBtnRow);
     this.root.appendChild(actionSec);
 
@@ -502,13 +456,5 @@ export class SceneTab {
       ...params,
       chatId,
     });
-  }
-
-  private async fileToDataUrl(file: { bytes: Uint8Array; mimeType?: string }): Promise<string> {
-    let binary = "";
-    for (let i = 0; i < file.bytes.byteLength; i++) {
-      binary += String.fromCharCode(file.bytes[i]!);
-    }
-    return `data:${file.mimeType || "image/png"};base64,${btoa(binary)}`;
   }
 }

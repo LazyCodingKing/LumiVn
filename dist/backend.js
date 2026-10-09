@@ -1,3 +1,4 @@
+// @bun
 // src/backend/storage.ts
 var DEFAULT_MANIFEST = {
   places: {},
@@ -16,7 +17,7 @@ CRITICAL CONSTRAINTS
 - NO SCRIPTED SPEECH: No quoted lines. Give each NPC a tactic and a cost, never words.
 - NO PLAYER CONTROL: Never dictate {{user}}'s actions, reactions, or outcomes. NPCs may initiate; the command ends at the attempt.
 - OPENING RULE: The reply must open on the direct consequence of {{user}}'s last input. World and texture details never lead; they interrupt, tied to an NPC's behavior, after the first beat.
-- NATURAL CAUSALITY: Nothing happens to create drama. Every event needs an in-world cause already on the ledger (a due time, an ETA, a routine, a want). When nothing is due, the world is quiet, and a quiet note is valid. Never raise stakes, add coincidence, or time an arrival to suit the emotional moment.
+- NATURAL CAUSALITY: Nothing happens to create drama. Every event needs an in-world cause (a due time, an routine, or a character want). When nothing is due, the world is quiet, and a quiet note is valid. Never raise stakes, add coincidence, or time an arrival to suit the emotional moment.
 - CONTINUITY LOCK: Reuse exact names, place keys, numbers, durations, and locations already established. Never rename a place key, change a number, or relocate a fact (a person established in one city does not move to another; two days does not become three). New facts enter only through CANON.
 - NO NEW PROPS OR ROOMS MID-SCENE: Use only resources already listed in places. A new node needs a key, plus route minutes both ways.
 - ANTI-LOOP: Compare with the last reply and your previous note. Never repeat the same prop gesture, sensory cue, B-plot vector, or opening verb in consecutive notes. A prop that was offered, pushed, or refused once is retired or changes function.
@@ -31,76 +32,121 @@ PRESSURE: Default is hold. Check bplots: act only if a bplot's next.due has been
 PRESENT: For each LOD 3 NPC, command one tactic that serves their own want_now, plus its cost (deflect, bargain, test, bait, withhold, stall, retreat, attack, change the subject, lie by omission). Aim NPCs at different targets: at most one reacts to {{user}}; the others pursue each other, a task, or the room. Never let two NPCs chase the same request or prop. Every cooperative act must serve the NPC's own aim. Keep guarded secrets at subtle-trace stage unless evidence forces the next stage.
 VOICE: Give each speaking NPC one speech cue for this beat, drawn from stress, familiarity, and audience (answers with a question, trails off, over-explains a lie, clipped fragments, interrupts themself, says less than they mean). Make speech sound like a real person: contractions, plain words, correct grammar, short lines, no announced feelings, no speeches, no assistant phrasing. Cues must differ per NPC; swearing and catchphrases are not cues. NPCs may only reference what they perceived or were told.
 TEXTURE: Command 2-3 concrete details from different senses, matched to place, phase, and weather, plus one environment change that alters where someone looks or stands. Make sources physically consistent (what makes the sound, how far, which floor). Time each detail to land mid-reply so it changes someone's behavior (a flinch, a glance, a pause). Prefer specific over atmospheric.
-CANON: State any new fact the reply is about to establish (family ties, backstory, durations, locations) as one short line for world.facts, consistent with existing facts. If the player's question exposes ambiguous backstory (relatives, ex-partners, past events), pick one answer consistent with the ledger and record it; do not let NPCs dodge it just because it is undefined. NPCs may still answer partially, biased, or evasively, but never contradict the ledger.
-END ON: Name one concrete unresolved physical or environmental moment where the reply stops, so {{user}} has a clean point to act. Not an NPC question aimed at {{user}}.
-
-OUTPUT FORMAT
-Return strictly one single-line JSON object on Line 1 inside a details block, nothing before or after:
-{"director_note":"FIRST BEAT: ... WORLD: ... OFFSCREEN: ... PRESSURE: ... PRESENT: ... VOICE: ... TEXTURE: ... CANON: ... END ON: ...","thread_label":"<3-6 words naming the dominant live thread; keep it unchanged until the thread changes>"}
-No double quotes, line breaks, or markdown inside values (use single quotes if needed).`,
+CANON: State any new fact the reply is about to establish (family ties, backstory, durations, locations) as one short line for world.facts, consistent with existing facts. If the player's question exposes ambiguous backstory (relatives, ex-partners, past events), pick one answer consistent with established canon and record it; do not let NPCs dodge it just because it is undefined. NPCs may still answer partially, biased, or evasively, but never contradict established canon.
+END ON: Name one concrete unresolved physical or environmental moment where the reply stops, so {{user}} has a clean point to act. Not an NPC question aimed at {{user}}.`,
   userNotes: "",
   enabled: true
 };
 
 class StorageManager {
   spindle;
+  manifestCache = null;
+  manifestDirty = false;
+  chatStateCache = new Map;
+  directorSettingsCache = null;
   constructor(spindle2) {
     this.spindle = spindle2;
   }
+  async ensureDir(dirPath) {
+    const parts = dirPath.split("/").filter(Boolean);
+    let current = "";
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      try {
+        if (!await this.spindle.storage.exists(current)) {
+          await this.spindle.storage.mkdir(current);
+        }
+      } catch {}
+    }
+  }
   async getManifest() {
+    if (this.manifestCache) {
+      return this.manifestCache;
+    }
     try {
       const exists = await this.spindle.storage.exists("asset_manifest.json");
       if (exists) {
         const raw = await this.spindle.storage.read("asset_manifest.json");
-        return JSON.parse(raw);
+        this.manifestCache = JSON.parse(raw);
+        return this.manifestCache;
       }
     } catch (e) {
       console.warn("[LumiVN] Failed to read asset_manifest.json, using default:", e);
     }
-    return { ...DEFAULT_MANIFEST };
+    this.manifestCache = { ...DEFAULT_MANIFEST };
+    return this.manifestCache;
+  }
+  getCachedManifest() {
+    return this.manifestCache || DEFAULT_MANIFEST;
   }
   async saveManifest(manifest) {
+    this.manifestCache = manifest;
+    this.manifestDirty = true;
     try {
       await this.spindle.storage.write("asset_manifest.json", JSON.stringify(manifest, null, 2));
+      this.manifestDirty = false;
     } catch (e) {
       console.error("[LumiVN] Failed to save asset_manifest.json:", e);
     }
   }
-  async getChatState(chatId) {
+  getCachedChatState(chatId) {
+    return this.chatStateCache.get(chatId) || null;
+  }
+  setCachedChatState(chatId, state) {
+    this.chatStateCache.set(chatId, state);
+  }
+  async getChatState(chatId, messageId, swipeId) {
+    if (messageId) {
+      const sId = swipeId !== undefined ? String(swipeId) : "0";
+      const branchPath = `turns/${chatId}/${messageId}/${sId}.json`;
+      try {
+        if (await this.spindle.storage.exists(branchPath)) {
+          const raw = await this.spindle.storage.read(branchPath);
+          const parsed = JSON.parse(raw);
+          this.chatStateCache.set(chatId, parsed);
+          return parsed;
+        }
+      } catch (e) {
+        console.warn(`[LumiVN] Failed to read branch snapshot ${branchPath}:`, e);
+      }
+    }
+    if (this.chatStateCache.has(chatId)) {
+      return this.chatStateCache.get(chatId);
+    }
     try {
-      const path = `chats/${chatId}/state.json`;
-      const exists = await this.spindle.storage.exists(path);
-      if (exists) {
-        const raw = await this.spindle.storage.read(path);
-        return JSON.parse(raw);
+      const activePath = `chats/${chatId}/state.json`;
+      if (await this.spindle.storage.exists(activePath)) {
+        const raw = await this.spindle.storage.read(activePath);
+        const parsed = JSON.parse(raw);
+        this.chatStateCache.set(chatId, parsed);
+        return parsed;
       }
     } catch (e) {
-      console.warn(`[LumiVN] Failed to read chat state for ${chatId}:`, e);
+      console.warn(`[LumiVN] Failed to read active chat state for ${chatId}:`, e);
     }
     return null;
   }
-  async saveChatState(chatId, state) {
+  async saveChatState(chatId, state, messageId, swipeId) {
+    this.chatStateCache.set(chatId, state);
     try {
-      const dir = `chats/${chatId}`;
-      if (!await this.spindle.storage.exists(dir)) {
-        await this.spindle.storage.mkdir(dir);
+      await this.ensureDir(`chats/${chatId}`);
+      await this.spindle.storage.write(`chats/${chatId}/state.json`, JSON.stringify(state, null, 2));
+      if (messageId) {
+        const sId = swipeId !== undefined ? String(swipeId) : "0";
+        const turnDir = `turns/${chatId}/${messageId}`;
+        await this.ensureDir(turnDir);
+        await this.spindle.storage.write(`${turnDir}/${sId}.json`, JSON.stringify(state, null, 2));
       }
-      await this.spindle.storage.write(`${dir}/state.json`, JSON.stringify(state, null, 2));
     } catch (e) {
-      console.error(`[LumiVN] Failed to save chat state for ${chatId}:`, e);
+      console.error(`[LumiVN] Failed to persist chat state for ${chatId}:`, e);
     }
   }
   async saveMediaFile(relPath, dataUrlOrBase64) {
     try {
       const parts = relPath.split("/");
       if (parts.length > 1) {
-        let currentDir = "";
-        for (let i = 0;i < parts.length - 1; i++) {
-          currentDir = currentDir ? `${currentDir}/${parts[i]}` : parts[i];
-          if (!await this.spindle.storage.exists(currentDir)) {
-            await this.spindle.storage.mkdir(currentDir);
-          }
-        }
+        const dir = parts.slice(0, -1).join("/");
+        await this.ensureDir(dir);
       }
       let base64 = dataUrlOrBase64;
       if (base64.includes(",")) {
@@ -125,19 +171,30 @@ class StorageManager {
       return false;
     }
   }
+  getCachedDirectorSettings() {
+    return this.directorSettingsCache || DEFAULT_DIRECTOR_SETTINGS;
+  }
   async getDirectorSettings() {
+    if (this.directorSettingsCache) {
+      return this.directorSettingsCache;
+    }
     try {
       const exists = await this.spindle.storage.exists("director_settings.json");
       if (exists) {
         const raw = await this.spindle.storage.read("director_settings.json");
-        return { ...DEFAULT_DIRECTOR_SETTINGS, ...JSON.parse(raw) };
+        const loaded = { ...DEFAULT_DIRECTOR_SETTINGS, ...JSON.parse(raw) };
+        this.directorSettingsCache = loaded;
+        return loaded;
       }
     } catch (e) {
       console.warn("[LumiVN] Failed to read director_settings.json, using defaults:", e);
     }
-    return { ...DEFAULT_DIRECTOR_SETTINGS };
+    const fallback = { ...DEFAULT_DIRECTOR_SETTINGS };
+    this.directorSettingsCache = fallback;
+    return fallback;
   }
   async saveDirectorSettings(settings) {
+    this.directorSettingsCache = settings;
     try {
       await this.spindle.storage.write("director_settings.json", JSON.stringify(settings, null, 2));
     } catch (e) {
@@ -159,11 +216,8 @@ class StorageManager {
   }
   async saveDirectorLogs(chatId, logs) {
     try {
-      const dir = `chats/${chatId}`;
-      if (!await this.spindle.storage.exists(dir)) {
-        await this.spindle.storage.mkdir(dir);
-      }
-      await this.spindle.storage.write(`${dir}/director_logs.json`, JSON.stringify(logs, null, 2));
+      await this.ensureDir(`chats/${chatId}`);
+      await this.spindle.storage.write(`chats/${chatId}/director_logs.json`, JSON.stringify(logs, null, 2));
     } catch (e) {
       console.error(`[LumiVN] Failed to save director logs for ${chatId}:`, e);
     }
@@ -285,7 +339,7 @@ function requireSnippet() {
       lineEnd = position + maxHalfLength - tail.length;
     }
     return {
-      str: head + buffer.slice(lineStart, lineEnd).replace(/\t/g, "→") + tail,
+      str: head + buffer.slice(lineStart, lineEnd).replace(/\t/g, "\u2192") + tail,
       pos: position - lineStart + head.length
     };
   }
@@ -1298,9 +1352,9 @@ function requireLoader() {
       case 92:
         return "\\";
       case 78:
-        return "";
+        return "\x85";
       case 95:
-        return " ";
+        return "\xA0";
       case 76:
         return "\u2028";
       case 80:
@@ -3328,11 +3382,11 @@ function detectSpeaker(paragraph, defaultSpeaker = "Narrator") {
   if (colonPrefix) {
     return { speaker: colonPrefix[1].trim(), text: colonPrefix[2].trim() };
   }
-  const actionDialogue = paragraph.match(/^([A-Z][a-zA-Z0-9_]{1,20})\b[^"“]*?["“]([\s\S]*?)["”]/);
+  const actionDialogue = paragraph.match(/^([A-Z][a-zA-Z0-9_]{1,20})\b[^"\u201C]*?["\u201C]([\s\S]*?)["\u201D]/);
   if (actionDialogue) {
     return { speaker: actionDialogue[1].trim(), text: paragraph };
   }
-  const speechTag = paragraph.match(/["”]\s*([A-Z][a-zA-Z0-9_]{1,20})\s+(?:said|whispered|asked|replied|shouted|murmured)/i);
+  const speechTag = paragraph.match(/["\u201D]\s*([A-Z][a-zA-Z0-9_]{1,20})\s+(?:said|whispered|asked|replied|shouted|murmured)/i);
   if (speechTag) {
     return { speaker: speechTag[1].trim(), text: paragraph };
   }
@@ -3984,7 +4038,10 @@ async function evaluateDirectorInterceptor(messages, context, getChatState, getD
     }
   }
   if (messages.some((m) => typeof m.content === "string" && (m.content.includes(activeDirective) || m.content.includes("[LumiVN Living World Director Guidance]")))) {
-    return messages;
+    return {
+      messages,
+      breakdown: [{ messageIndex: 0, name: "LumiVN Director" }]
+    };
   }
   const systemGuard = `[LumiVN Living World Director Guidance]
 ${activeDirective}
@@ -4187,8 +4244,7 @@ function processBPlots(ledger) {
 var storage = new StorageManager(spindle);
 var resolver = new AssetResolver(spindle, storage);
 var lastActiveChatId = null;
-var isStageOpen = false;
-var activeVnChatId = null;
+var activeVnChats = new Set;
 var activeGenerationIds = new Map;
 var pendingCommits = new Map;
 var injectedDirectives = new Map;
@@ -4200,9 +4256,11 @@ async function handleInterceptor(messages, context) {
   }
   const effectiveContext = context && typeof context === "object" ? { ...context, chatId: effectiveChatId } : { chatId: effectiveChatId };
   return evaluateDirectorInterceptor(messages, effectiveContext, async (cid) => {
-    const state = await storage.getChatState(cid);
-    return state || { scene: { place: "default" }, actors: {} };
-  }, () => storage.getDirectorSettings(), (key, directive) => injectedDirectives.set(key, directive));
+    const cached = storage.getCachedChatState(cid);
+    if (cached)
+      return cached;
+    return await storage.getChatState(cid) || { scene: { place: "default" }, actors: {} };
+  }, async () => storage.getDirectorSettings(), (key, directive) => injectedDirectives.set(key, directive));
 }
 if (typeof spindle.registerInterceptor === "function") {
   spindle.registerInterceptor(handleInterceptor, 50);
@@ -4212,9 +4270,8 @@ function onHostChatSwitched(chatId) {
   if (!chatId)
     return;
   lastActiveChatId = chatId;
-  activeVnChatId = chatId;
   spindle.log.info("[LumiVN] Active chat switched to: " + chatId);
-  if (isStageOpen) {
+  if (activeVnChats.has(chatId)) {
     processChatTurn(chatId, undefined, undefined, true);
   }
 }
@@ -4277,18 +4334,16 @@ spindle.commands.register([
 ]);
 spindle.commands.onInvoked(async (commandId) => {
   if (commandId === "lumivn_launch") {
-    isStageOpen = true;
     spindle.sendToFrontend({ type: "vn_force_open" });
   } else if (commandId === "lumivn_diagnostics") {
-    await spindle.ui.openDrawerTab("vn_diagnostics");
+    spindle.sendToFrontend({ type: "vn_force_open", tab: "diagnostics" });
   }
 });
-async function processChatTurn(chatId, messageId, overrideContent, force = false, generationId) {
+async function processChatTurn(chatId, messageId, overrideContent, force = false, generationId, swipeId) {
   if (!chatId)
     return;
-  if (!isStageOpen && !force)
+  if (!activeVnChats.has(chatId) && !force)
     return;
-  activeVnChatId = chatId;
   lastActiveChatId = chatId;
   try {
     let targetMessage = null;
@@ -4309,7 +4364,7 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     } else {
       let messages = [];
       try {
-        messages = await spindle.chat.getMessages(chatId);
+        messages = await spindle.chat.getMessages(chatId, { limit: 5 });
       } catch {}
       const boundedMessages = Array.isArray(messages) ? messages : [];
       for (let i = boundedMessages.length - 1;i >= 0; i--) {
@@ -4320,7 +4375,7 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
         }
       }
     }
-    let cumulativeLedger = await storage.getChatState(chatId);
+    let cumulativeLedger = await storage.getChatState(chatId, targetMessage?.id, swipeId);
     if (!targetMessage || !targetMessage.content) {
       if (!cumulativeLedger) {
         cumulativeLedger = { scene: { place: "default" }, actors: {} };
@@ -4347,7 +4402,7 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
           });
         }
       }
-    } catch (e) {}
+    } catch {}
     const rawLedger = extractLedgerRaw(targetMessage.content);
     const rawToon = rawLedger ? null : extractToonRaw(targetMessage.content);
     const prevLedger = cumulativeLedger ? JSON.parse(JSON.stringify(cumulativeLedger)) : null;
@@ -4383,7 +4438,7 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     if (commitKey) {
       pendingCommits.set(commitKey, cumulativeLedger);
     }
-    await storage.saveChatState(chatId, cumulativeLedger);
+    await storage.saveChatState(chatId, cumulativeLedger, targetMessage.id, swipeId);
     if (commitKey) {
       pendingCommits.delete(commitKey);
     }
@@ -4440,7 +4495,6 @@ spindle.on("GENERATION_STARTED", async (payload) => {
   const { chatId, generationId } = payload || {};
   if (!chatId || !generationId)
     return;
-  activeVnChatId = chatId;
   lastActiveChatId = chatId;
   const previousGenId = activeGenerationIds.get(chatId);
   if (previousGenId && previousGenId !== generationId) {
@@ -4449,9 +4503,9 @@ spindle.on("GENERATION_STARTED", async (payload) => {
     spindle.log.info(`[LumiVN] Discarded uncommitted state from superseded generation ${previousGenId} on chat ${chatId}`);
   }
   activeGenerationIds.set(chatId, generationId);
-  if (isStageOpen) {
+  if (activeVnChats.has(chatId)) {
     try {
-      const messages = await spindle.chat.getMessages(chatId);
+      const messages = await spindle.chat.getMessages(chatId, { limit: 5 });
       const bounded = Array.isArray(messages) ? messages : [];
       let latestUserMsg = null;
       for (let i = bounded.length - 1;i >= 0; i--) {
@@ -4507,39 +4561,37 @@ spindle.on("GENERATION_ENDED", async (payload) => {
   if (generationId && activeGenerationIds.get(chatId) === generationId) {
     activeGenerationIds.delete(chatId);
   }
-  if (!isStageOpen)
+  if (!activeVnChats.has(chatId))
     return;
   await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
 });
 spindle.on("MESSAGE_SWIPED", async (payload) => {
-  if (!isStageOpen)
+  const cid = payload?.chatId || lastActiveChatId;
+  if (!cid || !activeVnChats.has(cid))
     return;
-  const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
-  if (cid)
-    await processChatTurn(cid, payload.message?.id);
+  const swipeIndex = payload?.swipeIndex ?? payload?.swipe_index;
+  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex);
 });
 spindle.on("SWIPE_EDITED", async (payload) => {
-  if (!isStageOpen)
+  const cid = payload?.chatId || lastActiveChatId;
+  if (!cid || !activeVnChats.has(cid))
     return;
-  const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
-  if (cid)
-    await processChatTurn(cid, payload.message?.id);
+  const swipeIndex = payload?.swipeIndex ?? payload?.swipe_index;
+  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex);
 });
 var spindleAny = spindle;
 if (typeof spindleAny.on === "function") {
   spindleAny.on("MESSAGE_EDITED", async (payload) => {
-    if (!isStageOpen)
+    const cid = payload?.chatId || lastActiveChatId;
+    if (!cid || !activeVnChats.has(cid))
       return;
-    const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
-    if (cid)
-      await processChatTurn(cid, payload.messageId);
+    await processChatTurn(cid, payload.messageId);
   });
   spindleAny.on("MESSAGE_DELETED", async (payload) => {
-    if (!isStageOpen)
+    const cid = payload?.chatId || lastActiveChatId;
+    if (!cid || !activeVnChats.has(cid))
       return;
-    const cid = payload?.chatId || activeVnChatId || lastActiveChatId;
-    if (cid)
-      await processChatTurn(cid);
+    await processChatTurn(cid);
   });
 }
 spindle.onFrontendMessage(async (msg, senderUserId) => {
@@ -4549,24 +4601,27 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
   const type = String(payload.type);
   switch (type) {
     case "vn_stage_opened": {
-      isStageOpen = true;
       const cid = String(payload.chatId || "");
       if (cid) {
-        activeVnChatId = cid;
+        activeVnChats.add(cid);
         lastActiveChatId = cid;
       }
       break;
     }
     case "vn_stage_closed": {
-      isStageOpen = false;
+      const cid = String(payload.chatId || "");
+      if (cid) {
+        activeVnChats.delete(cid);
+      } else if (lastActiveChatId) {
+        activeVnChats.delete(lastActiveChatId);
+      }
       break;
     }
     case "vn_get_state":
     case "vn_init": {
-      isStageOpen = true;
       const chatId = await resolveEffectiveChatId(String(payload.chatId || ""));
       if (chatId) {
-        activeVnChatId = chatId;
+        activeVnChats.add(chatId);
         lastActiveChatId = chatId;
         await processChatTurn(chatId, undefined, undefined, true);
       } else {
@@ -4607,7 +4662,7 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
         spindle.log.error(`[LumiVN] Failed to dispatch action: ${errMsg}`);
         let userNotice = errMsg;
         if (errMsg.includes("PERMISSION_DENIED: generation")) {
-          userNotice = 'PERMISSION_DENIED: Please enable the "Generation" permission under Settings → Extensions → LumiVN Interactive Studio.';
+          userNotice = 'PERMISSION_DENIED: Please enable the "Generation" permission under Settings \u2192 Extensions \u2192 LumiVN Interactive Studio.';
         }
         spindle.sendToFrontend({
           type: "vn_error",
@@ -4697,48 +4752,53 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
         const expression = String(payload.expression || "neutral").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
         const actionName = String(payload.actionName || "").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
         const filename = String(payload.filename || "asset.png");
-        const dataUrl = String(payload.dataUrl || "");
+        const directUrl = typeof payload.url === "string" ? payload.url : "";
+        const dataUrl = typeof payload.dataUrl === "string" ? payload.dataUrl : "";
         const chatId = String(payload.chatId || "");
-        if (!dataUrl)
-          throw new Error("No image data provided");
         const finalPlaceKey = scope ? `${scope}:${placeId}` : placeId;
-        let resolvedUserId = senderUserId || payload.userId;
-        if (!resolvedUserId && chatId) {
-          try {
-            const chat = await spindle.chats.get(chatId);
-            resolvedUserId = chat?.user_id || chat?.userId;
-          } catch {}
+        let finalUrl = directUrl;
+        if (!finalUrl && dataUrl) {
+          let resolvedUserId = senderUserId || payload.userId;
+          if (!resolvedUserId && chatId) {
+            try {
+              const chat = await spindle.chats.get(chatId);
+              resolvedUserId = chat?.user_id || chat?.userId;
+            } catch {}
+          }
+          if (!resolvedUserId) {
+            try {
+              const chatList = await spindle.chats.list?.({ limit: 1 });
+              const first = chatList?.data?.[0];
+              resolvedUserId = first?.user_id || first?.userId;
+            } catch {}
+          }
+          let base64 = dataUrl;
+          let mimeType = "image/png";
+          if (base64.includes(",")) {
+            const match = base64.match(/data:([^;]+);base64,/);
+            if (match)
+              mimeType = match[1];
+            base64 = base64.split(",")[1] ?? "";
+          }
+          const binaryString = atob(base64);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0;i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          const upload = await spindle.images.upload({
+            data: bytes,
+            filename,
+            mime_type: mimeType,
+            userId: resolvedUserId,
+            user_id: resolvedUserId
+          }, resolvedUserId);
+          finalUrl = upload.url;
         }
-        if (!resolvedUserId) {
-          try {
-            const chatList = await spindle.chats.list?.({ limit: 1 });
-            const first = chatList?.data?.[0];
-            resolvedUserId = first?.user_id || first?.userId;
-          } catch {}
-        }
-        let base64 = dataUrl;
-        let mimeType = "image/png";
-        if (base64.includes(",")) {
-          const match = base64.match(/data:([^;]+);base64,/);
-          if (match)
-            mimeType = match[1];
-          base64 = base64.split(",")[1] ?? "";
-        }
-        const binaryString = atob(base64);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0;i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        const upload = await spindle.images.upload({
-          data: bytes,
-          filename,
-          mime_type: mimeType,
-          userId: resolvedUserId,
-          user_id: resolvedUserId
-        }, resolvedUserId);
+        if (!finalUrl)
+          throw new Error("No image URL or data provided");
         const manifest = await storage.getManifest();
         if (category === "places" && finalPlaceKey) {
-          manifest.places[finalPlaceKey] = upload.url;
+          manifest.places[finalPlaceKey] = finalUrl;
         } else if (category === "characters" && actorId) {
           if (!manifest.characters[actorId])
             manifest.characters[actorId] = {};
@@ -4746,13 +4806,13 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
             manifest.characters[actorId].outfits = {};
           if (!manifest.characters[actorId].outfits[outfit])
             manifest.characters[actorId].outfits[outfit] = {};
-          manifest.characters[actorId].outfits[outfit][expression] = upload.url;
+          manifest.characters[actorId].outfits[outfit][expression] = finalUrl;
         } else if (category === "actions" && actorId && actionName) {
           if (!manifest.characters[actorId])
             manifest.characters[actorId] = {};
           if (!manifest.characters[actorId].actions)
             manifest.characters[actorId].actions = {};
-          manifest.characters[actorId].actions[actionName] = upload.url;
+          manifest.characters[actorId].actions[actionName] = finalUrl;
         }
         await storage.saveManifest(manifest);
         spindle.sendToFrontend({ type: "vn_manifest", manifest });
