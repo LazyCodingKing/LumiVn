@@ -422,5 +422,91 @@ actors:
   });
 });
 
+import { VnTtsEngine } from "../src/frontend/stage/tts-engine.js";
+
+describe("LumiVN Host Default TTS Engine", () => {
+  test("cleans dialogue text removing tags, macros, and formatting", () => {
+    const engine = new VnTtsEngine();
+    const raw = '**Akane**: "Wait! <shake>Look at that!</shake>" [[Run|run_away]] [expression: blush] {{img::surprised}}';
+    const clean = engine.cleanDialogueText(raw);
+    expect(clean).toBe("Akane: Wait! Look at that!");
+  });
+
+  test("resolves default connection from host /api/v1/tts-connections", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url: any) => {
+      if (String(url).includes("/api/v1/tts-connections")) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: "conn_secondary", name: "Backup Voice", provider: "openai_tts", is_default: false },
+              { id: "conn_primary", name: "Default Voice", provider: "openrouter_tts", model: "elevenlabs", voice: "rachel", is_default: true },
+            ],
+          }),
+        } as any;
+      }
+      return { ok: false, status: 404 } as any;
+    };
+
+    try {
+      const engine = new VnTtsEngine();
+      const conn = await engine.resolveDefaultConnection();
+      expect(conn).toBeDefined();
+      expect(conn?.id).toBe("conn_primary");
+      expect(conn?.name).toBe("Default Voice");
+      expect(conn?.voice).toBe("rachel");
+      expect(conn?.isDefault).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("speaks using host /api/v1/tts/synthesize and falls back gracefully", async () => {
+    let synthesizeCalled = false;
+    let payloadSent: any = null;
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url: any, init: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/api/v1/tts-connections")) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [{ id: "conn_default", name: "Host Default", is_default: true, voice: "narrator_1" }],
+          }),
+        } as any;
+      }
+      if (urlStr.includes("/api/v1/tts/synthesize")) {
+        synthesizeCalled = true;
+        payloadSent = JSON.parse(init.body);
+        return {
+          ok: true,
+          blob: async () => new Blob(["fake_mp3_data"], { type: "audio/mpeg" }),
+        } as any;
+      }
+      return { ok: false, status: 404 } as any;
+    };
+
+    try {
+      const engine = new VnTtsEngine();
+      engine.setEnabled(true);
+      await engine.speak('Hello from Visual Novel!', "Akane");
+
+      expect(synthesizeCalled).toBe(true);
+      expect(payloadSent).toBeDefined();
+      expect(payloadSent.connectionId).toBe("conn_default");
+      expect(payloadSent.text).toBe("Hello from Visual Novel!");
+      expect(payloadSent.voice).toBe("narrator_1");
+
+      engine.stop();
+      expect(engine.isEnabled()).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+
 
 

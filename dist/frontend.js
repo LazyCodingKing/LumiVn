@@ -27117,12 +27117,20 @@ class DialogueBox {
     const voiceOn = this.ttsEngine?.isEnabled() ?? false;
     this.voiceBtn.innerHTML = voiceOn ? "\uD83D\uDD0A Voice" : "\uD83D\uDD07 Voice";
     this.voiceBtn.title = "Toggle Speech Voice";
-    this.voiceBtn.addEventListener("click", (e) => {
+    this.voiceBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
       this.audioEngine?.playSfx("click");
       const active = this.ttsEngine?.toggle() ?? false;
       this.voiceBtn.innerHTML = active ? "\uD83D\uDD0A Voice" : "\uD83D\uDD07 Voice";
       this.voiceBtn.style.color = active ? "var(--vn-accent, #ffd700)" : "#cbd5e1";
+      if (active) {
+        const conn = await this.ttsEngine?.resolveDefaultConnection();
+        if (conn) {
+          this.voiceBtn.title = `Voice active (${conn.name || conn.provider})`;
+        }
+      } else {
+        this.voiceBtn.title = "Toggle Speech Voice";
+      }
     });
     this.prevBtn = document.createElement("button");
     this.prevBtn.className = "vn-nav-btn vn-prev-btn";
@@ -35552,6 +35560,11 @@ class VnTtsEngine {
   enabled = false;
   voices = [];
   currentUtterance = null;
+  defaultConnection = null;
+  connectionFetched = false;
+  currentAudio = null;
+  currentObjectUrl = null;
+  abortController = null;
   constructor() {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       this.loadVoices();
@@ -35570,61 +35583,211 @@ class VnTtsEngine {
     this.enabled = val;
     if (!val) {
       this.stop();
+    } else {
+      this.resolveDefaultConnection();
     }
   }
   toggle() {
     this.setEnabled(!this.enabled);
     return this.enabled;
   }
+  async resolveDefaultConnection(forceRefresh = false) {
+    if (this.defaultConnection && !forceRefresh) {
+      return this.defaultConnection;
+    }
+    if (typeof window === "undefined" || typeof fetch === "undefined") {
+      return null;
+    }
+    try {
+      const res = await fetch("/api/v1/tts-connections?limit=100&offset=0", {
+        method: "GET",
+        credentials: "include"
+      });
+      if (!res.ok)
+        return null;
+      const json = await res.json();
+      const rows = Array.isArray(json?.data) ? json.data : [];
+      let foundDefault = null;
+      let firstValid = null;
+      for (const row of rows) {
+        if (!row || typeof row !== "object")
+          continue;
+        const r = row;
+        if (typeof r.id !== "string" || !r.id)
+          continue;
+        const conn = {
+          id: r.id,
+          name: typeof r.name === "string" ? r.name : r.id,
+          provider: typeof r.provider === "string" ? r.provider : "",
+          model: typeof r.model === "string" ? r.model : "",
+          voice: typeof r.voice === "string" ? r.voice : "",
+          isDefault: r.is_default === true
+        };
+        if (!firstValid)
+          firstValid = conn;
+        if (conn.isDefault) {
+          foundDefault = conn;
+          break;
+        }
+      }
+      this.defaultConnection = foundDefault || firstValid;
+      this.connectionFetched = true;
+      return this.defaultConnection;
+    } catch {
+      this.connectionFetched = true;
+      return null;
+    }
+  }
+  getDefaultConnection() {
+    return this.defaultConnection;
+  }
   stop() {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
+    this.cleanupCurrentAudio();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
       this.currentUtterance = null;
     }
   }
-  speak(text, speaker, onEnd) {
-    if (!this.enabled || typeof window === "undefined" || !("speechSynthesis" in window)) {
+  cleanupCurrentAudio() {
+    if (this.currentAudio) {
+      try {
+        this.currentAudio.pause();
+        this.currentAudio.removeAttribute("src");
+        this.currentAudio.load();
+      } catch {}
+      this.currentAudio = null;
+    }
+    if (this.currentObjectUrl) {
+      try {
+        URL.revokeObjectURL(this.currentObjectUrl);
+      } catch {}
+      this.currentObjectUrl = null;
+    }
+  }
+  cleanDialogueText(text) {
+    return text.replace(/<[^>]+>/g, "").replace(/\[\[.*?\]\]/g, "").replace(/\[(?:expression|pose|emotion|action|sfx)[^\]]*\]/gi, "").replace(/\{\{img::[^\}]+\}\}/gi, "").replace(/[\*_~`#]/g, "").replace(/["“”]/g, "").replace(/\s+/g, " ").trim();
+  }
+  async synthesizeWithHost(text, conn, signal) {
+    const payload = {
+      connectionId: conn.id,
+      text,
+      outputFormat: "mp3"
+    };
+    if (conn.voice) {
+      payload.voice = conn.voice;
+    }
+    const res = await fetch("/api/v1/tts/synthesize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload),
+      signal
+    });
+    if (!res.ok) {
+      throw new Error(`Host TTS synthesize error: HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    if (blob.size === 0) {
+      throw new Error("Host TTS returned empty audio");
+    }
+    return blob;
+  }
+  async speak(text, speaker, onEnd) {
+    if (!this.enabled || typeof window === "undefined") {
       onEnd?.();
       return;
     }
     this.stop();
-    const cleaned = text.replace(/\[\[.*?\]\]/g, "").replace(/<[^>]+>/g, "").replace(/[\*_~`#]/g, "").replace(/["“”]/g, "").trim();
+    const cleaned = this.cleanDialogueText(text);
     if (!cleaned) {
       onEnd?.();
       return;
     }
-    const utterance = new SpeechSynthesisUtterance(cleaned);
-    this.currentUtterance = utterance;
-    const hash = speaker.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    const isNarrator = !speaker || speaker.toLowerCase() === "narrator";
-    if (isNarrator) {
-      utterance.pitch = 0.95;
-      utterance.rate = 1;
-    } else {
-      utterance.pitch = 0.85 + hash % 9 * 0.05;
-      utterance.rate = 1 + hash % 3 * 0.05;
+    const conn = await this.resolveDefaultConnection();
+    if (conn) {
+      this.abortController = new AbortController;
+      const signal = this.abortController.signal;
+      try {
+        const blob = await this.synthesizeWithHost(cleaned, conn, signal);
+        if (signal.aborted)
+          return;
+        if (typeof Audio !== "undefined") {
+          const url = URL.createObjectURL(blob);
+          this.currentObjectUrl = url;
+          const audio = new Audio(url);
+          this.currentAudio = audio;
+          let settled = false;
+          const finish = () => {
+            if (settled)
+              return;
+            settled = true;
+            this.cleanupCurrentAudio();
+            onEnd?.();
+          };
+          audio.onended = finish;
+          audio.onerror = (e) => {
+            console.warn("[LumiVN TTS] Host audio playback failed, falling back to Web Speech:", e);
+            this.cleanupCurrentAudio();
+            this.speakWithWebSpeech(cleaned, speaker, onEnd);
+          };
+          await audio.play();
+          return;
+        }
+      } catch (err) {
+        if (signal.aborted)
+          return;
+        console.warn("[LumiVN TTS] Host TTS synthesis error, falling back to Web Speech:", err);
+      }
     }
-    if (this.voices.length > 0) {
-      const enVoices = this.voices.filter((v) => v.lang.startsWith("en"));
-      const pool = enVoices.length > 0 ? enVoices : this.voices;
-      utterance.voice = pool[hash % pool.length] || null;
-    }
-    let settled = false;
-    const finish = () => {
-      if (settled)
-        return;
-      settled = true;
-      this.currentUtterance = null;
+    this.speakWithWebSpeech(cleaned, speaker, onEnd);
+  }
+  speakWithWebSpeech(cleaned, speaker, onEnd) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
       onEnd?.();
-    };
-    utterance.onend = finish;
-    utterance.onerror = finish;
-    const maxDuration = Math.max(2000, cleaned.length * 100);
-    window.setTimeout(() => {
-      if (!settled)
-        finish();
-    }, maxDuration);
-    window.speechSynthesis.speak(utterance);
+      return;
+    }
+    try {
+      const utterance = new SpeechSynthesisUtterance(cleaned);
+      this.currentUtterance = utterance;
+      const hash = speaker.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+      const isNarrator = !speaker || speaker.toLowerCase() === "narrator";
+      if (isNarrator) {
+        utterance.pitch = 0.95;
+        utterance.rate = 1;
+      } else {
+        utterance.pitch = 0.85 + hash % 9 * 0.05;
+        utterance.rate = 1 + hash % 3 * 0.05;
+      }
+      if (this.voices.length > 0) {
+        const enVoices = this.voices.filter((v) => v.lang.startsWith("en"));
+        const pool = enVoices.length > 0 ? enVoices : this.voices;
+        utterance.voice = pool[hash % pool.length] || null;
+      }
+      let settled = false;
+      const finish = () => {
+        if (settled)
+          return;
+        settled = true;
+        this.currentUtterance = null;
+        onEnd?.();
+      };
+      utterance.onend = finish;
+      utterance.onerror = finish;
+      const maxDuration = Math.max(2000, cleaned.length * 100);
+      window.setTimeout(() => {
+        if (!settled)
+          finish();
+      }, maxDuration);
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      onEnd?.();
+    }
   }
 }
 

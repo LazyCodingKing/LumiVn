@@ -111,12 +111,20 @@ export class DialogueBox {
     const voiceOn = this.ttsEngine?.isEnabled() ?? false;
     this.voiceBtn.innerHTML = voiceOn ? "🔊 Voice" : "🔇 Voice";
     this.voiceBtn.title = "Toggle Speech Voice";
-    this.voiceBtn.addEventListener("click", (e) => {
+    this.voiceBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
       this.audioEngine?.playSfx("click");
       const active = this.ttsEngine?.toggle() ?? false;
       this.voiceBtn.innerHTML = active ? "🔊 Voice" : "🔇 Voice";
       this.voiceBtn.style.color = active ? "var(--vn-accent, #ffd700)" : "#cbd5e1";
+      if (active) {
+        const conn = await this.ttsEngine?.resolveDefaultConnection();
+        if (conn) {
+          this.voiceBtn.title = `Voice active (${conn.name || conn.provider})`;
+        }
+      } else {
+        this.voiceBtn.title = "Toggle Speech Voice";
+      }
     });
 
     this.prevBtn = document.createElement("button");
