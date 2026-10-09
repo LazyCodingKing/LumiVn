@@ -90,6 +90,7 @@ export class StageOverlay {
         this.stageRenderer.setActorTransform(actorId, transform);
       },
       isOverlayActive: () => this.isActive(),
+      ttsEngine: this.ttsEngine,
     });
 
     // Toast Container
@@ -141,6 +142,7 @@ export class StageOverlay {
 
   public resetStage(targetChatId?: string): void {
     this.currentChatId = targetChatId || this.resolveChatId() || null;
+    this.ttsEngine.setChatId(this.currentChatId || "");
     this.lastProcessedEvtId = null;
     this.dialogueBox.reset();
     this.stageRenderer.reset();

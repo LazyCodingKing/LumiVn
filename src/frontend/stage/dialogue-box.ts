@@ -476,15 +476,19 @@ export class DialogueBox {
     temp.innerHTML = html;
     const plain = temp.textContent || beat.text;
     let charIdx = 0;
+    let hasStartedTyping = false;
+    let stepDelay = 20;
 
-    // Trigger TTS speech
-    if (this.ttsEngine?.isEnabled()) {
-      this.ttsEngine.speak(beat.text, beat.speaker, () => {
-        if (this.autoPlay && !this.isTyping) {
-          this.advance();
-        }
-      });
-    }
+    const startTypewriter = (audioDuration?: number) => {
+      if (hasStartedTyping || !this.isTyping) return;
+      hasStartedTyping = true;
+
+      // Pacing synchronized to audio duration when available
+      if (audioDuration && audioDuration > 0 && plain.length > 0) {
+        stepDelay = Math.max(10, Math.min(80, (audioDuration * 1000) / (plain.length / 2)));
+      }
+      tick();
+    };
 
     const tick = () => {
       if (!this.isTyping) return;
@@ -498,10 +502,44 @@ export class DialogueBox {
         this.onBeatSettled();
       } else {
         this.textContainer.textContent = plain.substring(0, charIdx);
-        this.typeTimer = window.setTimeout(tick, 20);
+        this.typeTimer = window.setTimeout(tick, stepDelay);
       }
     };
-    tick();
+
+    if (this.ttsEngine?.isEnabled()) {
+      // 1.2s fallback timer in case browser autoplay policy blocks audio
+      const fallbackTimer = window.setTimeout(() => {
+        startTypewriter();
+      }, 1200);
+
+      this.ttsEngine.speak(beat.text, beat.speaker, {
+        onStart: (duration) => {
+          clearTimeout(fallbackTimer);
+          startTypewriter(duration);
+        },
+        onBoundary: (wordCharIdx) => {
+          if (wordCharIdx > charIdx) {
+            charIdx = wordCharIdx;
+            this.textContainer.textContent = plain.substring(0, charIdx);
+          }
+        },
+        onEnd: () => {
+          if (this.isTyping) {
+            this.textContainer.innerHTML = html;
+            this.isTyping = false;
+            this.onBeatSettled();
+          } else if (this.autoPlay) {
+            this.advance();
+          }
+        },
+        onError: () => {
+          clearTimeout(fallbackTimer);
+          startTypewriter();
+        },
+      });
+    } else {
+      startTypewriter();
+    }
   }
 
   private onBeatSettled(): void {

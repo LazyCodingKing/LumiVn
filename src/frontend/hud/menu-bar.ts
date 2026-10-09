@@ -11,6 +11,7 @@ import { JournalTab } from "./tab-journal.js";
 import { SceneTab } from "./tab-scene.js";
 import { DiagnosticsTab } from "./tab-diagnostics.js";
 import type { SpriteTransform } from "../stage/sprite-transform.js";
+import type { VnTtsEngine } from "../stage/tts-engine.js";
 
 export type HudTabId =
   | "characters"
@@ -29,6 +30,7 @@ export interface MenuBarOptions {
   onAction: (actionText: string) => void;
   onTransformChange?: (actorId: string, transform: SpriteTransform) => void;
   isOverlayActive?: () => boolean;
+  ttsEngine?: VnTtsEngine;
 }
 
 export class MenuBar {
@@ -80,7 +82,7 @@ export class MenuBar {
     });
 
     // Instantiate tab views
-    this.charactersTab = new CharactersTab();
+    this.charactersTab = new CharactersTab(options.ttsEngine);
     this.bplotsTab = new BPlotsTab();
     this.wardrobeTab = new WardrobeTab(options.onAction);
     this.statsTab = new StatsTab();

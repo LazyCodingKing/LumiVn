@@ -1240,13 +1240,17 @@ class DialogueBox {
     temp.innerHTML = html;
     const plain = temp.textContent || beat.text;
     let charIdx = 0;
-    if (this.ttsEngine?.isEnabled()) {
-      this.ttsEngine.speak(beat.text, beat.speaker, () => {
-        if (this.autoPlay && !this.isTyping) {
-          this.advance();
-        }
-      });
-    }
+    let hasStartedTyping = false;
+    let stepDelay = 20;
+    const startTypewriter = (audioDuration) => {
+      if (hasStartedTyping || !this.isTyping)
+        return;
+      hasStartedTyping = true;
+      if (audioDuration && audioDuration > 0 && plain.length > 0) {
+        stepDelay = Math.max(10, Math.min(80, audioDuration * 1000 / (plain.length / 2)));
+      }
+      tick();
+    };
     const tick = () => {
       if (!this.isTyping)
         return;
@@ -1260,10 +1264,41 @@ class DialogueBox {
         this.onBeatSettled();
       } else {
         this.textContainer.textContent = plain.substring(0, charIdx);
-        this.typeTimer = window.setTimeout(tick, 20);
+        this.typeTimer = window.setTimeout(tick, stepDelay);
       }
     };
-    tick();
+    if (this.ttsEngine?.isEnabled()) {
+      const fallbackTimer = window.setTimeout(() => {
+        startTypewriter();
+      }, 1200);
+      this.ttsEngine.speak(beat.text, beat.speaker, {
+        onStart: (duration) => {
+          clearTimeout(fallbackTimer);
+          startTypewriter(duration);
+        },
+        onBoundary: (wordCharIdx) => {
+          if (wordCharIdx > charIdx) {
+            charIdx = wordCharIdx;
+            this.textContainer.textContent = plain.substring(0, charIdx);
+          }
+        },
+        onEnd: () => {
+          if (this.isTyping) {
+            this.textContainer.innerHTML = html;
+            this.isTyping = false;
+            this.onBeatSettled();
+          } else if (this.autoPlay) {
+            this.advance();
+          }
+        },
+        onError: () => {
+          clearTimeout(fallbackTimer);
+          startTypewriter();
+        }
+      });
+    } else {
+      startTypewriter();
+    }
   }
   onBeatSettled() {
     const isLast = this.currentBeatIndex >= this.beats.length - 1;
@@ -1466,7 +1501,9 @@ function normalizeRoutine(r) {
 class CharactersTab {
   root;
   selectedActorId = null;
-  constructor() {
+  ttsEngine;
+  constructor(ttsEngine) {
+    this.ttsEngine = ttsEngine;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-characters";
   }
@@ -2223,6 +2260,105 @@ class CharactersTab {
       }
       relsSection.appendChild(relsList);
       container.appendChild(relsSection);
+    }
+    if (this.ttsEngine) {
+      const voiceSec = document.createElement("div");
+      voiceSec.className = "vn-section";
+      voiceSec.innerHTML = `<h4>\uD83C\uDF99️ Voice Assignment (TTS)</h4>`;
+      const vBox = document.createElement("div");
+      vBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; font-size: 12px; display: flex; flex-direction: column; gap: 10px;";
+      const currentVoice = this.ttsEngine.resolveVoice(isUser ? "user" : actor.name || actor.id);
+      const isNarrator = (actor.id || "").toLowerCase() === "narrator";
+      vBox.innerHTML = `
+        <div style="font-size: 11px; color: #94a3b8;">
+          Assign a distinct voice connection for <strong>${displayName}</strong>.
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div>
+            <label style="font-size: 10px; color: #94a3b8; display: block; margin-bottom: 2px;">TTS Profile / Connection:</label>
+            <select id="vn-voice-profile-select" style="width: 100%; background: #0f172a; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 6px; font-size: 11px;">
+              <option value="">(Default / Inherited)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size: 10px; color: #94a3b8; display: block; margin-bottom: 2px;">Voice:</label>
+            <select id="vn-voice-id-select" style="width: 100%; background: #0f172a; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 6px; font-size: 11px;">
+              <option value="">(Profile Default Voice)</option>
+            </select>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 4px;">
+          <button id="vn-voice-test-btn" style="background: #334155; border: 1px solid #475569; border-radius: 4px; color: #cbd5e1; font-size: 11px; padding: 4px 10px; cursor: pointer;">
+            ▶ Test Voice
+          </button>
+          <button id="vn-voice-save-btn" style="background: #6366f1; border: none; border-radius: 4px; color: #fff; font-size: 11px; font-weight: 700; padding: 4px 12px; cursor: pointer;">
+            Save Voice
+          </button>
+        </div>
+      `;
+      voiceSec.appendChild(vBox);
+      container.appendChild(voiceSec);
+      const profileSelect = vBox.querySelector("#vn-voice-profile-select");
+      const voiceSelect = vBox.querySelector("#vn-voice-id-select");
+      const saveBtn = vBox.querySelector("#vn-voice-save-btn");
+      const testBtn = vBox.querySelector("#vn-voice-test-btn");
+      this.ttsEngine.listProfiles().then((profiles) => {
+        profiles.forEach((p) => {
+          const opt = document.createElement("option");
+          opt.value = p.id;
+          opt.textContent = `${p.name} (${p.provider})`;
+          if (currentVoice?.connectionId === p.id)
+            opt.selected = true;
+          profileSelect.appendChild(opt);
+        });
+        if (profileSelect.value) {
+          updateVoiceList(profileSelect.value);
+        }
+      });
+      const updateVoiceList = async (connId) => {
+        voiceSelect.innerHTML = `<option value="">(Profile Default Voice)</option>`;
+        if (!connId)
+          return;
+        const voices = await this.ttsEngine.listVoices(connId);
+        voices.forEach((v) => {
+          const opt = document.createElement("option");
+          opt.value = v.id;
+          opt.textContent = v.name;
+          if (currentVoice?.voice === v.id)
+            opt.selected = true;
+          voiceSelect.appendChild(opt);
+        });
+      };
+      profileSelect.addEventListener("change", () => {
+        updateVoiceList(profileSelect.value);
+      });
+      saveBtn.addEventListener("click", () => {
+        const connectionId = profileSelect.value;
+        const voice = voiceSelect.value;
+        const settings = this.ttsEngine.getSettings();
+        if (isNarrator) {
+          this.ttsEngine.updateSettings({
+            narrator: connectionId ? { connectionId, voice } : null
+          });
+        } else {
+          const key = (actor.name || actor.id || "").toLowerCase();
+          const nextChars = { ...settings.characters };
+          if (connectionId) {
+            nextChars[key] = { connectionId, voice };
+          } else {
+            delete nextChars[key];
+          }
+          this.ttsEngine.updateSettings({ characters: nextChars });
+        }
+        saveBtn.textContent = "✓ Saved!";
+        setTimeout(() => {
+          saveBtn.textContent = "Save Voice";
+        }, 1500);
+      });
+      testBtn.addEventListener("click", () => {
+        const testText = isNarrator ? "The morning light filtered through the quiet room." : `Hello, my name is ${displayName}.`;
+        this.ttsEngine.speak(testText, displayName);
+      });
     }
     this.root.appendChild(container);
   }
@@ -8472,7 +8608,7 @@ class MenuBar {
       if (e.target === this.panelOverlay)
         this.closeTab();
     });
-    this.charactersTab = new CharactersTab;
+    this.charactersTab = new CharactersTab(options.ttsEngine);
     this.bplotsTab = new BPlotsTab;
     this.wardrobeTab = new WardrobeTab(options.onAction);
     this.statsTab = new StatsTab;
@@ -8830,97 +8966,75 @@ class VnAudioEngine {
 }
 
 // src/frontend/stage/tts-engine.ts
+var DEFAULT_VOICE_SETTINGS = {
+  enabled: false,
+  volume: 0.8,
+  narrator: null,
+  characterDefault: null,
+  characters: {}
+};
+function speakerKey(name) {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+function characterVoiceKey(chatId, name) {
+  return `chat::${chatId}::${speakerKey(name)}`;
+}
+
 class VnTtsEngine {
-  enabled = false;
-  voices = [];
-  currentUtterance = null;
-  defaultConnection = null;
-  connectionFetched = false;
   currentAudio = null;
-  currentObjectUrl = null;
-  abortController = null;
+  currentUtterance = null;
+  settings = { ...DEFAULT_VOICE_SETTINGS };
+  activeChatId = "";
+  cachedDefaultConnection = null;
   constructor() {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      this.loadVoices();
-      window.speechSynthesis.onvoiceschanged = () => this.loadVoices();
-    }
+    this.loadLocalSettings();
   }
-  loadVoices() {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      this.voices = window.speechSynthesis.getVoices();
-    }
+  setChatId(chatId) {
+    this.activeChatId = chatId;
   }
-  isEnabled() {
-    return this.enabled;
+  getSettings() {
+    return this.settings;
+  }
+  updateSettings(patch) {
+    this.settings = { ...this.settings, ...patch };
+    this.saveLocalSettings();
+    if (!this.settings.enabled)
+      this.stop();
   }
   setEnabled(val) {
-    this.enabled = val;
-    if (!val) {
-      this.stop();
-    } else {
-      this.resolveDefaultConnection();
-    }
+    this.updateSettings({ enabled: val });
+  }
+  loadLocalSettings() {
+    try {
+      if (typeof localStorage !== "undefined") {
+        const raw = localStorage.getItem("lumivn_voice_settings");
+        if (raw)
+          this.settings = { ...DEFAULT_VOICE_SETTINGS, ...JSON.parse(raw) };
+      }
+    } catch {}
+  }
+  saveLocalSettings() {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("lumivn_voice_settings", JSON.stringify(this.settings));
+      }
+    } catch {}
+  }
+  isEnabled() {
+    return this.settings.enabled;
   }
   toggle() {
-    this.setEnabled(!this.enabled);
-    return this.enabled;
-  }
-  async resolveDefaultConnection(forceRefresh = false) {
-    if (this.defaultConnection && !forceRefresh) {
-      return this.defaultConnection;
-    }
-    if (typeof window === "undefined" || typeof fetch === "undefined") {
-      return null;
-    }
-    try {
-      const res = await fetch("/api/v1/tts-connections?limit=100&offset=0", {
-        method: "GET",
-        credentials: "include"
-      });
-      if (!res.ok)
-        return null;
-      const json = await res.json();
-      const rows = Array.isArray(json?.data) ? json.data : [];
-      let foundDefault = null;
-      let firstValid = null;
-      for (const row of rows) {
-        if (!row || typeof row !== "object")
-          continue;
-        const r = row;
-        if (typeof r.id !== "string" || !r.id)
-          continue;
-        const conn = {
-          id: r.id,
-          name: typeof r.name === "string" ? r.name : r.id,
-          provider: typeof r.provider === "string" ? r.provider : "",
-          model: typeof r.model === "string" ? r.model : "",
-          voice: typeof r.voice === "string" ? r.voice : "",
-          isDefault: r.is_default === true
-        };
-        if (!firstValid)
-          firstValid = conn;
-        if (conn.isDefault) {
-          foundDefault = conn;
-          break;
-        }
-      }
-      this.defaultConnection = foundDefault || firstValid;
-      this.connectionFetched = true;
-      return this.defaultConnection;
-    } catch {
-      this.connectionFetched = true;
-      return null;
-    }
-  }
-  getDefaultConnection() {
-    return this.defaultConnection;
+    this.updateSettings({ enabled: !this.settings.enabled });
+    return this.settings.enabled;
   }
   stop() {
-    if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = null;
+    if (this.currentAudio) {
+      try {
+        this.currentAudio.pause();
+        this.currentAudio.src = "";
+      } catch {}
+      this.currentAudio = null;
     }
-    this.cleanupCurrentAudio();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try {
         window.speechSynthesis.cancel();
@@ -8928,139 +9042,154 @@ class VnTtsEngine {
       this.currentUtterance = null;
     }
   }
-  cleanupCurrentAudio() {
-    if (this.currentAudio) {
-      try {
-        this.currentAudio.pause();
-        this.currentAudio.removeAttribute("src");
-        this.currentAudio.load();
-      } catch {}
-      this.currentAudio = null;
-    }
-    if (this.currentObjectUrl) {
-      try {
-        URL.revokeObjectURL(this.currentObjectUrl);
-      } catch {}
-      this.currentObjectUrl = null;
-    }
-  }
   cleanDialogueText(text) {
     return text.replace(/<[^>]+>/g, "").replace(/\[\[.*?\]\]/g, "").replace(/\[(?:expression|pose|emotion|action|sfx)[^\]]*\]/gi, "").replace(/\{\{img::[^\}]+\}\}/gi, "").replace(/[\*_~`#]/g, "").replace(/["“”]/g, "").replace(/\s+/g, " ").trim();
   }
-  async synthesizeWithHost(text, conn, signal) {
-    const payload = {
-      connectionId: conn.id,
-      text,
-      outputFormat: "mp3"
-    };
-    if (conn.voice) {
-      payload.voice = conn.voice;
+  async listProfiles() {
+    try {
+      const res = await fetch("/api/v1/tts-connections?limit=50", { credentials: "include" });
+      if (!res.ok)
+        return [];
+      const body = await res.json();
+      const rows = Array.isArray(body.data) ? body.data : [];
+      return rows.map((r) => ({
+        id: r.id,
+        name: r.name || r.id,
+        provider: r.provider || "",
+        model: r.model || "",
+        voice: r.voice || "",
+        isDefault: Boolean(r.is_default)
+      }));
+    } catch {
+      return [];
     }
-    const res = await fetch("/api/v1/tts/synthesize", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(payload),
-      signal
-    });
-    if (!res.ok) {
-      throw new Error(`Host TTS synthesize error: HTTP ${res.status}`);
-    }
-    const blob = await res.blob();
-    if (blob.size === 0) {
-      throw new Error("Host TTS returned empty audio");
-    }
-    return blob;
   }
-  async speak(text, speaker, onEnd) {
-    if (!this.enabled || typeof window === "undefined") {
-      onEnd?.();
+  async resolveDefaultConnection(forceRefresh = false) {
+    if (this.cachedDefaultConnection && !forceRefresh) {
+      return this.cachedDefaultConnection;
+    }
+    const profiles = await this.listProfiles();
+    const found = profiles.find((p) => p.isDefault) || profiles[0] || null;
+    this.cachedDefaultConnection = found;
+    return found;
+  }
+  async listVoices(connectionId) {
+    if (!connectionId)
+      return [];
+    try {
+      const res = await fetch(`/api/v1/tts-connections/${encodeURIComponent(connectionId)}/voices`, { credentials: "include" });
+      if (!res.ok)
+        return [];
+      const body = await res.json();
+      const rows = Array.isArray(body.voices) ? body.voices : [];
+      return rows.map((v) => ({
+        id: v.id || v.name,
+        name: v.name || v.id
+      }));
+    } catch {
+      return [];
+    }
+  }
+  resolveVoice(speakerName = "") {
+    const clean = speakerKey(speakerName);
+    const isNarrator = !clean || clean === "narrator";
+    if (isNarrator) {
+      return this.settings.narrator || this.settings.characterDefault || null;
+    }
+    const scopedKey = characterVoiceKey(this.activeChatId, clean);
+    return this.settings.characters[scopedKey] || this.settings.characters[clean] || this.settings.characterDefault || this.settings.narrator || null;
+  }
+  async speak(text, speakerName = "", callbacks) {
+    if (!this.settings.enabled || !text.trim()) {
+      if (typeof callbacks === "function")
+        callbacks();
+      else
+        callbacks?.onEnd?.();
       return;
     }
     this.stop();
-    const cleaned = this.cleanDialogueText(text);
-    if (!cleaned) {
-      onEnd?.();
+    const cb = typeof callbacks === "function" ? { onEnd: callbacks } : callbacks || {};
+    const cleanText = this.cleanDialogueText(text);
+    if (!cleanText) {
+      cb.onEnd?.();
       return;
     }
-    const conn = await this.resolveDefaultConnection();
-    if (conn) {
-      this.abortController = new AbortController;
-      const signal = this.abortController.signal;
+    let voiceRef = this.resolveVoice(speakerName);
+    if (!voiceRef?.connectionId) {
+      const defaultConn = await this.resolveDefaultConnection();
+      if (defaultConn) {
+        voiceRef = {
+          connectionId: defaultConn.id,
+          voice: defaultConn.voice || ""
+        };
+      }
+    }
+    if (voiceRef?.connectionId) {
       try {
-        const blob = await this.synthesizeWithHost(cleaned, conn, signal);
-        if (signal.aborted)
-          return;
-        if (typeof Audio !== "undefined") {
-          const url = URL.createObjectURL(blob);
-          this.currentObjectUrl = url;
-          const audio = new Audio(url);
-          this.currentAudio = audio;
-          let settled = false;
-          const finish = () => {
-            if (settled)
-              return;
-            settled = true;
-            this.cleanupCurrentAudio();
-            onEnd?.();
-          };
-          audio.onended = finish;
-          audio.onerror = (e) => {
-            console.warn("[LumiVN TTS] Host audio playback failed, falling back to Web Speech:", e);
-            this.cleanupCurrentAudio();
-            this.speakWithWebSpeech(cleaned, speaker, onEnd);
-          };
-          await audio.play();
-          return;
+        const payload = {
+          connectionId: voiceRef.connectionId,
+          text: cleanText,
+          outputFormat: "mp3"
+        };
+        if (voiceRef.voice)
+          payload.voice = voiceRef.voice;
+        if (voiceRef.speed)
+          payload.parameters = { speed: voiceRef.speed };
+        const resp = await fetch("/api/v1/tts/synthesize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(payload)
+        });
+        if (resp.ok) {
+          const blob = await resp.blob();
+          if (typeof Audio !== "undefined" && typeof URL !== "undefined") {
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            this.currentAudio = audio;
+            audio.volume = Math.max(0, Math.min(1, this.settings.volume));
+            audio.addEventListener("play", () => {
+              cb.onStart?.(audio.duration || undefined);
+            });
+            audio.addEventListener("ended", () => {
+              URL.revokeObjectURL(url);
+              this.currentAudio = null;
+              cb.onEnd?.();
+            });
+            audio.addEventListener("error", (e) => {
+              URL.revokeObjectURL(url);
+              this.currentAudio = null;
+              cb.onError?.(e);
+            });
+            await audio.play();
+            return;
+          }
         }
-      } catch (err) {
-        if (signal.aborted)
-          return;
-        console.warn("[LumiVN TTS] Host TTS synthesis error, falling back to Web Speech:", err);
-      }
+      } catch (err) {}
     }
-    this.speakWithWebSpeech(cleaned, speaker, onEnd);
-  }
-  speakWithWebSpeech(cleaned, speaker, onEnd) {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      onEnd?.();
-      return;
-    }
-    try {
-      const utterance = new SpeechSynthesisUtterance(cleaned);
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      const utterance = new SpeechSynthesisUtterance(cleanText);
       this.currentUtterance = utterance;
-      const hash = speaker.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-      const isNarrator = !speaker || speaker.toLowerCase() === "narrator";
-      if (isNarrator) {
-        utterance.pitch = 0.95;
-        utterance.rate = 1;
-      } else {
-        utterance.pitch = 0.85 + hash % 9 * 0.05;
-        utterance.rate = 1 + hash % 3 * 0.05;
-      }
-      if (this.voices.length > 0) {
-        const enVoices = this.voices.filter((v) => v.lang.startsWith("en"));
-        const pool = enVoices.length > 0 ? enVoices : this.voices;
-        utterance.voice = pool[hash % pool.length] || null;
-      }
-      let settled = false;
-      const finish = () => {
-        if (settled)
-          return;
-        settled = true;
-        this.currentUtterance = null;
-        onEnd?.();
+      utterance.volume = this.settings.volume;
+      utterance.onstart = () => {
+        cb.onStart?.();
       };
-      utterance.onend = finish;
-      utterance.onerror = finish;
-      const maxDuration = Math.max(2000, cleaned.length * 100);
-      window.setTimeout(() => {
-        if (!settled)
-          finish();
-      }, maxDuration);
+      utterance.onboundary = (e) => {
+        if (e.name === "word")
+          cb.onBoundary?.(e.charIndex);
+      };
+      utterance.onend = () => {
+        this.currentUtterance = null;
+        cb.onEnd?.();
+      };
+      utterance.onerror = (e) => {
+        this.currentUtterance = null;
+        cb.onError?.(e);
+      };
       window.speechSynthesis.speak(utterance);
-    } catch {
-      onEnd?.();
+    } else {
+      cb.onStart?.();
+      cb.onEnd?.();
     }
   }
 }
@@ -9126,7 +9255,8 @@ class StageOverlay {
       onTransformChange: (actorId, transform) => {
         this.stageRenderer.setActorTransform(actorId, transform);
       },
-      isOverlayActive: () => this.isActive()
+      isOverlayActive: () => this.isActive(),
+      ttsEngine: this.ttsEngine
     });
     this.toastContainer = document.createElement("div");
     this.toastContainer.className = "vn-toast-container";
@@ -9166,6 +9296,7 @@ class StageOverlay {
   }
   resetStage(targetChatId) {
     this.currentChatId = targetChatId || this.resolveChatId() || null;
+    this.ttsEngine.setChatId(this.currentChatId || "");
     this.lastProcessedEvtId = null;
     this.dialogueBox.reset();
     this.stageRenderer.reset();

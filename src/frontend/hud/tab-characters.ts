@@ -1,4 +1,5 @@
 import type { LedgerData, ActorDossier, AssetManifest, RosterCharacter } from "../../shared/types.js";
+import type { VnTtsEngine } from "../stage/tts-engine.js";
 
 // Helper normalizers for tuples vs objects emitted by LLM My World 1.85 ledger
 function normalizeGoal(g: any): {
@@ -179,8 +180,10 @@ function normalizeRoutine(r: any): {
 export class CharactersTab {
   public root: HTMLElement;
   private selectedActorId: string | null = null;
+  private ttsEngine?: VnTtsEngine;
 
-  constructor() {
+  constructor(ttsEngine?: VnTtsEngine) {
+    this.ttsEngine = ttsEngine;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-characters";
   }
@@ -1029,6 +1032,118 @@ export class CharactersTab {
       }
       relsSection.appendChild(relsList);
       container.appendChild(relsSection);
+    }
+
+    // Add Voice Assignment Panel to Character Dossier
+    if (this.ttsEngine) {
+      const voiceSec = document.createElement("div");
+      voiceSec.className = "vn-section";
+      voiceSec.innerHTML = `<h4>🎙️ Voice Assignment (TTS)</h4>`;
+
+      const vBox = document.createElement("div");
+      vBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; font-size: 12px; display: flex; flex-direction: column; gap: 10px;";
+      
+      const currentVoice = this.ttsEngine.resolveVoice(isUser ? "user" : actor.name || actor.id);
+      const isNarrator = (actor.id || "").toLowerCase() === "narrator";
+
+      vBox.innerHTML = `
+        <div style="font-size: 11px; color: #94a3b8;">
+          Assign a distinct voice connection for <strong>${displayName}</strong>.
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div>
+            <label style="font-size: 10px; color: #94a3b8; display: block; margin-bottom: 2px;">TTS Profile / Connection:</label>
+            <select id="vn-voice-profile-select" style="width: 100%; background: #0f172a; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 6px; font-size: 11px;">
+              <option value="">(Default / Inherited)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size: 10px; color: #94a3b8; display: block; margin-bottom: 2px;">Voice:</label>
+            <select id="vn-voice-id-select" style="width: 100%; background: #0f172a; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 6px; font-size: 11px;">
+              <option value="">(Profile Default Voice)</option>
+            </select>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 4px;">
+          <button id="vn-voice-test-btn" style="background: #334155; border: 1px solid #475569; border-radius: 4px; color: #cbd5e1; font-size: 11px; padding: 4px 10px; cursor: pointer;">
+            ▶ Test Voice
+          </button>
+          <button id="vn-voice-save-btn" style="background: #6366f1; border: none; border-radius: 4px; color: #fff; font-size: 11px; font-weight: 700; padding: 4px 12px; cursor: pointer;">
+            Save Voice
+          </button>
+        </div>
+      `;
+
+      voiceSec.appendChild(vBox);
+      container.appendChild(voiceSec);
+
+      // Populate Profiles from Host
+      const profileSelect = vBox.querySelector("#vn-voice-profile-select") as HTMLSelectElement;
+      const voiceSelect = vBox.querySelector("#vn-voice-id-select") as HTMLSelectElement;
+      const saveBtn = vBox.querySelector("#vn-voice-save-btn") as HTMLButtonElement;
+      const testBtn = vBox.querySelector("#vn-voice-test-btn") as HTMLButtonElement;
+
+      void this.ttsEngine.listProfiles().then((profiles) => {
+        profiles.forEach((p) => {
+          const opt = document.createElement("option");
+          opt.value = p.id;
+          opt.textContent = `${p.name} (${p.provider})`;
+          if (currentVoice?.connectionId === p.id) opt.selected = true;
+          profileSelect.appendChild(opt);
+        });
+
+        if (profileSelect.value) {
+          void updateVoiceList(profileSelect.value);
+        }
+      });
+
+      const updateVoiceList = async (connId: string) => {
+        voiceSelect.innerHTML = `<option value="">(Profile Default Voice)</option>`;
+        if (!connId) return;
+        const voices = await this.ttsEngine!.listVoices(connId);
+        voices.forEach((v) => {
+          const opt = document.createElement("option");
+          opt.value = v.id;
+          opt.textContent = v.name;
+          if (currentVoice?.voice === v.id) opt.selected = true;
+          voiceSelect.appendChild(opt);
+        });
+      };
+
+      profileSelect.addEventListener("change", () => {
+        void updateVoiceList(profileSelect.value);
+      });
+
+      saveBtn.addEventListener("click", () => {
+        const connectionId = profileSelect.value;
+        const voice = voiceSelect.value;
+        const settings = this.ttsEngine!.getSettings();
+
+        if (isNarrator) {
+          this.ttsEngine!.updateSettings({
+            narrator: connectionId ? { connectionId, voice } : null,
+          });
+        } else {
+          const key = (actor.name || actor.id || "").toLowerCase();
+          const nextChars = { ...settings.characters };
+          if (connectionId) {
+            nextChars[key] = { connectionId, voice };
+          } else {
+            delete nextChars[key];
+          }
+          this.ttsEngine!.updateSettings({ characters: nextChars });
+        }
+
+        saveBtn.textContent = "✓ Saved!";
+        setTimeout(() => { saveBtn.textContent = "Save Voice"; }, 1500);
+      });
+
+      testBtn.addEventListener("click", () => {
+        const testText = isNarrator
+          ? "The morning light filtered through the quiet room."
+          : `Hello, my name is ${displayName}.`;
+        void this.ttsEngine!.speak(testText, displayName);
+      });
     }
 
     this.root.appendChild(container);
