@@ -388,7 +388,7 @@ async function processChatTurn(
 }
 
 // ── Event Handlers ──
-spindle.on("GENERATION_STARTED", (payload: GenerationStartedPayloadDTO) => {
+spindle.on("GENERATION_STARTED", async (payload: GenerationStartedPayloadDTO) => {
   const { chatId, generationId } = payload || {};
   if (!chatId || !generationId) return;
 
@@ -403,9 +403,33 @@ spindle.on("GENERATION_STARTED", (payload: GenerationStartedPayloadDTO) => {
   }
   activeGenerationIds.set(chatId, generationId);
 
-  // Notify frontend that generation started so stale text clears immediately
+  // Notify frontend that generation started; extract user message to display under user nameplate
   if (isStageOpen) {
-    spindle.sendToFrontend({ type: "vn_generating", chatId });
+    try {
+      const messages: any[] = await (spindle.chat as any).getMessages(chatId);
+      const bounded = Array.isArray(messages) ? messages : [];
+      let latestUserMsg: any = null;
+      for (let i = bounded.length - 1; i >= 0; i--) {
+        const m = bounded[i];
+        if (m && (m.role === "user" || m.is_user)) {
+          latestUserMsg = m;
+          break;
+        }
+      }
+      if (latestUserMsg && latestUserMsg.content) {
+        const speaker = latestUserMsg.name || "You";
+        spindle.sendToFrontend({
+          type: "vn_user_message",
+          chatId,
+          speaker,
+          text: latestUserMsg.content,
+        });
+      } else {
+        spindle.sendToFrontend({ type: "vn_generating", chatId });
+      }
+    } catch {
+      spindle.sendToFrontend({ type: "vn_generating", chatId });
+    }
   }
 });
 
@@ -524,6 +548,14 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         });
         break;
       }
+
+      // Immediately echo user action to frontend dialogue box under "You"
+      spindle.sendToFrontend({
+        type: "vn_user_message",
+        chatId,
+        speaker: "You",
+        text: actionText,
+      });
 
       try {
         await spindle.chat.appendMessage(

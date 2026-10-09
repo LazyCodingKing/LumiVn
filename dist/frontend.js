@@ -26857,6 +26857,28 @@ function identifySpeaker(text, fallbackSpeaker, knownActors = []) {
   }
   return { speaker: "Narrator", cleanBody: trimmed };
 }
+var PROSE_EMOTION_PATTERNS = [
+  { regex: /\b(?:blush(?:ed|ing|es)?|flush(?:ed|ing|es)?|shyly|embarrass(?:ed|ing)?)\b/i, emotion: "blush" },
+  { regex: /\b(?:smil(?:ed|ing|es)?|grin(?:ned|ning|s)?|laugh(?:ed|ing|s)?|chuckle(?:d|s|ing)?|beam(?:ed|ing|s)?|giggle(?:d|s|ing)?)\b/i, emotion: "smile" },
+  { regex: /\b(?:frown(?:ed|ing|es)?|scowl(?:ed|ing|es)?|glar(?:ed|ing|es)?|growl(?:ed|ing|s)?|snapp(?:ed|ing|s)?|shout(?:ed|ing|s)?|yell(?:ed|ing|s)?|anger|angry)\b/i, emotion: "angry" },
+  { regex: /\b(?:gasp(?:ed|ing|s)?|flinch(?:ed|ing|es)?|trembl(?:ed|ing|es)?|startl(?:ed|ing|es)?|terrifi(?:ed|es)?|fear|scared)\b/i, emotion: "fear" },
+  { regex: /\b(?:sigh(?:ed|ing|s)?|look(?:ed|ing|s)?\s+down|tear(?:ed|ing)?\s+up|sob(?:bed|bing|s)?|sad(?:ly)?|pensive)\b/i, emotion: "sad" },
+  { regex: /\b(?:narrow(?:ed|ing|s)?\s+eyes|rais(?:ed|ing|es)?\s+an?\s+eyebrow|skeptic(?:al)?|suspicious(?:ly)?)\b/i, emotion: "suspicious" }
+];
+function inferEmotionFromText(text) {
+  for (const { regex, emotion } of PROSE_EMOTION_PATTERNS) {
+    if (regex.test(text))
+      return emotion;
+  }
+  return;
+}
+function inferActionFromText(text) {
+  const italicMatch = text.match(/\*([A-Za-z0-9_\-\s]{2,30})\*/);
+  if (italicMatch && !/^\s*(?:said|whispered|asked|replied)\s*$/i.test(italicMatch[1])) {
+    return italicMatch[1].trim().toLowerCase().replace(/\s+/g, "_");
+  }
+  return;
+}
 function splitParagraphIntoBeats(paragraphs, defaultSpeaker = "Narrator", knownActors = []) {
   const beats = [];
   for (const para of paragraphs) {
@@ -26873,24 +26895,28 @@ function splitParagraphIntoBeats(paragraphs, defaultSpeaker = "Narrator", knownA
         if (!chunk)
           continue;
         const { speaker, cleanBody } = identifySpeaker(chunk, defaultSpeaker, knownActors);
+        const inferredExpr = expression || inferEmotionFromText(chunk);
+        const inferredAct = action || inferActionFromText(chunk);
         beats.push({
           speaker,
           text: cleanBody,
           rawText: chunk,
-          expression,
-          action,
+          expression: inferredExpr,
+          action: inferredAct,
           sfx
         });
       }
       continue;
     }
     const { speaker, cleanBody } = identifySpeaker(cleanText, defaultSpeaker, knownActors);
+    const inferredExpr = expression || inferEmotionFromText(raw);
+    const inferredAct = action || inferActionFromText(raw);
     beats.push({
       speaker,
       text: cleanBody,
       rawText: raw,
-      expression,
-      action,
+      expression: inferredExpr,
+      action: inferredAct,
       sfx
     });
   }
@@ -27040,6 +27066,8 @@ class DialogueBox {
   audioEngine;
   ttsEngine;
   knownActors = [];
+  isUserTurn = false;
+  lastUserText = "";
   constructor(options) {
     this.onAction = options.onAction;
     this.onParagraphChange = options.onParagraphChange;
@@ -27137,6 +27165,7 @@ class DialogueBox {
         if (val) {
           this.inputField.value = "";
           this.composerContainer.style.display = "none";
+          this.presentUserParagraph(val, "You", true);
           this.onAction(val);
         }
       }
@@ -27151,6 +27180,7 @@ class DialogueBox {
       if (val) {
         this.inputField.value = "";
         this.composerContainer.style.display = "none";
+        this.presentUserParagraph(val, "You", true);
         this.onAction(val);
       }
     });
@@ -27232,6 +27262,8 @@ class DialogueBox {
     if (this.skipTimer)
       clearTimeout(this.skipTimer);
     this.ttsEngine?.stop();
+    this.isUserTurn = false;
+    this.lastUserText = "";
     this.beats = [];
     this.currentBeatIndex = 0;
     this.backlogHistory = [];
@@ -27251,12 +27283,50 @@ class DialogueBox {
     if (this.skipTimer)
       clearTimeout(this.skipTimer);
     this.ttsEngine?.stop();
+    if (this.isUserTurn && this.lastUserText) {
+      if (!this.textContainer.querySelector(".vn-generating-indicator")) {
+        const ind = document.createElement("div");
+        ind.className = "vn-generating-indicator";
+        ind.style.cssText = "margin-top:10px;font-size:0.85em;opacity:0.75;display:inline-flex;align-items:center;gap:6px;";
+        ind.innerHTML = "<span>✍️</span> <i>Writing next response...</i>";
+        this.textContainer.appendChild(ind);
+      }
+      return;
+    }
     this.beats = [];
     this.currentBeatIndex = 0;
     this.nameplate.style.display = "none";
     this.textContainer.innerHTML = `<span class="vn-generating-indicator" style="opacity:0.75;display:inline-flex;align-items:center;gap:8px;"><span>✍️</span> <i>Writing next response...</i></span>`;
     this.choicesContainer.innerHTML = "";
     this.composerContainer.style.display = "none";
+  }
+  presentUserParagraph(text, speaker = "You", isWaiting = true) {
+    if (this.typeTimer)
+      clearTimeout(this.typeTimer);
+    if (this.autoTimer)
+      clearTimeout(this.autoTimer);
+    if (this.skipTimer)
+      clearTimeout(this.skipTimer);
+    this.ttsEngine?.stop();
+    this.isUserTurn = true;
+    this.lastUserText = text;
+    this.beats = [];
+    this.currentBeatIndex = 0;
+    this.nameplate.textContent = speaker || "You";
+    this.nameplate.style.display = "block";
+    const { html } = formatDialogueHtml(text);
+    const waitingHtml = isWaiting ? `<div class="vn-generating-indicator" style="margin-top:10px;font-size:0.85em;opacity:0.75;display:inline-flex;align-items:center;gap:6px;"><span>✍️</span> <i>Writing next response...</i></div>` : "";
+    this.textContainer.innerHTML = `<div>${html}</div>${waitingHtml}`;
+    this.choicesContainer.innerHTML = "";
+    this.composerContainer.style.display = "none";
+    this.nextBtn.style.display = "none";
+    this.prevBtn.disabled = true;
+    this.backlogHistory.push({
+      messageId: "user-" + Date.now(),
+      speaker: speaker || "You",
+      text,
+      isUser: true
+    });
   }
   setContent(speakerName, paragraphs, messageId = "") {
     if (this.typeTimer)
@@ -27266,6 +27336,8 @@ class DialogueBox {
     if (this.skipTimer)
       clearTimeout(this.skipTimer);
     this.ttsEngine?.stop();
+    this.isUserTurn = false;
+    this.lastUserText = "";
     this.currentMessageId = messageId;
     this.beats = splitParagraphIntoBeats(paragraphs, speakerName, this.knownActors);
     this.currentBeatIndex = 0;
@@ -35660,6 +35732,9 @@ class StageOverlay {
   showGenerating() {
     this.dialogueBox.showGeneratingIndicator();
   }
+  showUserMessage(text, speaker = "You") {
+    this.dialogueBox.presentUserParagraph(text, speaker, true);
+  }
   onChatChanged(newChatId) {
     const resolved = newChatId || this.resolveChatId() || null;
     this.resetStage(resolved || undefined);
@@ -37310,6 +37385,15 @@ function setup(ctx) {
       const targetCid = typeof payload.chatId === "string" ? payload.chatId : null;
       if (overlay.isActive() && (!targetCid || overlay.getCurrentChatId() === targetCid)) {
         overlay.showGenerating();
+      }
+    } else if (payload?.type === "vn_user_message") {
+      const targetCid = typeof payload.chatId === "string" ? payload.chatId : null;
+      if (overlay.isActive() && (!targetCid || overlay.getCurrentChatId() === targetCid)) {
+        const text = typeof payload.text === "string" ? payload.text : "";
+        const speaker = typeof payload.speaker === "string" ? payload.speaker : "You";
+        if (text) {
+          overlay.showUserMessage(text, speaker);
+        }
       }
     } else if (payload?.type === "vn_diagnostic_update" && payload.data) {
       diagDrawer?.updateDiagnostic(payload.data);

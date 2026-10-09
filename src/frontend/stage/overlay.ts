@@ -145,6 +145,10 @@ export class StageOverlay {
     this.dialogueBox.showGeneratingIndicator();
   }
 
+  public showUserMessage(text: string, speaker = "You"): void {
+    this.dialogueBox.presentUserParagraph(text, speaker, true);
+  }
+
   public onChatChanged(newChatId: string | null): void {
     const resolved = newChatId || this.resolveChatId() || null;
     this.resetStage(resolved || undefined);

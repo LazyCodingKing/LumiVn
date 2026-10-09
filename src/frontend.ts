@@ -251,6 +251,15 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       if (overlay.isActive() && (!targetCid || overlay.getCurrentChatId() === targetCid)) {
         overlay.showGenerating();
       }
+    } else if (payload?.type === "vn_user_message") {
+      const targetCid = typeof payload.chatId === "string" ? payload.chatId : null;
+      if (overlay.isActive() && (!targetCid || overlay.getCurrentChatId() === targetCid)) {
+        const text = typeof payload.text === "string" ? payload.text : "";
+        const speaker = typeof payload.speaker === "string" ? payload.speaker : "You";
+        if (text) {
+          overlay.showUserMessage(text, speaker);
+        }
+      }
     } else if (payload?.type === "vn_diagnostic_update" && payload.data) {
       diagDrawer?.updateDiagnostic(payload.data as DiagnosticData);
       diagBus.setTelemetry(payload.data as DiagnosticData);

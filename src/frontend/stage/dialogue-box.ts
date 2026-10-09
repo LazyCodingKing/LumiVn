@@ -50,6 +50,8 @@ export class DialogueBox {
   private audioEngine?: VnAudioEngine;
   private ttsEngine?: VnTtsEngine;
   private knownActors: string[] = [];
+  private isUserTurn = false;
+  private lastUserText = "";
 
   constructor(options: DialogueBoxOptions) {
     this.onAction = options.onAction;
@@ -164,6 +166,7 @@ export class DialogueBox {
         if (val) {
           this.inputField.value = "";
           this.composerContainer.style.display = "none";
+          this.presentUserParagraph(val, "You", true);
           this.onAction(val);
         }
       }
@@ -179,6 +182,7 @@ export class DialogueBox {
       if (val) {
         this.inputField.value = "";
         this.composerContainer.style.display = "none";
+        this.presentUserParagraph(val, "You", true);
         this.onAction(val);
       }
     });
@@ -292,6 +296,8 @@ export class DialogueBox {
     if (this.skipTimer) clearTimeout(this.skipTimer);
     this.ttsEngine?.stop();
 
+    this.isUserTurn = false;
+    this.lastUserText = "";
     this.beats = [];
     this.currentBeatIndex = 0;
     this.backlogHistory = [];
@@ -310,6 +316,17 @@ export class DialogueBox {
     if (this.skipTimer) clearTimeout(this.skipTimer);
     this.ttsEngine?.stop();
 
+    if (this.isUserTurn && this.lastUserText) {
+      if (!this.textContainer.querySelector(".vn-generating-indicator")) {
+        const ind = document.createElement("div");
+        ind.className = "vn-generating-indicator";
+        ind.style.cssText = "margin-top:10px;font-size:0.85em;opacity:0.75;display:inline-flex;align-items:center;gap:6px;";
+        ind.innerHTML = "<span>✍️</span> <i>Writing next response...</i>";
+        this.textContainer.appendChild(ind);
+      }
+      return;
+    }
+
     this.beats = [];
     this.currentBeatIndex = 0;
     this.nameplate.style.display = "none";
@@ -318,12 +335,47 @@ export class DialogueBox {
     this.composerContainer.style.display = "none";
   }
 
+  public presentUserParagraph(text: string, speaker = "You", isWaiting = true): void {
+    if (this.typeTimer) clearTimeout(this.typeTimer);
+    if (this.autoTimer) clearTimeout(this.autoTimer);
+    if (this.skipTimer) clearTimeout(this.skipTimer);
+    this.ttsEngine?.stop();
+
+    this.isUserTurn = true;
+    this.lastUserText = text;
+    this.beats = [];
+    this.currentBeatIndex = 0;
+    this.nameplate.textContent = speaker || "You";
+    this.nameplate.style.display = "block";
+
+    const { html } = formatDialogueHtml(text);
+    const waitingHtml = isWaiting
+      ? `<div class="vn-generating-indicator" style="margin-top:10px;font-size:0.85em;opacity:0.75;display:inline-flex;align-items:center;gap:6px;"><span>✍️</span> <i>Writing next response...</i></div>`
+      : "";
+
+    this.textContainer.innerHTML = `<div>${html}</div>${waitingHtml}`;
+    this.choicesContainer.innerHTML = "";
+    this.composerContainer.style.display = "none";
+    this.nextBtn.style.display = "none";
+    this.prevBtn.disabled = true;
+
+    // Record into backlog history
+    this.backlogHistory.push({
+      messageId: "user-" + Date.now(),
+      speaker: speaker || "You",
+      text,
+      isUser: true,
+    });
+  }
+
   public setContent(speakerName: string, paragraphs: string[], messageId = ""): void {
     if (this.typeTimer) clearTimeout(this.typeTimer);
     if (this.autoTimer) clearTimeout(this.autoTimer);
     if (this.skipTimer) clearTimeout(this.skipTimer);
     this.ttsEngine?.stop();
 
+    this.isUserTurn = false;
+    this.lastUserText = "";
     this.currentMessageId = messageId;
     this.beats = splitParagraphIntoBeats(paragraphs, speakerName, this.knownActors);
     this.currentBeatIndex = 0;

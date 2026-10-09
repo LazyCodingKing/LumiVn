@@ -144,6 +144,30 @@ function identifySpeaker(
   return { speaker: "Narrator", cleanBody: trimmed };
 }
 
+const PROSE_EMOTION_PATTERNS: Array<{ regex: RegExp; emotion: string }> = [
+  { regex: /\b(?:blush(?:ed|ing|es)?|flush(?:ed|ing|es)?|shyly|embarrass(?:ed|ing)?)\b/i, emotion: "blush" },
+  { regex: /\b(?:smil(?:ed|ing|es)?|grin(?:ned|ning|s)?|laugh(?:ed|ing|s)?|chuckle(?:d|s|ing)?|beam(?:ed|ing|s)?|giggle(?:d|s|ing)?)\b/i, emotion: "smile" },
+  { regex: /\b(?:frown(?:ed|ing|es)?|scowl(?:ed|ing|es)?|glar(?:ed|ing|es)?|growl(?:ed|ing|s)?|snapp(?:ed|ing|s)?|shout(?:ed|ing|s)?|yell(?:ed|ing|s)?|anger|angry)\b/i, emotion: "angry" },
+  { regex: /\b(?:gasp(?:ed|ing|s)?|flinch(?:ed|ing|es)?|trembl(?:ed|ing|es)?|startl(?:ed|ing|es)?|terrifi(?:ed|es)?|fear|scared)\b/i, emotion: "fear" },
+  { regex: /\b(?:sigh(?:ed|ing|s)?|look(?:ed|ing|s)?\s+down|tear(?:ed|ing)?\s+up|sob(?:bed|bing|s)?|sad(?:ly)?|pensive)\b/i, emotion: "sad" },
+  { regex: /\b(?:narrow(?:ed|ing|s)?\s+eyes|rais(?:ed|ing|es)?\s+an?\s+eyebrow|skeptic(?:al)?|suspicious(?:ly)?)\b/i, emotion: "suspicious" },
+];
+
+export function inferEmotionFromText(text: string): string | undefined {
+  for (const { regex, emotion } of PROSE_EMOTION_PATTERNS) {
+    if (regex.test(text)) return emotion;
+  }
+  return undefined;
+}
+
+export function inferActionFromText(text: string): string | undefined {
+  const italicMatch = text.match(/\*([A-Za-z0-9_\-\s]{2,30})\*/);
+  if (italicMatch && !/^\s*(?:said|whispered|asked|replied)\s*$/i.test(italicMatch[1]!)) {
+    return italicMatch[1]!.trim().toLowerCase().replace(/\s+/g, "_");
+  }
+  return undefined;
+}
+
 export function splitParagraphIntoBeats(
   paragraphs: string[],
   defaultSpeaker = "Narrator",
@@ -168,12 +192,14 @@ export function splitParagraphIntoBeats(
         const chunk = m[1]?.trim() || "";
         if (!chunk) continue;
         const { speaker, cleanBody } = identifySpeaker(chunk, defaultSpeaker, knownActors);
+        const inferredExpr = expression || inferEmotionFromText(chunk);
+        const inferredAct = action || inferActionFromText(chunk);
         beats.push({
           speaker,
           text: cleanBody,
           rawText: chunk,
-          expression,
-          action,
+          expression: inferredExpr,
+          action: inferredAct,
           sfx,
         });
       }
@@ -181,13 +207,15 @@ export function splitParagraphIntoBeats(
     }
 
     const { speaker, cleanBody } = identifySpeaker(cleanText, defaultSpeaker, knownActors);
+    const inferredExpr = expression || inferEmotionFromText(raw);
+    const inferredAct = action || inferActionFromText(raw);
 
     beats.push({
       speaker,
       text: cleanBody,
       rawText: raw,
-      expression,
-      action,
+      expression: inferredExpr,
+      action: inferredAct,
       sfx,
     });
   }

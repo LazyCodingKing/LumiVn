@@ -271,7 +271,7 @@ describe("LumiVN Rich Text & Twine Action Triggers", () => {
   });
 });
 
-import { splitParagraphIntoBeats } from "../src/frontend/stage/beat-splitter.js";
+import { splitParagraphIntoBeats, inferEmotionFromText, inferActionFromText } from "../src/frontend/stage/beat-splitter.js";
 import { VN_THEMES } from "../src/frontend/stage/theme.js";
 
 describe("Ren'Py ADV Beat Chunking & Theme Presets", () => {
@@ -331,6 +331,22 @@ describe("Ren'Py ADV Beat Chunking & Theme Presets", () => {
     expect(beats.length).toBe(2);
     expect(beats[0]?.speaker).toBe("Alethea");
     expect(beats[1]?.speaker).toBe("Donald");
+  });
+
+  test("infers emotion and actions directly from narrative prose without explicit tags", () => {
+    expect(inferEmotionFromText("She smiled warmly at him.")).toBe("smile");
+    expect(inferEmotionFromText("He blushed shyly and looked away.")).toBe("blush");
+    expect(inferEmotionFromText("Her eyes narrowed suspiciously.")).toBe("suspicious");
+    expect(inferActionFromText("*drawing sword* He stood ready.")).toBe("drawing_sword");
+
+    const paras = [
+      'Alethea smiled warmly. "I knew you would make it back in time."',
+      'Donald scowled in frustration. *slams table* "This makes no sense!"',
+    ];
+    const beats = splitParagraphIntoBeats(paras, "Narrator");
+    expect(beats[0]?.expression).toBe("smile");
+    expect(beats[1]?.expression).toBe("angry");
+    expect(beats[1]?.action).toBe("slams_table");
   });
 });
 

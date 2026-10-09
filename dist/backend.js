@@ -4652,7 +4652,7 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     });
   }
 }
-spindle.on("GENERATION_STARTED", (payload) => {
+spindle.on("GENERATION_STARTED", async (payload) => {
   const { chatId, generationId } = payload || {};
   if (!chatId || !generationId)
     return;
@@ -4666,7 +4666,31 @@ spindle.on("GENERATION_STARTED", (payload) => {
   }
   activeGenerationIds.set(chatId, generationId);
   if (isStageOpen) {
-    spindle.sendToFrontend({ type: "vn_generating", chatId });
+    try {
+      const messages = await spindle.chat.getMessages(chatId);
+      const bounded = Array.isArray(messages) ? messages : [];
+      let latestUserMsg = null;
+      for (let i = bounded.length - 1;i >= 0; i--) {
+        const m = bounded[i];
+        if (m && (m.role === "user" || m.is_user)) {
+          latestUserMsg = m;
+          break;
+        }
+      }
+      if (latestUserMsg && latestUserMsg.content) {
+        const speaker = latestUserMsg.name || "You";
+        spindle.sendToFrontend({
+          type: "vn_user_message",
+          chatId,
+          speaker,
+          text: latestUserMsg.content
+        });
+      } else {
+        spindle.sendToFrontend({ type: "vn_generating", chatId });
+      }
+    } catch {
+      spindle.sendToFrontend({ type: "vn_generating", chatId });
+    }
   }
 });
 spindle.on("GENERATION_STOPPED", (payload) => {
@@ -4780,6 +4804,12 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
         });
         break;
       }
+      spindle.sendToFrontend({
+        type: "vn_user_message",
+        chatId,
+        speaker: "You",
+        text: actionText
+      });
       try {
         await spindle.chat.appendMessage(chatId, { role: "user", content: actionText }, { triggerGeneration: true });
         spindle.log.info(`[LumiVN] Successfully appended user message and triggered generation.`);

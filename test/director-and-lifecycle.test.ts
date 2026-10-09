@@ -629,5 +629,33 @@ describe("LumiVN Director & Lifecycle Systems", () => {
       overlay.showGenerating();
       expect(dialogueBoxEl.textContent).toContain("Writing next response...");
     });
+
+    test("StageOverlay showUserMessage renders user input under user nameplate with waiting badge", () => {
+      const mockCtx: any = {
+        getActiveChat: () => ({ chatId: "chat_live", characterId: "char_1" }),
+        sendToBackend: () => {},
+        ui: {},
+      };
+
+      const overlay = new StageOverlay({ ctx: mockCtx, onExit: () => {} });
+      overlay.activate();
+
+      overlay.showUserMessage("I open the treasure chest carefully.", "Traveler");
+
+      const nameplateEl = overlay.root.querySelector(".vn-nameplate") as HTMLElement;
+      expect(nameplateEl.style.display).toBe("block");
+      expect(nameplateEl.textContent).toBe("Traveler");
+
+      const dialogueBoxEl = overlay.root.querySelector(".vn-dialogue-text") as HTMLElement;
+      expect(dialogueBoxEl.textContent).toContain("I open the treasure chest carefully.");
+      expect(dialogueBoxEl.textContent).toContain("Writing next response...");
+
+      // Subsequent showGenerating() preserves the user message
+      overlay.showGenerating();
+      expect(nameplateEl.textContent).toBe("Traveler");
+      expect(dialogueBoxEl.textContent).toContain("I open the treasure chest carefully.");
+      expect(dialogueBoxEl.textContent).toContain("Writing next response...");
+    });
   });
 });
+
