@@ -320,4 +320,93 @@ export class VnTtsEngine {
       cb.onEnd?.();
     }
   }
+
+  /**
+   * Tests a specific voice connection directly, bypassing global enable state.
+   */
+  public async testVoice(
+    text: string,
+    overrideVoiceRef?: SpeechVoiceRef | null,
+    speakerName = "",
+    callbacks?: SpeakCallbacks
+  ): Promise<void> {
+    if (!text.trim()) return;
+    this.stop();
+
+    const cb: SpeakCallbacks = callbacks || {};
+    const cleanText = text.replace(/<[^>]*>/g, "").trim();
+    const voiceRef = overrideVoiceRef !== undefined ? overrideVoiceRef : this.resolveVoice(speakerName);
+
+    // 1. Host REST Synthesis Path
+    if (voiceRef?.connectionId) {
+      try {
+        const payload: Record<string, unknown> = {
+          connectionId: voiceRef.connectionId,
+          text: cleanText,
+          outputFormat: "mp3",
+        };
+        if (voiceRef.voice) payload.voice = voiceRef.voice;
+        if (voiceRef.speed) payload.parameters = { speed: voiceRef.speed };
+
+        const resp = await fetch("/api/v1/tts/synthesize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(payload),
+        });
+
+        if (!resp.ok) {
+          throw new Error(`TTS synthesis returned HTTP ${resp.status}`);
+        }
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        this.currentAudio = audio;
+        audio.volume = Math.max(0, Math.min(1, this.settings.volume || 1.0));
+
+        audio.addEventListener("play", () => {
+          cb.onStart?.(audio.duration || undefined);
+        });
+
+        audio.addEventListener("ended", () => {
+          URL.revokeObjectURL(url);
+          this.currentAudio = null;
+          cb.onEnd?.();
+        });
+
+        audio.addEventListener("error", (e) => {
+          URL.revokeObjectURL(url);
+          this.currentAudio = null;
+          cb.onError?.(e);
+        });
+
+        await audio.play();
+        return;
+      } catch (err) {
+        console.warn("[LumiVN] Host TTS synthesis test failed, attempting Web Speech fallback:", err);
+      }
+    }
+
+    // 2. Browser Native Web Speech API Fallback
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      this.currentUtterance = utterance;
+      utterance.volume = this.settings.volume || 1.0;
+
+      utterance.onstart = () => cb.onStart?.();
+      utterance.onend = () => {
+        this.currentUtterance = null;
+        cb.onEnd?.();
+      };
+      utterance.onerror = (e) => {
+        this.currentUtterance = null;
+        cb.onError?.(e);
+      };
+
+      window.speechSynthesis.speak(utterance);
+    } else {
+      cb.onError?.(new Error("No TTS connection selected and Web Speech API unavailable."));
+    }
+  }
 }

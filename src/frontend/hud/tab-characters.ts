@@ -1,5 +1,5 @@
 import type { LedgerData, ActorDossier, AssetManifest, RosterCharacter } from "../../shared/types.js";
-import type { VnTtsEngine } from "../stage/tts-engine.js";
+import type { VnTtsEngine, SpeechVoiceRef } from "../stage/tts-engine.js";
 
 // Helper normalizers for tuples vs objects emitted by LLM My World 1.85 ledger
 function normalizeGoal(g: any): {
@@ -1142,7 +1142,32 @@ export class CharactersTab {
         const testText = isNarrator
           ? "The morning light filtered through the quiet room."
           : `Hello, my name is ${displayName}.`;
-        void this.ttsEngine!.speak(testText, displayName);
+
+        const selectedConnId = profileSelect.value.trim();
+        const selectedVoiceId = voiceSelect.value.trim();
+
+        const activeVoiceRef: SpeechVoiceRef | null = selectedConnId
+          ? { connectionId: selectedConnId, voice: selectedVoiceId }
+          : null;
+
+        const originalText = testBtn.textContent;
+        testBtn.textContent = "🔊 Playing...";
+        testBtn.disabled = true;
+
+        void this.ttsEngine!.testVoice(testText, activeVoiceRef, displayName, {
+          onEnd: () => {
+            testBtn.textContent = originalText;
+            testBtn.disabled = false;
+          },
+          onError: (err) => {
+            console.error("[LumiVN] Voice test error:", err);
+            testBtn.textContent = "⚠️ Failed";
+            setTimeout(() => {
+              testBtn.textContent = originalText;
+              testBtn.disabled = false;
+            }, 2000);
+          },
+        });
       });
     }
 

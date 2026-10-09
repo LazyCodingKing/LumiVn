@@ -3593,7 +3593,7 @@ export class BPlotsTab {
 
 ```typescript
 import type { LedgerData, ActorDossier, AssetManifest, RosterCharacter } from "../../shared/types.js";
-import type { VnTtsEngine } from "../stage/tts-engine.js";
+import type { VnTtsEngine, SpeechVoiceRef } from "../stage/tts-engine.js";
 
 // Helper normalizers for tuples vs objects emitted by LLM My World 1.85 ledger
 function normalizeGoal(g: any): {
@@ -4736,7 +4736,32 @@ export class CharactersTab {
         const testText = isNarrator
           ? "The morning light filtered through the quiet room."
           : `Hello, my name is ${displayName}.`;
-        void this.ttsEngine!.speak(testText, displayName);
+
+        const selectedConnId = profileSelect.value.trim();
+        const selectedVoiceId = voiceSelect.value.trim();
+
+        const activeVoiceRef: SpeechVoiceRef | null = selectedConnId
+          ? { connectionId: selectedConnId, voice: selectedVoiceId }
+          : null;
+
+        const originalText = testBtn.textContent;
+        testBtn.textContent = "🔊 Playing...";
+        testBtn.disabled = true;
+
+        void this.ttsEngine!.testVoice(testText, activeVoiceRef, displayName, {
+          onEnd: () => {
+            testBtn.textContent = originalText;
+            testBtn.disabled = false;
+          },
+          onError: (err) => {
+            console.error("[LumiVN] Voice test error:", err);
+            testBtn.textContent = "⚠️ Failed";
+            setTimeout(() => {
+              testBtn.textContent = originalText;
+              testBtn.disabled = false;
+            }, 2000);
+          },
+        });
       });
     }
 
@@ -11329,6 +11354,95 @@ export class VnTtsEngine {
       cb.onEnd?.();
     }
   }
+
+  /**
+   * Tests a specific voice connection directly, bypassing global enable state.
+   */
+  public async testVoice(
+    text: string,
+    overrideVoiceRef?: SpeechVoiceRef | null,
+    speakerName = "",
+    callbacks?: SpeakCallbacks
+  ): Promise<void> {
+    if (!text.trim()) return;
+    this.stop();
+
+    const cb: SpeakCallbacks = callbacks || {};
+    const cleanText = text.replace(/<[^>]*>/g, "").trim();
+    const voiceRef = overrideVoiceRef !== undefined ? overrideVoiceRef : this.resolveVoice(speakerName);
+
+    // 1. Host REST Synthesis Path
+    if (voiceRef?.connectionId) {
+      try {
+        const payload: Record<string, unknown> = {
+          connectionId: voiceRef.connectionId,
+          text: cleanText,
+          outputFormat: "mp3",
+        };
+        if (voiceRef.voice) payload.voice = voiceRef.voice;
+        if (voiceRef.speed) payload.parameters = { speed: voiceRef.speed };
+
+        const resp = await fetch("/api/v1/tts/synthesize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(payload),
+        });
+
+        if (!resp.ok) {
+          throw new Error(`TTS synthesis returned HTTP ${resp.status}`);
+        }
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        this.currentAudio = audio;
+        audio.volume = Math.max(0, Math.min(1, this.settings.volume || 1.0));
+
+        audio.addEventListener("play", () => {
+          cb.onStart?.(audio.duration || undefined);
+        });
+
+        audio.addEventListener("ended", () => {
+          URL.revokeObjectURL(url);
+          this.currentAudio = null;
+          cb.onEnd?.();
+        });
+
+        audio.addEventListener("error", (e) => {
+          URL.revokeObjectURL(url);
+          this.currentAudio = null;
+          cb.onError?.(e);
+        });
+
+        await audio.play();
+        return;
+      } catch (err) {
+        console.warn("[LumiVN] Host TTS synthesis test failed, attempting Web Speech fallback:", err);
+      }
+    }
+
+    // 2. Browser Native Web Speech API Fallback
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      this.currentUtterance = utterance;
+      utterance.volume = this.settings.volume || 1.0;
+
+      utterance.onstart = () => cb.onStart?.();
+      utterance.onend = () => {
+        this.currentUtterance = null;
+        cb.onEnd?.();
+      };
+      utterance.onerror = (e) => {
+        this.currentUtterance = null;
+        cb.onError?.(e);
+      };
+
+      window.speechSynthesis.speak(utterance);
+    } else {
+      cb.onError?.(new Error("No TTS connection selected and Web Speech API unavailable."));
+    }
+  }
 }
 
 ```
@@ -12041,21 +12155,93 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const diagDrawer = registerDiagnosticsDrawer(ctx, toggleStage);
 
   // 2. Persistent Floating "🎬 Stage" Widget
+  const WIDGET_STORAGE_KEY = "lumivn_launcher_widget_pos";
+
+  function getSavedWidgetPosition(): { x: number; y: number } {
+    try {
+      if (typeof localStorage !== "undefined") {
+        const raw = localStorage.getItem(WIDGET_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (typeof parsed.x === "number" && typeof parsed.y === "number") {
+            return parsed;
+          }
+        }
+      }
+    } catch {}
+    return { x: window.innerWidth - 64, y: 72 };
+  }
+
+  function saveWidgetPosition(x: number, y: number) {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(WIDGET_STORAGE_KEY, JSON.stringify({ x, y }));
+      }
+    } catch {}
+  }
+
   if (typeof ctx.ui?.createFloatWidget === "function") {
     try {
-      floatWidget = ctx.ui.createFloatWidget({
-        width: 120,
-        height: 38,
-        initialPosition: { x: window.innerWidth - 140, y: 70 },
-        snapToEdge: true,
-        tooltip: "Open Visual Novel Stage",
+      const initPos = getSavedWidgetPosition();
+      const widget = ctx.ui.createFloatWidget({
+        width: 48,
+        height: 48,
+        initialPosition: initPos,
+        snapToEdge: false, // Prevents forced snapping back to window bounds
+        chromeless: true,
+        tooltip: "Launch Visual Novel Stage",
       });
-      floatWidget.root.innerHTML = `
-        <button style="width: 100%; height: 100%; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; border: none; border-radius: 19px; font-weight: 700; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 12px rgba(99,102,241,0.4);">
-          🎬 Stage
-        </button>
+      floatWidget = widget;
+
+      // Style the inner button: MUST NOT be position: fixed!
+      widget.root.style.width = "48px";
+      widget.root.style.height = "48px";
+      widget.root.style.position = "relative"; // Allows Spindle parent to handle positioning
+      widget.root.style.overflow = "visible";
+
+      const launchBtn = document.createElement("button");
+      launchBtn.className = "vn-stage-launcher-btn";
+      launchBtn.innerHTML = "🎬";
+      launchBtn.style.cssText = `
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        border: 2px solid #a5b4fc;
+        box-shadow: 0 4px 14px rgba(99, 102, 241, 0.5);
+        font-size: 22px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        user-select: none;
+        transition: transform 0.15s ease;
       `;
-      floatWidget.root.querySelector("button")?.addEventListener("click", () => toggleStage());
+
+      launchBtn.addEventListener("mouseenter", () => {
+        launchBtn.style.transform = "scale(1.08)";
+      });
+      launchBtn.addEventListener("mouseleave", () => {
+        launchBtn.style.transform = "scale(1.0)";
+      });
+
+      launchBtn.addEventListener("click", () => {
+        if (!overlay.isActive()) {
+          if (appMount) appMount.setVisible(true);
+          overlay.activate();
+        } else {
+          overlay.deactivate();
+          if (appMount) appMount.setVisible(false);
+        }
+      });
+
+      widget.root.appendChild(launchBtn);
+
+      // Save updated coordinates when user completes dragging the widget
+      widget.root.addEventListener("pointerup", () => {
+        const rect = widget.root.getBoundingClientRect();
+        saveWidgetPosition(rect.left, rect.top);
+      });
     } catch (e) {
       console.warn("[LumiVN] Failed to create float widget:", e);
     }
