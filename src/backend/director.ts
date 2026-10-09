@@ -159,10 +159,7 @@ export async function evaluateDirectorInterceptor(
 
   // Guard against duplicate injections
   if (messages.some((m) => typeof m.content === "string" && (m.content.includes(activeDirective) || m.content.includes("[LumiVN Living World Director Guidance]")))) {
-    return {
-      messages,
-      breakdown: [{ messageIndex: 0, name: "LumiVN Director" }],
-    };
+    return messages;
   }
 
   const systemGuard = `[LumiVN Living World Director Guidance]

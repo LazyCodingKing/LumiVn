@@ -159,7 +159,7 @@ spindle.commands.onInvoked(async (commandId) => {
   if (commandId === "lumivn_launch") {
     spindle.sendToFrontend({ type: "vn_force_open" });
   } else if (commandId === "lumivn_diagnostics") {
-    spindle.sendToFrontend({ type: "vn_force_open", tab: "diagnostics" });
+    await spindle.ui.openDrawerTab("vn_diagnostics");
   }
 });
 

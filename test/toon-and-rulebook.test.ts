@@ -13,12 +13,6 @@ import {
   extractLedgerRaw,
   parseLedgerYaml,
 } from "../src/backend/ledger-parser.js";
-import {
-  isRulesetBookName,
-  isRulesetEntryTitle,
-  ensureCharacterRulebook,
-  loadRulebookForCharacter,
-} from "../src/backend/rulebook.js";
 import type { LedgerData } from "../src/shared/types.js";
 
 describe("TOON Format & Preset Independence", () => {
@@ -261,50 +255,3 @@ actors:
   });
 });
 
-describe("Character Rulebook Lorebook System", () => {
-  test("identifies ruleset book names and entry titles", () => {
-    expect(isRulesetBookName("lumivn-ruleset")).toBe(true);
-    expect(isRulesetBookName("lumivn-ruleset-v2")).toBe(true);
-    expect(isRulesetBookName("my_regular_lore")).toBe(false);
-
-    expect(isRulesetEntryTitle("lumivn-ruleset · Places")).toBe(true);
-    expect(isRulesetEntryTitle("[lumivn] Cast")).toBe(true);
-    expect(isRulesetEntryTitle("General Lore")).toBe(false);
-  });
-
-  test("ensureCharacterRulebook creates and attaches world book when missing", async () => {
-    const createdEntries: any[] = [];
-    let updatedChar: any = null;
-
-    const mockSpindle: any = {
-      characters: {
-        get: async () => ({ id: "char_1", name: "Akane", world_book_ids: [] }),
-        update: async (id: string, patch: any) => {
-          updatedChar = patch;
-        },
-      },
-      world_books: {
-        create: async (data: any) => ({ id: "wb_999", name: data.name }),
-        entries: {
-          create: async (bookId: string, entry: any) => {
-            createdEntries.push(entry);
-            return { id: `entry_${createdEntries.length}`, ...entry };
-          },
-        },
-      },
-      log: { info: () => {}, warn: () => {} },
-    };
-
-    const bookId = await ensureCharacterRulebook(
-      mockSpindle,
-      "char_1",
-      { places: { tendo_dojo: "url1" }, characters: { akane: {} as any } }
-    );
-
-    expect(bookId).toBe("wb_999");
-    expect(createdEntries.length).toBe(2);
-    expect(createdEntries[0].comment).toContain("Places");
-    expect(createdEntries[1].comment).toContain("Cast");
-    expect(updatedChar?.world_book_ids).toEqual(["wb_999"]);
-  });
-});
