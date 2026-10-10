@@ -37,6 +37,7 @@ const storage = new StorageManager(spindle);
 const resolver = new AssetResolver(spindle, storage);
 
 let lastActiveChatId: string | null = null;
+let lastActiveUserId: string | null = null;
 
 // View Registry: Track active visual novel stage presence per chat
 const activeVnChats = new Set<string>();
@@ -83,39 +84,43 @@ if (typeof (spindle as any).registerInterceptor === "function") {
   spindle.log.info("[LumiVN] Living World Director interceptor registered at priority 50.");
 }
 
-function onHostChatSwitched(chatId: string | null) {
+function onHostChatSwitched(chatId: string | null, userId?: string) {
   if (!chatId) return;
   lastActiveChatId = chatId;
+  if (userId) lastActiveUserId = userId;
   spindle.log.info("[LumiVN] Active chat switched to: " + chatId);
-  if (activeVnChats.has(chatId)) {
-    void processChatTurn(chatId, undefined, undefined, true);
+  if (activeVnChats.has(chatId) || true) {
+    void processChatTurn(chatId, undefined, undefined, true, undefined, undefined, userId);
   }
 }
 
 const spindleAnyObj = spindle as any;
 if (typeof spindleAnyObj.on === "function") {
-  spindleAnyObj.on("CHAT_SWITCHED", (payload: unknown) => {
-    const candidate = payload && typeof payload === "object" ? (payload as { chatId?: unknown }) : {};
+  spindleAnyObj.on("CHAT_SWITCHED", (payload: unknown, userId?: string) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { chatId?: unknown; userId?: unknown }) : {};
+    const uid = userId || (typeof candidate.userId === "string" ? candidate.userId : undefined);
     if (typeof candidate.chatId === "string" && candidate.chatId) {
-      onHostChatSwitched(candidate.chatId);
+      onHostChatSwitched(candidate.chatId, uid);
     }
   });
 
-  spindleAnyObj.on("CHAT_CHANGED", (payload: unknown) => {
-    const candidate = payload && typeof payload === "object" ? (payload as { chat?: { id?: unknown }; chatId?: unknown }) : {};
+  spindleAnyObj.on("CHAT_CHANGED", (payload: unknown, userId?: string) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { chat?: { id?: unknown; user_id?: unknown }; chatId?: unknown; userId?: unknown }) : {};
     const cid = (typeof candidate.chat?.id === "string" ? candidate.chat.id : null) ||
                 (typeof candidate.chatId === "string" ? candidate.chatId : null);
+    const uid = userId || (typeof candidate.chat?.user_id === "string" ? candidate.chat.user_id : undefined) || (typeof candidate.userId === "string" ? candidate.userId : undefined);
     if (cid) {
-      onHostChatSwitched(cid);
+      onHostChatSwitched(cid, uid);
     }
   });
 
-  spindleAnyObj.on("CHAT_FORKED", (payload: unknown) => {
-    const candidate = payload && typeof payload === "object" ? (payload as { forkedChatId?: unknown; chat?: { id?: unknown } }) : {};
+  spindleAnyObj.on("CHAT_FORKED", (payload: unknown, userId?: string) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { forkedChatId?: unknown; chat?: { id?: unknown; user_id?: unknown }; userId?: unknown }) : {};
     const cid = (typeof candidate.forkedChatId === "string" ? candidate.forkedChatId : null) ||
                 (typeof candidate.chat?.id === "string" ? candidate.chat.id : null);
+    const uid = userId || (typeof candidate.chat?.user_id === "string" ? candidate.chat.user_id : undefined) || (typeof candidate.userId === "string" ? candidate.userId : undefined);
     if (cid) {
-      onHostChatSwitched(cid);
+      onHostChatSwitched(cid, uid);
     }
   });
 }
@@ -172,7 +177,8 @@ async function processChatTurn(
   overrideContent?: string,
   force = false,
   generationId?: string,
-  swipeId?: string | number
+  swipeId?: string | number,
+  userId?: string
 ): Promise<void> {
   if (!chatId) return;
 
@@ -184,14 +190,28 @@ async function processChatTurn(
   try {
     let targetMessage: ChatMessageDTO | null = null;
     let characterId: string | undefined;
+    let effectiveUserId = userId || lastActiveUserId;
 
     try {
       const activeChat = await spindle.chats.get(chatId);
       if (activeChat) {
         characterId = activeChat.character_id;
+        if (!effectiveUserId) {
+          effectiveUserId = (activeChat as any)?.user_id || (activeChat as any)?.userId;
+        }
       }
-    } catch {
-      // Ignore if chat lookup fails
+    } catch {}
+
+    if (!effectiveUserId) {
+      try {
+        const chatList = await (spindle.chats as any).list?.({ limit: 1 });
+        const first = chatList?.data?.[0] || chatList?.[0];
+        effectiveUserId = first?.user_id || first?.userId;
+      } catch {}
+    }
+
+    if (effectiveUserId) {
+      lastActiveUserId = effectiveUserId;
     }
 
     if (overrideContent) {
@@ -283,7 +303,8 @@ async function processChatTurn(
             chatId,
             extractProse(targetMessage.content),
             cumulativeLedger || { scene: { place: "default" }, actors: {} },
-            statRulesSettings
+            statRulesSettings,
+            effectiveUserId || undefined
           );
         } finally {
           mvuEvaluatingChats.delete(chatId);
@@ -466,9 +487,11 @@ spindle.on("GENERATION_STOPPED", (payload: GenerationStoppedPayloadDTO) => {
   spindle.log.info(`[LumiVN] Discarded staged commit for stopped generation ${generationId}`);
 });
 
-spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
+spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO, userId?: string) => {
   const { chatId, generationId, error } = payload || {};
   if (!chatId) return;
+
+  if (userId) lastActiveUserId = userId;
 
   if (error) {
     if (generationId) {
@@ -489,36 +512,40 @@ spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
   // View-Gating: abort in < 1ms if stage not open for this chat and stat rules not enabled
   const settings = await storage.getStatRulesSettings();
   if (!activeVnChats.has(chatId) && !settings.enabled) return;
-  await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
+  await processChatTurn(chatId, payload.messageId, payload.content, false, generationId, undefined, userId);
 });
 
-spindle.on("MESSAGE_SWIPED", async (payload: MessageSwipedPayloadDTO) => {
+spindle.on("MESSAGE_SWIPED", async (payload: MessageSwipedPayloadDTO, userId?: string) => {
   const cid = payload?.chatId || lastActiveChatId;
+  if (userId) lastActiveUserId = userId;
   // View-Gating: abort in < 1ms if stage not active for this chat
   if (!cid || !activeVnChats.has(cid)) return;
   const swipeIndex = (payload as any)?.swipeIndex ?? (payload as any)?.swipe_index;
-  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex);
+  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex, userId);
 });
 
-spindle.on("SWIPE_EDITED", async (payload: SwipeEditedPayloadDTO) => {
+spindle.on("SWIPE_EDITED", async (payload: SwipeEditedPayloadDTO, userId?: string) => {
   const cid = payload?.chatId || lastActiveChatId;
+  if (userId) lastActiveUserId = userId;
   // View-Gating: abort in < 1ms if stage not active for this chat
   if (!cid || !activeVnChats.has(cid)) return;
   const swipeIndex = (payload as any)?.swipeIndex ?? (payload as any)?.swipe_index;
-  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex);
+  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex, userId);
 });
 
 const spindleAny = spindle as any;
 if (typeof spindleAny.on === "function") {
-  spindleAny.on("MESSAGE_EDITED", async (payload: { chatId?: string; messageId?: string }) => {
+  spindleAny.on("MESSAGE_EDITED", async (payload: { chatId?: string; messageId?: string }, userId?: string) => {
     const cid = payload?.chatId || lastActiveChatId;
+    if (userId) lastActiveUserId = userId;
     if (!cid || !activeVnChats.has(cid)) return;
-    await processChatTurn(cid, payload.messageId);
+    await processChatTurn(cid, payload.messageId, undefined, false, undefined, undefined, userId);
   });
-  spindleAny.on("MESSAGE_DELETED", async (payload: { chatId?: string }) => {
+  spindleAny.on("MESSAGE_DELETED", async (payload: { chatId?: string }, userId?: string) => {
     const cid = payload?.chatId || lastActiveChatId;
+    if (userId) lastActiveUserId = userId;
     if (!cid || !activeVnChats.has(cid)) return;
-    await processChatTurn(cid);
+    await processChatTurn(cid, undefined, undefined, false, undefined, undefined, userId);
   });
 }
 
@@ -526,6 +553,11 @@ if (typeof spindleAny.on === "function") {
 spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
   const payload = msg as Record<string, unknown>;
   if (!payload || typeof payload !== "object") return;
+
+  if (senderUserId) {
+    lastActiveUserId = senderUserId;
+  }
+  const effectiveUid = senderUserId || lastActiveUserId || undefined;
 
   const type = String(payload.type);
 
@@ -555,7 +587,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
       if (chatId) {
         activeVnChats.add(chatId);
         lastActiveChatId = chatId;
-        await processChatTurn(chatId, undefined, undefined, true);
+        await processChatTurn(chatId, undefined, undefined, true, undefined, undefined, effectiveUid);
       } else {
         spindle.sendToFrontend({
           type: "vn_error",
@@ -699,7 +731,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         try {
           await spindle.chat.updateMessage(chatId, messageId, { content });
           spindle.log.info(`[LumiVN] Updated message ${messageId} in chat ${chatId}`);
-          await processChatTurn(chatId, messageId, content);
+          await processChatTurn(chatId, messageId, content, false, undefined, undefined, effectiveUid);
           spindle.sendToFrontend({
             type: "vn_log",
             message: `Updated line in message #${messageId.slice(0, 8)}`,

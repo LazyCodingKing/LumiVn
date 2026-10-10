@@ -4655,7 +4655,7 @@ function processBPlots(ledger) {
 }
 
 // src/backend/mvu-evaluator.ts
-async function evaluateMvuLedgerDelta(spindle2, chatId, latestProse, currentLedger, settings) {
+async function evaluateMvuLedgerDelta(spindle2, chatId, latestProse, currentLedger, settings, userId) {
   if (!settings.enabled || settings.mode !== "mvu_quiet")
     return null;
   const currentSummary = JSON.stringify({
@@ -4685,12 +4685,17 @@ ${latestProse}
 
 Emit the resulting ledger compact delta now.`;
   try {
-    const res = await spindle2.generate.quiet({
+    const quietPayload = {
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ]
-    });
+    };
+    if (userId) {
+      quietPayload.userId = userId;
+      quietPayload.user_id = userId;
+    }
+    const res = await spindle2.generate.quiet(quietPayload, userId);
     const output = typeof res === "string" ? res : res?.content || "";
     if (!output)
       return null;
@@ -4707,6 +4712,7 @@ Emit the resulting ledger compact delta now.`;
 var storage = new StorageManager(spindle);
 var resolver = new AssetResolver(spindle, storage);
 var lastActiveChatId = null;
+var lastActiveUserId = null;
 var activeVnChats = new Set;
 var mvuEvaluatingChats = new Set;
 var activeGenerationIds = new Map;
@@ -4730,35 +4736,40 @@ if (typeof spindle.registerInterceptor === "function") {
   spindle.registerInterceptor(handleInterceptor, 50);
   spindle.log.info("[LumiVN] Living World Director interceptor registered at priority 50.");
 }
-function onHostChatSwitched(chatId) {
+function onHostChatSwitched(chatId, userId) {
   if (!chatId)
     return;
   lastActiveChatId = chatId;
+  if (userId)
+    lastActiveUserId = userId;
   spindle.log.info("[LumiVN] Active chat switched to: " + chatId);
-  if (activeVnChats.has(chatId)) {
-    processChatTurn(chatId, undefined, undefined, true);
+  if (activeVnChats.has(chatId) || true) {
+    processChatTurn(chatId, undefined, undefined, true, undefined, undefined, userId);
   }
 }
 var spindleAnyObj = spindle;
 if (typeof spindleAnyObj.on === "function") {
-  spindleAnyObj.on("CHAT_SWITCHED", (payload) => {
+  spindleAnyObj.on("CHAT_SWITCHED", (payload, userId) => {
     const candidate = payload && typeof payload === "object" ? payload : {};
+    const uid = userId || (typeof candidate.userId === "string" ? candidate.userId : undefined);
     if (typeof candidate.chatId === "string" && candidate.chatId) {
-      onHostChatSwitched(candidate.chatId);
+      onHostChatSwitched(candidate.chatId, uid);
     }
   });
-  spindleAnyObj.on("CHAT_CHANGED", (payload) => {
+  spindleAnyObj.on("CHAT_CHANGED", (payload, userId) => {
     const candidate = payload && typeof payload === "object" ? payload : {};
     const cid = (typeof candidate.chat?.id === "string" ? candidate.chat.id : null) || (typeof candidate.chatId === "string" ? candidate.chatId : null);
+    const uid = userId || (typeof candidate.chat?.user_id === "string" ? candidate.chat.user_id : undefined) || (typeof candidate.userId === "string" ? candidate.userId : undefined);
     if (cid) {
-      onHostChatSwitched(cid);
+      onHostChatSwitched(cid, uid);
     }
   });
-  spindleAnyObj.on("CHAT_FORKED", (payload) => {
+  spindleAnyObj.on("CHAT_FORKED", (payload, userId) => {
     const candidate = payload && typeof payload === "object" ? payload : {};
     const cid = (typeof candidate.forkedChatId === "string" ? candidate.forkedChatId : null) || (typeof candidate.chat?.id === "string" ? candidate.chat.id : null);
+    const uid = userId || (typeof candidate.chat?.user_id === "string" ? candidate.chat.user_id : undefined) || (typeof candidate.userId === "string" ? candidate.userId : undefined);
     if (cid) {
-      onHostChatSwitched(cid);
+      onHostChatSwitched(cid, uid);
     }
   });
 }
@@ -4803,7 +4814,7 @@ spindle.commands.onInvoked(async (commandId) => {
     await spindle.ui.openDrawerTab("vn_diagnostics");
   }
 });
-async function processChatTurn(chatId, messageId, overrideContent, force = false, generationId, swipeId) {
+async function processChatTurn(chatId, messageId, overrideContent, force = false, generationId, swipeId, userId) {
   if (!chatId)
     return;
   const statRulesSettings = await storage.getStatRulesSettings();
@@ -4813,12 +4824,26 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
   try {
     let targetMessage = null;
     let characterId;
+    let effectiveUserId = userId || lastActiveUserId;
     try {
       const activeChat = await spindle.chats.get(chatId);
       if (activeChat) {
         characterId = activeChat.character_id;
+        if (!effectiveUserId) {
+          effectiveUserId = activeChat?.user_id || activeChat?.userId;
+        }
       }
     } catch {}
+    if (!effectiveUserId) {
+      try {
+        const chatList = await spindle.chats.list?.({ limit: 1 });
+        const first = chatList?.data?.[0] || chatList?.[0];
+        effectiveUserId = first?.user_id || first?.userId;
+      } catch {}
+    }
+    if (effectiveUserId) {
+      lastActiveUserId = effectiveUserId;
+    }
     if (overrideContent) {
       targetMessage = {
         id: messageId || `msg_${Date.now()}`,
@@ -4881,7 +4906,7 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
       if (!mvuEvaluatingChats.has(chatId)) {
         mvuEvaluatingChats.add(chatId);
         try {
-          delta = await evaluateMvuLedgerDelta(spindle, chatId, extractProse(targetMessage.content), cumulativeLedger || { scene: { place: "default" }, actors: {} }, statRulesSettings);
+          delta = await evaluateMvuLedgerDelta(spindle, chatId, extractProse(targetMessage.content), cumulativeLedger || { scene: { place: "default" }, actors: {} }, statRulesSettings, effectiveUserId || undefined);
         } finally {
           mvuEvaluatingChats.delete(chatId);
         }
@@ -5018,10 +5043,12 @@ spindle.on("GENERATION_STOPPED", (payload) => {
   }
   spindle.log.info(`[LumiVN] Discarded staged commit for stopped generation ${generationId}`);
 });
-spindle.on("GENERATION_ENDED", async (payload) => {
+spindle.on("GENERATION_ENDED", async (payload, userId) => {
   const { chatId, generationId, error } = payload || {};
   if (!chatId)
     return;
+  if (userId)
+    lastActiveUserId = userId;
   if (error) {
     if (generationId) {
       pendingCommits.delete(`${chatId}:${generationId}`);
@@ -5039,41 +5066,53 @@ spindle.on("GENERATION_ENDED", async (payload) => {
   const settings = await storage.getStatRulesSettings();
   if (!activeVnChats.has(chatId) && !settings.enabled)
     return;
-  await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
+  await processChatTurn(chatId, payload.messageId, payload.content, false, generationId, undefined, userId);
 });
-spindle.on("MESSAGE_SWIPED", async (payload) => {
+spindle.on("MESSAGE_SWIPED", async (payload, userId) => {
   const cid = payload?.chatId || lastActiveChatId;
+  if (userId)
+    lastActiveUserId = userId;
   if (!cid || !activeVnChats.has(cid))
     return;
   const swipeIndex = payload?.swipeIndex ?? payload?.swipe_index;
-  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex);
+  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex, userId);
 });
-spindle.on("SWIPE_EDITED", async (payload) => {
+spindle.on("SWIPE_EDITED", async (payload, userId) => {
   const cid = payload?.chatId || lastActiveChatId;
+  if (userId)
+    lastActiveUserId = userId;
   if (!cid || !activeVnChats.has(cid))
     return;
   const swipeIndex = payload?.swipeIndex ?? payload?.swipe_index;
-  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex);
+  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex, userId);
 });
 var spindleAny = spindle;
 if (typeof spindleAny.on === "function") {
-  spindleAny.on("MESSAGE_EDITED", async (payload) => {
+  spindleAny.on("MESSAGE_EDITED", async (payload, userId) => {
     const cid = payload?.chatId || lastActiveChatId;
+    if (userId)
+      lastActiveUserId = userId;
     if (!cid || !activeVnChats.has(cid))
       return;
-    await processChatTurn(cid, payload.messageId);
+    await processChatTurn(cid, payload.messageId, undefined, false, undefined, undefined, userId);
   });
-  spindleAny.on("MESSAGE_DELETED", async (payload) => {
+  spindleAny.on("MESSAGE_DELETED", async (payload, userId) => {
     const cid = payload?.chatId || lastActiveChatId;
+    if (userId)
+      lastActiveUserId = userId;
     if (!cid || !activeVnChats.has(cid))
       return;
-    await processChatTurn(cid);
+    await processChatTurn(cid, undefined, undefined, false, undefined, undefined, userId);
   });
 }
 spindle.onFrontendMessage(async (msg, senderUserId) => {
   const payload = msg;
   if (!payload || typeof payload !== "object")
     return;
+  if (senderUserId) {
+    lastActiveUserId = senderUserId;
+  }
+  const effectiveUid = senderUserId || lastActiveUserId || undefined;
   const type = String(payload.type);
   switch (type) {
     case "vn_stage_opened": {
@@ -5099,7 +5138,7 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
       if (chatId) {
         activeVnChats.add(chatId);
         lastActiveChatId = chatId;
-        await processChatTurn(chatId, undefined, undefined, true);
+        await processChatTurn(chatId, undefined, undefined, true, undefined, undefined, effectiveUid);
       } else {
         spindle.sendToFrontend({
           type: "vn_error",
@@ -5223,7 +5262,7 @@ spindle.onFrontendMessage(async (msg, senderUserId) => {
         try {
           await spindle.chat.updateMessage(chatId, messageId, { content });
           spindle.log.info(`[LumiVN] Updated message ${messageId} in chat ${chatId}`);
-          await processChatTurn(chatId, messageId, content);
+          await processChatTurn(chatId, messageId, content, false, undefined, undefined, effectiveUid);
           spindle.sendToFrontend({
             type: "vn_log",
             message: `Updated line in message #${messageId.slice(0, 8)}`,

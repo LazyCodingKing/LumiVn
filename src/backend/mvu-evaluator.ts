@@ -7,7 +7,8 @@ export async function evaluateMvuLedgerDelta(
   chatId: string,
   latestProse: string,
   currentLedger: LedgerData,
-  settings: StatRulesSettings
+  settings: StatRulesSettings,
+  userId?: string
 ): Promise<Partial<LedgerData> | null> {
   if (!settings.enabled || settings.mode !== "mvu_quiet") return null;
 
@@ -41,12 +42,18 @@ ${latestProse}
 Emit the resulting ledger compact delta now.`;
 
   try {
-    const res = await spindle.generate.quiet({
+    const quietPayload: any = {
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-    });
+    };
+    if (userId) {
+      quietPayload.userId = userId;
+      quietPayload.user_id = userId;
+    }
+
+    const res = await (spindle.generate as any).quiet(quietPayload, userId);
 
     const output = typeof res === "string" ? res : (res as any)?.content || "";
     if (!output) return null;

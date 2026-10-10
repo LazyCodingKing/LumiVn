@@ -1,63 +1,13 @@
-# LumiVN Engine Codebase & Documentation
+# LumiVN Engine - Complete Source Repository
 
-This document aggregates all source code, configuration, tests, and documentation files of the LumiVN engine repository for ingestion into NotebookLM.
+This document bundles the complete codebase of LumiVN Engine for reference.
 
-## Table of Contents
+## File: .gitignore
 
-- [.gitignore](#-gitignore)
-- [bun.lock](#bun-lock)
-- [package.json](#package-json)
-- [spindle.json](#spindle-json)
-- [src/backend.ts](#src-backend-ts)
-- [src/backend/asset-resolver.ts](#src-backend-asset-resolver-ts)
-- [src/backend/default-rules.ts](#src-backend-default-rules-ts)
-- [src/backend/director.ts](#src-backend-director-ts)
-- [src/backend/ledger-parser.ts](#src-backend-ledger-parser-ts)
-- [src/backend/mvu-evaluator.ts](#src-backend-mvu-evaluator-ts)
-- [src/backend/storage.ts](#src-backend-storage-ts)
-- [src/backend/toon-parser.ts](#src-backend-toon-parser-ts)
-- [src/frontend.ts](#src-frontend-ts)
-- [src/frontend/hud/menu-bar.ts](#src-frontend-hud-menu-bar-ts)
-- [src/frontend/hud/tab-bplots.ts](#src-frontend-hud-tab-bplots-ts)
-- [src/frontend/hud/tab-characters.ts](#src-frontend-hud-tab-characters-ts)
-- [src/frontend/hud/tab-diagnostics.ts](#src-frontend-hud-tab-diagnostics-ts)
-- [src/frontend/hud/tab-inventory.ts](#src-frontend-hud-tab-inventory-ts)
-- [src/frontend/hud/tab-journal.ts](#src-frontend-hud-tab-journal-ts)
-- [src/frontend/hud/tab-map.ts](#src-frontend-hud-tab-map-ts)
-- [src/frontend/hud/tab-phone.ts](#src-frontend-hud-tab-phone-ts)
-- [src/frontend/hud/tab-scene.ts](#src-frontend-hud-tab-scene-ts)
-- [src/frontend/hud/tab-stats.ts](#src-frontend-hud-tab-stats-ts)
-- [src/frontend/hud/tab-wardrobe.ts](#src-frontend-hud-tab-wardrobe-ts)
-- [src/frontend/stage/audio-player.ts](#src-frontend-stage-audio-player-ts)
-- [src/frontend/stage/backlog.ts](#src-frontend-stage-backlog-ts)
-- [src/frontend/stage/beat-splitter.ts](#src-frontend-stage-beat-splitter-ts)
-- [src/frontend/stage/choice-modal.ts](#src-frontend-stage-choice-modal-ts)
-- [src/frontend/stage/dialogue-box.ts](#src-frontend-stage-dialogue-box-ts)
-- [src/frontend/stage/overlay.ts](#src-frontend-stage-overlay-ts)
-- [src/frontend/stage/particles.ts](#src-frontend-stage-particles-ts)
-- [src/frontend/stage/rich-text.ts](#src-frontend-stage-rich-text-ts)
-- [src/frontend/stage/sprite-transform.ts](#src-frontend-stage-sprite-transform-ts)
-- [src/frontend/stage/staging.ts](#src-frontend-stage-staging-ts)
-- [src/frontend/stage/theme.ts](#src-frontend-stage-theme-ts)
-- [src/frontend/stage/tts-engine.ts](#src-frontend-stage-tts-engine-ts)
-- [src/frontend/studio/diagnostics-drawer.ts](#src-frontend-studio-diagnostics-drawer-ts)
-- [src/frontend/utils/diag-bus.ts](#src-frontend-utils-diag-bus-ts)
-- [src/shared/text-effects.ts](#src-shared-text-effects-ts)
-- [src/shared/types.ts](#src-shared-types-ts)
-- [test/director-and-lifecycle.test.ts](#test-director-and-lifecycle-test-ts)
-- [test/engine.test.ts](#test-engine-test-ts)
-- [test/hud-tabs.test.ts](#test-hud-tabs-test-ts)
-- [test/toon-and-rulebook.test.ts](#test-toon-and-rulebook-test-ts)
-- [tsconfig.json](#tsconfig-json)
+**Path:** `.gitignore`  
+**Description:** Source file for `.gitignore`
 
----
-
-<a id="-gitignore"></a>
-## File: `.gitignore`
-
-**Description**: Source file `.gitignore` in LumiVN Visual Novel Engine.
-
-```text
+```
 node_modules/
 .DS_Store
 
@@ -65,12 +15,12 @@ node_modules/
 
 ---
 
-<a id="bun-lock"></a>
-## File: `bun.lock`
+## File: bun.lock
 
-**Description**: Source file `bun.lock` in LumiVN Visual Novel Engine.
+**Path:** `bun.lock`  
+**Description:** Source file for `bun.lock`
 
-```text
+```
 {
   "lockfileVersion": 2,
   "configVersion": 1,
@@ -111,10 +61,10 @@ node_modules/
 
 ---
 
-<a id="package-json"></a>
-## File: `package.json`
+## File: package.json
 
-**Description**: Source file `package.json` in LumiVN Visual Novel Engine.
+**Path:** `package.json`  
+**Description:** Source file for `package.json`
 
 ```json
 {
@@ -144,10 +94,10 @@ node_modules/
 
 ---
 
-<a id="spindle-json"></a>
-## File: `spindle.json`
+## File: spindle.json
 
-**Description**: Source file `spindle.json` in LumiVN Visual Novel Engine.
+**Path:** `spindle.json`  
+**Description:** Source file for `spindle.json`
 
 ```json
 {
@@ -181,10 +131,10 @@ node_modules/
 
 ---
 
-<a id="src-backend-ts"></a>
-## File: `src/backend.ts`
+## File: src/backend.ts
 
-**Description**: Source file `src/backend.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/backend.ts`  
+**Description:** Source file for `src/backend.ts`
 
 ```typescript
 import type {
@@ -226,6 +176,7 @@ const storage = new StorageManager(spindle);
 const resolver = new AssetResolver(spindle, storage);
 
 let lastActiveChatId: string | null = null;
+let lastActiveUserId: string | null = null;
 
 // View Registry: Track active visual novel stage presence per chat
 const activeVnChats = new Set<string>();
@@ -272,39 +223,43 @@ if (typeof (spindle as any).registerInterceptor === "function") {
   spindle.log.info("[LumiVN] Living World Director interceptor registered at priority 50.");
 }
 
-function onHostChatSwitched(chatId: string | null) {
+function onHostChatSwitched(chatId: string | null, userId?: string) {
   if (!chatId) return;
   lastActiveChatId = chatId;
+  if (userId) lastActiveUserId = userId;
   spindle.log.info("[LumiVN] Active chat switched to: " + chatId);
-  if (activeVnChats.has(chatId)) {
-    void processChatTurn(chatId, undefined, undefined, true);
+  if (activeVnChats.has(chatId) || true) {
+    void processChatTurn(chatId, undefined, undefined, true, undefined, undefined, userId);
   }
 }
 
 const spindleAnyObj = spindle as any;
 if (typeof spindleAnyObj.on === "function") {
-  spindleAnyObj.on("CHAT_SWITCHED", (payload: unknown) => {
-    const candidate = payload && typeof payload === "object" ? (payload as { chatId?: unknown }) : {};
+  spindleAnyObj.on("CHAT_SWITCHED", (payload: unknown, userId?: string) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { chatId?: unknown; userId?: unknown }) : {};
+    const uid = userId || (typeof candidate.userId === "string" ? candidate.userId : undefined);
     if (typeof candidate.chatId === "string" && candidate.chatId) {
-      onHostChatSwitched(candidate.chatId);
+      onHostChatSwitched(candidate.chatId, uid);
     }
   });
 
-  spindleAnyObj.on("CHAT_CHANGED", (payload: unknown) => {
-    const candidate = payload && typeof payload === "object" ? (payload as { chat?: { id?: unknown }; chatId?: unknown }) : {};
+  spindleAnyObj.on("CHAT_CHANGED", (payload: unknown, userId?: string) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { chat?: { id?: unknown; user_id?: unknown }; chatId?: unknown; userId?: unknown }) : {};
     const cid = (typeof candidate.chat?.id === "string" ? candidate.chat.id : null) ||
                 (typeof candidate.chatId === "string" ? candidate.chatId : null);
+    const uid = userId || (typeof candidate.chat?.user_id === "string" ? candidate.chat.user_id : undefined) || (typeof candidate.userId === "string" ? candidate.userId : undefined);
     if (cid) {
-      onHostChatSwitched(cid);
+      onHostChatSwitched(cid, uid);
     }
   });
 
-  spindleAnyObj.on("CHAT_FORKED", (payload: unknown) => {
-    const candidate = payload && typeof payload === "object" ? (payload as { forkedChatId?: unknown; chat?: { id?: unknown } }) : {};
+  spindleAnyObj.on("CHAT_FORKED", (payload: unknown, userId?: string) => {
+    const candidate = payload && typeof payload === "object" ? (payload as { forkedChatId?: unknown; chat?: { id?: unknown; user_id?: unknown }; userId?: unknown }) : {};
     const cid = (typeof candidate.forkedChatId === "string" ? candidate.forkedChatId : null) ||
                 (typeof candidate.chat?.id === "string" ? candidate.chat.id : null);
+    const uid = userId || (typeof candidate.chat?.user_id === "string" ? candidate.chat.user_id : undefined) || (typeof candidate.userId === "string" ? candidate.userId : undefined);
     if (cid) {
-      onHostChatSwitched(cid);
+      onHostChatSwitched(cid, uid);
     }
   });
 }
@@ -361,7 +316,8 @@ async function processChatTurn(
   overrideContent?: string,
   force = false,
   generationId?: string,
-  swipeId?: string | number
+  swipeId?: string | number,
+  userId?: string
 ): Promise<void> {
   if (!chatId) return;
 
@@ -373,14 +329,28 @@ async function processChatTurn(
   try {
     let targetMessage: ChatMessageDTO | null = null;
     let characterId: string | undefined;
+    let effectiveUserId = userId || lastActiveUserId;
 
     try {
       const activeChat = await spindle.chats.get(chatId);
       if (activeChat) {
         characterId = activeChat.character_id;
+        if (!effectiveUserId) {
+          effectiveUserId = (activeChat as any)?.user_id || (activeChat as any)?.userId;
+        }
       }
-    } catch {
-      // Ignore if chat lookup fails
+    } catch {}
+
+    if (!effectiveUserId) {
+      try {
+        const chatList = await (spindle.chats as any).list?.({ limit: 1 });
+        const first = chatList?.data?.[0] || chatList?.[0];
+        effectiveUserId = first?.user_id || first?.userId;
+      } catch {}
+    }
+
+    if (effectiveUserId) {
+      lastActiveUserId = effectiveUserId;
     }
 
     if (overrideContent) {
@@ -472,7 +442,8 @@ async function processChatTurn(
             chatId,
             extractProse(targetMessage.content),
             cumulativeLedger || { scene: { place: "default" }, actors: {} },
-            statRulesSettings
+            statRulesSettings,
+            effectiveUserId || undefined
           );
         } finally {
           mvuEvaluatingChats.delete(chatId);
@@ -655,9 +626,11 @@ spindle.on("GENERATION_STOPPED", (payload: GenerationStoppedPayloadDTO) => {
   spindle.log.info(`[LumiVN] Discarded staged commit for stopped generation ${generationId}`);
 });
 
-spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
+spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO, userId?: string) => {
   const { chatId, generationId, error } = payload || {};
   if (!chatId) return;
+
+  if (userId) lastActiveUserId = userId;
 
   if (error) {
     if (generationId) {
@@ -678,36 +651,40 @@ spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
   // View-Gating: abort in < 1ms if stage not open for this chat and stat rules not enabled
   const settings = await storage.getStatRulesSettings();
   if (!activeVnChats.has(chatId) && !settings.enabled) return;
-  await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
+  await processChatTurn(chatId, payload.messageId, payload.content, false, generationId, undefined, userId);
 });
 
-spindle.on("MESSAGE_SWIPED", async (payload: MessageSwipedPayloadDTO) => {
+spindle.on("MESSAGE_SWIPED", async (payload: MessageSwipedPayloadDTO, userId?: string) => {
   const cid = payload?.chatId || lastActiveChatId;
+  if (userId) lastActiveUserId = userId;
   // View-Gating: abort in < 1ms if stage not active for this chat
   if (!cid || !activeVnChats.has(cid)) return;
   const swipeIndex = (payload as any)?.swipeIndex ?? (payload as any)?.swipe_index;
-  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex);
+  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex, userId);
 });
 
-spindle.on("SWIPE_EDITED", async (payload: SwipeEditedPayloadDTO) => {
+spindle.on("SWIPE_EDITED", async (payload: SwipeEditedPayloadDTO, userId?: string) => {
   const cid = payload?.chatId || lastActiveChatId;
+  if (userId) lastActiveUserId = userId;
   // View-Gating: abort in < 1ms if stage not active for this chat
   if (!cid || !activeVnChats.has(cid)) return;
   const swipeIndex = (payload as any)?.swipeIndex ?? (payload as any)?.swipe_index;
-  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex);
+  await processChatTurn(cid, payload.message?.id, undefined, false, undefined, swipeIndex, userId);
 });
 
 const spindleAny = spindle as any;
 if (typeof spindleAny.on === "function") {
-  spindleAny.on("MESSAGE_EDITED", async (payload: { chatId?: string; messageId?: string }) => {
+  spindleAny.on("MESSAGE_EDITED", async (payload: { chatId?: string; messageId?: string }, userId?: string) => {
     const cid = payload?.chatId || lastActiveChatId;
+    if (userId) lastActiveUserId = userId;
     if (!cid || !activeVnChats.has(cid)) return;
-    await processChatTurn(cid, payload.messageId);
+    await processChatTurn(cid, payload.messageId, undefined, false, undefined, undefined, userId);
   });
-  spindleAny.on("MESSAGE_DELETED", async (payload: { chatId?: string }) => {
+  spindleAny.on("MESSAGE_DELETED", async (payload: { chatId?: string }, userId?: string) => {
     const cid = payload?.chatId || lastActiveChatId;
+    if (userId) lastActiveUserId = userId;
     if (!cid || !activeVnChats.has(cid)) return;
-    await processChatTurn(cid);
+    await processChatTurn(cid, undefined, undefined, false, undefined, undefined, userId);
   });
 }
 
@@ -715,6 +692,11 @@ if (typeof spindleAny.on === "function") {
 spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
   const payload = msg as Record<string, unknown>;
   if (!payload || typeof payload !== "object") return;
+
+  if (senderUserId) {
+    lastActiveUserId = senderUserId;
+  }
+  const effectiveUid = senderUserId || lastActiveUserId || undefined;
 
   const type = String(payload.type);
 
@@ -744,7 +726,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
       if (chatId) {
         activeVnChats.add(chatId);
         lastActiveChatId = chatId;
-        await processChatTurn(chatId, undefined, undefined, true);
+        await processChatTurn(chatId, undefined, undefined, true, undefined, undefined, effectiveUid);
       } else {
         spindle.sendToFrontend({
           type: "vn_error",
@@ -888,7 +870,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         try {
           await spindle.chat.updateMessage(chatId, messageId, { content });
           spindle.log.info(`[LumiVN] Updated message ${messageId} in chat ${chatId}`);
-          await processChatTurn(chatId, messageId, content);
+          await processChatTurn(chatId, messageId, content, false, undefined, undefined, effectiveUid);
           spindle.sendToFrontend({
             type: "vn_log",
             message: `Updated line in message #${messageId.slice(0, 8)}`,
@@ -1079,10 +1061,10 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
 
 ---
 
-<a id="src-backend-asset-resolver-ts"></a>
-## File: `src/backend/asset-resolver.ts`
+## File: src/backend/asset-resolver.ts
 
-**Description**: Source file `src/backend/asset-resolver.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/backend/asset-resolver.ts`  
+**Description:** Source file for `src/backend/asset-resolver.ts`
 
 ```typescript
 import type { SpindleAPI } from "lumiverse-spindle-types";
@@ -1366,10 +1348,10 @@ export class AssetResolver {
 
 ---
 
-<a id="src-backend-default-rules-ts"></a>
-## File: `src/backend/default-rules.ts`
+## File: src/backend/default-rules.ts
 
-**Description**: Source file `src/backend/default-rules.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/backend/default-rules.ts`  
+**Description:** Source file for `src/backend/default-rules.ts`
 
 ```typescript
 export const DEFAULT_STAT_RULES = `<stat_rules>
@@ -1703,10 +1685,10 @@ opportunities:
 
 ---
 
-<a id="src-backend-director-ts"></a>
-## File: `src/backend/director.ts`
+## File: src/backend/director.ts
 
-**Description**: Source file `src/backend/director.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/backend/director.ts`  
+**Description:** Source file for `src/backend/director.ts`
 
 ```typescript
 import type { LlmMessageDTO, InterceptorResultDTO } from "lumiverse-spindle-types";
@@ -2164,10 +2146,10 @@ export function processBPlots(ledger: LedgerData): BPlotProcessResult {
 
 ---
 
-<a id="src-backend-ledger-parser-ts"></a>
-## File: `src/backend/ledger-parser.ts`
+## File: src/backend/ledger-parser.ts
 
-**Description**: Source file `src/backend/ledger-parser.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/backend/ledger-parser.ts`  
+**Description:** Source file for `src/backend/ledger-parser.ts`
 
 ```typescript
 import yaml from "js-yaml";
@@ -2627,10 +2609,10 @@ export function inferProseEmotionDelta(
 
 ---
 
-<a id="src-backend-mvu-evaluator-ts"></a>
-## File: `src/backend/mvu-evaluator.ts`
+## File: src/backend/mvu-evaluator.ts
 
-**Description**: Source file `src/backend/mvu-evaluator.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/backend/mvu-evaluator.ts`  
+**Description:** Source file for `src/backend/mvu-evaluator.ts`
 
 ```typescript
 import type { SpindleAPI } from "lumiverse-spindle-types";
@@ -2642,7 +2624,8 @@ export async function evaluateMvuLedgerDelta(
   chatId: string,
   latestProse: string,
   currentLedger: LedgerData,
-  settings: StatRulesSettings
+  settings: StatRulesSettings,
+  userId?: string
 ): Promise<Partial<LedgerData> | null> {
   if (!settings.enabled || settings.mode !== "mvu_quiet") return null;
 
@@ -2676,12 +2659,18 @@ ${latestProse}
 Emit the resulting ledger compact delta now.`;
 
   try {
-    const res = await spindle.generate.quiet({
+    const quietPayload: any = {
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-    });
+    };
+    if (userId) {
+      quietPayload.userId = userId;
+      quietPayload.user_id = userId;
+    }
+
+    const res = await (spindle.generate as any).quiet(quietPayload, userId);
 
     const output = typeof res === "string" ? res : (res as any)?.content || "";
     if (!output) return null;
@@ -2699,10 +2688,10 @@ Emit the resulting ledger compact delta now.`;
 
 ---
 
-<a id="src-backend-storage-ts"></a>
-## File: `src/backend/storage.ts`
+## File: src/backend/storage.ts
 
-**Description**: Source file `src/backend/storage.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/backend/storage.ts`  
+**Description:** Source file for `src/backend/storage.ts`
 
 ```typescript
 import type { SpindleAPI } from "lumiverse-spindle-types";
@@ -3028,10 +3017,10 @@ export class StorageManager {
 
 ---
 
-<a id="src-backend-toon-parser-ts"></a>
-## File: `src/backend/toon-parser.ts`
+## File: src/backend/toon-parser.ts
 
-**Description**: Source file `src/backend/toon-parser.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/backend/toon-parser.ts`  
+**Description:** Source file for `src/backend/toon-parser.ts`
 
 ```typescript
 import type { LedgerData, SceneState, ActorDossier, ActorPassions } from "../shared/types.js";
@@ -3229,10 +3218,10 @@ actors[N]{id,mood,slot}:
 
 ---
 
-<a id="src-frontend-ts"></a>
-## File: `src/frontend.ts`
+## File: src/frontend.ts
 
-**Description**: Source file `src/frontend.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend.ts`  
+**Description:** Source file for `src/frontend.ts`
 
 ```typescript
 import type {
@@ -3583,10 +3572,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
 ---
 
-<a id="src-frontend-hud-menu-bar-ts"></a>
-## File: `src/frontend/hud/menu-bar.ts`
+## File: src/frontend/hud/menu-bar.ts
 
-**Description**: Source file `src/frontend/hud/menu-bar.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/hud/menu-bar.ts`  
+**Description:** Source file for `src/frontend/hud/menu-bar.ts`
 
 ```typescript
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
@@ -3823,10 +3812,10 @@ export class MenuBar {
 
 ---
 
-<a id="src-frontend-hud-tab-bplots-ts"></a>
-## File: `src/frontend/hud/tab-bplots.ts`
+## File: src/frontend/hud/tab-bplots.ts
 
-**Description**: Source file `src/frontend/hud/tab-bplots.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/hud/tab-bplots.ts`  
+**Description:** Source file for `src/frontend/hud/tab-bplots.ts`
 
 ```typescript
 import type { LedgerData, BPlot, RosterCharacter, FrontNode, TravelNode, SceneLatent } from "../../shared/types.js";
@@ -4054,10 +4043,10 @@ export class BPlotsTab {
 
 ---
 
-<a id="src-frontend-hud-tab-characters-ts"></a>
-## File: `src/frontend/hud/tab-characters.ts`
+## File: src/frontend/hud/tab-characters.ts
 
-**Description**: Source file `src/frontend/hud/tab-characters.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/hud/tab-characters.ts`  
+**Description:** Source file for `src/frontend/hud/tab-characters.ts`
 
 ```typescript
 import type { LedgerData, ActorDossier, AssetManifest, RosterCharacter } from "../../shared/types.js";
@@ -5241,10 +5230,10 @@ export class CharactersTab {
 
 ---
 
-<a id="src-frontend-hud-tab-diagnostics-ts"></a>
-## File: `src/frontend/hud/tab-diagnostics.ts`
+## File: src/frontend/hud/tab-diagnostics.ts
 
-**Description**: Source file `src/frontend/hud/tab-diagnostics.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/hud/tab-diagnostics.ts`  
+**Description:** Source file for `src/frontend/hud/tab-diagnostics.ts`
 
 ```typescript
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
@@ -5616,10 +5605,10 @@ export class DiagnosticsTab {
 
 ---
 
-<a id="src-frontend-hud-tab-inventory-ts"></a>
-## File: `src/frontend/hud/tab-inventory.ts`
+## File: src/frontend/hud/tab-inventory.ts
 
-**Description**: Source file `src/frontend/hud/tab-inventory.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/hud/tab-inventory.ts`  
+**Description:** Source file for `src/frontend/hud/tab-inventory.ts`
 
 ```typescript
 import type { LedgerData, ActorInventory } from "../../shared/types.js";
@@ -5766,10 +5755,10 @@ export class InventoryTab {
 
 ---
 
-<a id="src-frontend-hud-tab-journal-ts"></a>
-## File: `src/frontend/hud/tab-journal.ts`
+## File: src/frontend/hud/tab-journal.ts
 
-**Description**: Source file `src/frontend/hud/tab-journal.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/hud/tab-journal.ts`  
+**Description:** Source file for `src/frontend/hud/tab-journal.ts`
 
 ```typescript
 import type { LedgerData } from "../../shared/types.js";
@@ -5873,10 +5862,10 @@ export class JournalTab {
 
 ---
 
-<a id="src-frontend-hud-tab-map-ts"></a>
-## File: `src/frontend/hud/tab-map.ts`
+## File: src/frontend/hud/tab-map.ts
 
-**Description**: Source file `src/frontend/hud/tab-map.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/hud/tab-map.ts`  
+**Description:** Source file for `src/frontend/hud/tab-map.ts`
 
 ```typescript
 import type { LedgerData, PlaceRoute, PlaceNode } from "../../shared/types.js";
@@ -6485,10 +6474,10 @@ export class MapTab {
 
 ---
 
-<a id="src-frontend-hud-tab-phone-ts"></a>
-## File: `src/frontend/hud/tab-phone.ts`
+## File: src/frontend/hud/tab-phone.ts
 
-**Description**: Source file `src/frontend/hud/tab-phone.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/hud/tab-phone.ts`  
+**Description:** Source file for `src/frontend/hud/tab-phone.ts`
 
 ```typescript
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
@@ -7478,10 +7467,10 @@ export class PhoneTab {
 
 ---
 
-<a id="src-frontend-hud-tab-scene-ts"></a>
-## File: `src/frontend/hud/tab-scene.ts`
+## File: src/frontend/hud/tab-scene.ts
 
-**Description**: Source file `src/frontend/hud/tab-scene.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/hud/tab-scene.ts`  
+**Description:** Source file for `src/frontend/hud/tab-scene.ts`
 
 ```typescript
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
@@ -7949,10 +7938,10 @@ export class SceneTab {
 
 ---
 
-<a id="src-frontend-hud-tab-stats-ts"></a>
-## File: `src/frontend/hud/tab-stats.ts`
+## File: src/frontend/hud/tab-stats.ts
 
-**Description**: Source file `src/frontend/hud/tab-stats.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/hud/tab-stats.ts`  
+**Description:** Source file for `src/frontend/hud/tab-stats.ts`
 
 ```typescript
 import type { LedgerData, ActorDossier } from "../../shared/types.js";
@@ -8369,10 +8358,10 @@ export class StatsTab {
 
 ---
 
-<a id="src-frontend-hud-tab-wardrobe-ts"></a>
-## File: `src/frontend/hud/tab-wardrobe.ts`
+## File: src/frontend/hud/tab-wardrobe.ts
 
-**Description**: Source file `src/frontend/hud/tab-wardrobe.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/hud/tab-wardrobe.ts`  
+**Description:** Source file for `src/frontend/hud/tab-wardrobe.ts`
 
 ```typescript
 import type { LedgerData, ActorOutfit } from "../../shared/types.js";
@@ -8520,10 +8509,10 @@ export class WardrobeTab {
 
 ---
 
-<a id="src-frontend-stage-audio-player-ts"></a>
-## File: `src/frontend/stage/audio-player.ts`
+## File: src/frontend/stage/audio-player.ts
 
-**Description**: Source file `src/frontend/stage/audio-player.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/audio-player.ts`  
+**Description:** Source file for `src/frontend/stage/audio-player.ts`
 
 ```typescript
 export type SoundEffectType = "click" | "type" | "page" | "impact" | "chime";
@@ -8705,10 +8694,10 @@ export class VnAudioEngine {
 
 ---
 
-<a id="src-frontend-stage-backlog-ts"></a>
-## File: `src/frontend/stage/backlog.ts`
+## File: src/frontend/stage/backlog.ts
 
-**Description**: Source file `src/frontend/stage/backlog.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/backlog.ts`  
+**Description:** Source file for `src/frontend/stage/backlog.ts`
 
 ```typescript
 export interface BacklogEntry {
@@ -8793,10 +8782,10 @@ export class BacklogModal {
 
 ---
 
-<a id="src-frontend-stage-beat-splitter-ts"></a>
-## File: `src/frontend/stage/beat-splitter.ts`
+## File: src/frontend/stage/beat-splitter.ts
 
-**Description**: Source file `src/frontend/stage/beat-splitter.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/beat-splitter.ts`  
+**Description:** Source file for `src/frontend/stage/beat-splitter.ts`
 
 ```typescript
 export interface DialogueBeat {
@@ -9028,10 +9017,10 @@ export function splitParagraphIntoBeats(
 
 ---
 
-<a id="src-frontend-stage-choice-modal-ts"></a>
-## File: `src/frontend/stage/choice-modal.ts`
+## File: src/frontend/stage/choice-modal.ts
 
-**Description**: Source file `src/frontend/stage/choice-modal.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/choice-modal.ts`  
+**Description:** Source file for `src/frontend/stage/choice-modal.ts`
 
 ```typescript
 export interface ChoiceOption {
@@ -9100,10 +9089,10 @@ export class ChoiceModal {
 
 ---
 
-<a id="src-frontend-stage-dialogue-box-ts"></a>
-## File: `src/frontend/stage/dialogue-box.ts`
+## File: src/frontend/stage/dialogue-box.ts
 
-**Description**: Source file `src/frontend/stage/dialogue-box.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/dialogue-box.ts`  
+**Description:** Source file for `src/frontend/stage/dialogue-box.ts`
 
 ```typescript
 import { formatDialogueHtml } from "./rich-text.js";
@@ -9722,10 +9711,10 @@ export class DialogueBox {
 
 ---
 
-<a id="src-frontend-stage-overlay-ts"></a>
-## File: `src/frontend/stage/overlay.ts`
+## File: src/frontend/stage/overlay.ts
 
-**Description**: Source file `src/frontend/stage/overlay.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/overlay.ts`  
+**Description:** Source file for `src/frontend/stage/overlay.ts`
 
 ```typescript
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
@@ -10791,10 +10780,10 @@ export class StageOverlay {
 
 ---
 
-<a id="src-frontend-stage-particles-ts"></a>
-## File: `src/frontend/stage/particles.ts`
+## File: src/frontend/stage/particles.ts
 
-**Description**: Source file `src/frontend/stage/particles.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/particles.ts`  
+**Description:** Source file for `src/frontend/stage/particles.ts`
 
 ```typescript
 export type ParticlePreset = "sakura" | "rain" | "snow" | "embers" | "dust" | "none";
@@ -11050,10 +11039,10 @@ export class ParticleEngine {
 
 ---
 
-<a id="src-frontend-stage-rich-text-ts"></a>
-## File: `src/frontend/stage/rich-text.ts`
+## File: src/frontend/stage/rich-text.ts
 
-**Description**: Source file `src/frontend/stage/rich-text.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/rich-text.ts`  
+**Description:** Source file for `src/frontend/stage/rich-text.ts`
 
 ```typescript
 import { TEXT_EFFECT_IDS, escapeHtml, parseTwineChoices } from "../../shared/text-effects.js";
@@ -11175,10 +11164,10 @@ export const TEXT_EFFECTS_CSS = `
 
 ---
 
-<a id="src-frontend-stage-sprite-transform-ts"></a>
-## File: `src/frontend/stage/sprite-transform.ts`
+## File: src/frontend/stage/sprite-transform.ts
 
-**Description**: Source file `src/frontend/stage/sprite-transform.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/sprite-transform.ts`  
+**Description:** Source file for `src/frontend/stage/sprite-transform.ts`
 
 ```typescript
 export interface SpriteTransform {
@@ -11225,10 +11214,10 @@ export function resetSpriteTransform(actorId: string): void {
 
 ---
 
-<a id="src-frontend-stage-staging-ts"></a>
-## File: `src/frontend/stage/staging.ts`
+## File: src/frontend/stage/staging.ts
 
-**Description**: Source file `src/frontend/stage/staging.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/staging.ts`  
+**Description:** Source file for `src/frontend/stage/staging.ts`
 
 ```typescript
 import type { StageBackground, StageCharacter } from "../../shared/types.js";
@@ -11461,10 +11450,10 @@ export class StageRenderer {
 
 ---
 
-<a id="src-frontend-stage-theme-ts"></a>
-## File: `src/frontend/stage/theme.ts`
+## File: src/frontend/stage/theme.ts
 
-**Description**: Source file `src/frontend/stage/theme.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/theme.ts`  
+**Description:** Source file for `src/frontend/stage/theme.ts`
 
 ```typescript
 export interface VnTheme {
@@ -11552,10 +11541,10 @@ export function applyVnTheme(rootEl: HTMLElement, themeId = "default"): void {
 
 ---
 
-<a id="src-frontend-stage-tts-engine-ts"></a>
-## File: `src/frontend/stage/tts-engine.ts`
+## File: src/frontend/stage/tts-engine.ts
 
-**Description**: Source file `src/frontend/stage/tts-engine.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/stage/tts-engine.ts`  
+**Description:** Source file for `src/frontend/stage/tts-engine.ts`
 
 ```typescript
 export interface SpeechVoiceRef {
@@ -11975,10 +11964,10 @@ export class VnTtsEngine {
 
 ---
 
-<a id="src-frontend-studio-diagnostics-drawer-ts"></a>
-## File: `src/frontend/studio/diagnostics-drawer.ts`
+## File: src/frontend/studio/diagnostics-drawer.ts
 
-**Description**: Source file `src/frontend/studio/diagnostics-drawer.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/studio/diagnostics-drawer.ts`  
+**Description:** Source file for `src/frontend/studio/diagnostics-drawer.ts`
 
 ```typescript
 import type { SpindleFrontendContext, SpindleDrawerTabHandle } from "lumiverse-spindle-types";
@@ -12424,10 +12413,10 @@ export function registerDiagnosticsDrawer(
 
 ---
 
-<a id="src-frontend-utils-diag-bus-ts"></a>
-## File: `src/frontend/utils/diag-bus.ts`
+## File: src/frontend/utils/diag-bus.ts
 
-**Description**: Source file `src/frontend/utils/diag-bus.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/frontend/utils/diag-bus.ts`  
+**Description:** Source file for `src/frontend/utils/diag-bus.ts`
 
 ```typescript
 import type { LedgerData, AssetManifest, DirectorNoteData, DiagnosticData } from "../../shared/types.js";
@@ -12606,10 +12595,10 @@ export const diagBus = new DiagnosticBus();
 
 ---
 
-<a id="src-shared-text-effects-ts"></a>
-## File: `src/shared/text-effects.ts`
+## File: src/shared/text-effects.ts
 
-**Description**: Source file `src/shared/text-effects.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/shared/text-effects.ts`  
+**Description:** Source file for `src/shared/text-effects.ts`
 
 ```typescript
 export const TEXT_EFFECT_IDS = [
@@ -12681,10 +12670,10 @@ export function parseTwineChoices(text: string): { cleanText: string; choices: T
 
 ---
 
-<a id="src-shared-types-ts"></a>
-## File: `src/shared/types.ts`
+## File: src/shared/types.ts
 
-**Description**: Source file `src/shared/types.ts` in LumiVN Visual Novel Engine.
+**Path:** `src/shared/types.ts`  
+**Description:** Source file for `src/shared/types.ts`
 
 ```typescript
 export interface ClockState {
@@ -13077,10 +13066,10 @@ export interface StatRulesSettingsPayload {
 
 ---
 
-<a id="test-director-and-lifecycle-test-ts"></a>
-## File: `test/director-and-lifecycle.test.ts`
+## File: test/director-and-lifecycle.test.ts
 
-**Description**: Source file `test/director-and-lifecycle.test.ts` in LumiVN Visual Novel Engine.
+**Path:** `test/director-and-lifecycle.test.ts`  
+**Description:** Source file for `test/director-and-lifecycle.test.ts`
 
 ```typescript
 import { describe, expect, test } from "bun:test";
@@ -13749,10 +13738,10 @@ describe("LumiVN Director & Lifecycle Systems", () => {
 
 ---
 
-<a id="test-engine-test-ts"></a>
-## File: `test/engine.test.ts`
+## File: test/engine.test.ts
 
-**Description**: Source file `test/engine.test.ts` in LumiVN Visual Novel Engine.
+**Path:** `test/engine.test.ts`  
+**Description:** Source file for `test/engine.test.ts`
 
 ```typescript
 import { describe, expect, test } from "bun:test";
@@ -14272,10 +14261,10 @@ describe("LumiVN Host Default TTS Engine", () => {
 
 ---
 
-<a id="test-hud-tabs-test-ts"></a>
-## File: `test/hud-tabs.test.ts`
+## File: test/hud-tabs.test.ts
 
-**Description**: Source file `test/hud-tabs.test.ts` in LumiVN Visual Novel Engine.
+**Path:** `test/hud-tabs.test.ts`  
+**Description:** Source file for `test/hud-tabs.test.ts`
 
 ```typescript
 import { describe, expect, test, beforeAll } from "bun:test";
@@ -14814,10 +14803,10 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
 
 ---
 
-<a id="test-toon-and-rulebook-test-ts"></a>
-## File: `test/toon-and-rulebook.test.ts`
+## File: test/toon-and-rulebook.test.ts
 
-**Description**: Source file `test/toon-and-rulebook.test.ts` in LumiVN Visual Novel Engine.
+**Path:** `test/toon-and-rulebook.test.ts`  
+**Description:** Source file for `test/toon-and-rulebook.test.ts`
 
 ```typescript
 import { describe, test, expect } from "bun:test";
@@ -15082,10 +15071,10 @@ actors:
 
 ---
 
-<a id="tsconfig-json"></a>
-## File: `tsconfig.json`
+## File: tsconfig.json
 
-**Description**: Source file `tsconfig.json` in LumiVN Visual Novel Engine.
+**Path:** `tsconfig.json`  
+**Description:** Source file for `tsconfig.json`
 
 ```json
 {
