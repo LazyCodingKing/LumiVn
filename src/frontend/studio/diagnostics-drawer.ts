@@ -1,5 +1,6 @@
 import type { SpindleFrontendContext, SpindleDrawerTabHandle } from "lumiverse-spindle-types";
 import type { DiagnosticData, DirectorSettings, DirectorLogEntry } from "../../shared/types.js";
+import { PROP_TEMPLATES_CATALOG, formatDialogueHtml, TEXT_EFFECTS_CSS } from "../stage/rich-text.js";
 
 export interface DiagnosticsDrawerHandle {
   tab: SpindleDrawerTabHandle;
@@ -118,6 +119,52 @@ export function registerDiagnosticsDrawer(
         </div>
       </div>
 
+      <!-- Roleplay Prop & UI Templates Card -->
+      <details class="vn-props-card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #38bdf8; border-radius: 10px; padding: 12px;">
+        <summary style="font-size: 13px; font-weight: 700; color: #38bdf8; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none;">
+          <span>🎭 Roleplay Prop & UI Templates</span>
+          <span style="font-size: 10px; background: rgba(56, 189, 248, 0.2); border: 1px solid #0284c7; color: #7dd3fc; padding: 2px 6px; border-radius: 4px;">HTML/CSS Props</span>
+        </summary>
+        <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">
+          <p style="margin: 0; font-size: 11px; color: #94a3b8;">
+            Select a prop widget to inspect live game styling and copy its prompt tag:
+          </p>
+          <div id="vn-prop-tabs" style="display: flex; gap: 4px; flex-wrap: wrap;">
+            ${PROP_TEMPLATES_CATALOG.map((p, idx) => `
+              <button class="vn-prop-select-btn" data-prop-id="${p.id}" style="padding: 3px 8px; font-size: 11px; background: ${idx === 0 ? "#0284c7" : "#1e293b"}; border: 1px solid ${idx === 0 ? "#38bdf8" : "#475569"}; color: #fff; border-radius: 4px; cursor: pointer;">
+                ${p.icon} ${p.name}
+              </button>
+            `).join("")}
+          </div>
+
+          <!-- Live Preview Box -->
+          <div style="background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span id="vn-prop-desc" style="font-size: 10px; color: #94a3b8;">${PROP_TEMPLATES_CATALOG[0]?.description}</span>
+              <button id="vn-copy-prop-tag-btn" style="padding: 2px 8px; font-size: 10px; font-weight: 700; background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 4px; cursor: pointer;">
+                📋 Copy Tag
+              </button>
+            </div>
+            <div id="vn-prop-preview-container" style="min-height: 60px;">
+              ${formatDialogueHtml(PROP_TEMPLATES_CATALOG[0]?.sampleTag || "").html}
+            </div>
+          </div>
+
+          <!-- Custom Prop CSS Overrides -->
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label for="vn-custom-css-input" style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase;">
+                Custom Prop CSS Overrides
+              </label>
+              <button id="vn-save-custom-css-btn" style="padding: 2px 8px; font-size: 10px; background: #0284c7; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-weight: 700;">
+                💾 Save CSS
+              </button>
+            </div>
+            <textarea id="vn-custom-css-input" rows="3" placeholder="/* Add custom CSS rules for .vn-prop-card or custom classes */" style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 6px; resize: vertical;"></textarea>
+          </div>
+        </div>
+      </details>
+
       <!-- Engine & Director Impact Console -->
       <div style="flex: 1; display: flex; flex-direction: column; background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; min-height: 220px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -213,6 +260,74 @@ export function registerDiagnosticsDrawer(
     if (saveBtn) {
       saveBtn.textContent = "✓ Saved!";
       setTimeout(() => (saveBtn.textContent = "Save Directives"), 1500);
+    }
+  });
+
+  // Roleplay Props & CSS Template Manager Wiring
+  let styleEl = document.getElementById("lumivn-custom-prop-styles") as HTMLStyleElement | null;
+  if (!styleEl) {
+    styleEl = document.createElement("style");
+    styleEl.id = "lumivn-custom-prop-styles";
+    document.head.appendChild(styleEl);
+  }
+  let savedCustomCss = "";
+  try {
+    savedCustomCss = localStorage.getItem("lumivn_custom_prop_css") || "";
+  } catch {}
+  styleEl.textContent = `${TEXT_EFFECTS_CSS}\n${savedCustomCss}`;
+
+  let selectedPropDef = PROP_TEMPLATES_CATALOG[0]!;
+  const propDesc = root.querySelector("#vn-prop-desc") as HTMLElement | null;
+  const propPreview = root.querySelector("#vn-prop-preview-container") as HTMLElement | null;
+  const copyTagBtn = root.querySelector("#vn-copy-prop-tag-btn") as HTMLButtonElement | null;
+  const customCssInput = root.querySelector("#vn-custom-css-input") as HTMLTextAreaElement | null;
+  const saveCustomCssBtn = root.querySelector("#vn-save-custom-css-btn") as HTMLButtonElement | null;
+
+  if (customCssInput) {
+    customCssInput.value = savedCustomCss;
+  }
+
+  root.querySelectorAll(".vn-prop-select-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const propId = btn.getAttribute("data-prop-id");
+      const found = PROP_TEMPLATES_CATALOG.find((p) => p.id === propId);
+      if (found) {
+        selectedPropDef = found;
+        if (propDesc) propDesc.textContent = found.description;
+        if (propPreview) propPreview.innerHTML = formatDialogueHtml(found.sampleTag).html;
+        root.querySelectorAll(".vn-prop-select-btn").forEach((b) => {
+          (b as HTMLElement).style.background = b === btn ? "#0284c7" : "#1e293b";
+          (b as HTMLElement).style.borderColor = b === btn ? "#38bdf8" : "#475569";
+        });
+      }
+    });
+  });
+
+  copyTagBtn?.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(selectedPropDef.sampleTag).catch(() => {});
+    if (copyTagBtn) {
+      const orig = copyTagBtn.textContent;
+      copyTagBtn.textContent = "✓ Copied Tag!";
+      copyTagBtn.style.borderColor = "#10b981";
+      setTimeout(() => {
+        copyTagBtn.textContent = orig;
+        copyTagBtn.style.borderColor = "#38bdf8";
+      }, 1500);
+    }
+  });
+
+  saveCustomCssBtn?.addEventListener("click", () => {
+    const cssVal = customCssInput?.value || "";
+    try {
+      localStorage.setItem("lumivn_custom_prop_css", cssVal);
+    } catch {}
+    if (styleEl) {
+      styleEl.textContent = `${TEXT_EFFECTS_CSS}\n${cssVal}`;
+    }
+    if (saveCustomCssBtn) {
+      const orig = saveCustomCssBtn.textContent;
+      saveCustomCssBtn.textContent = "✓ Saved!";
+      setTimeout(() => (saveCustomCssBtn.textContent = orig), 1500);
     }
   });
 

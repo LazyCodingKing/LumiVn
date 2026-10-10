@@ -483,11 +483,14 @@ export class DialogueBox {
     const { html } = formatDialogueHtml(beat.text);
     this.prevBtn.disabled = this.currentBeatIndex === 0;
 
-    // Fast-Forward Skip Mode
-    if (this.isSkipping) {
+    // Fast-Forward Skip Mode or Prop Card Mode (avoids broken mid-tag slicing of UI widgets)
+    if (this.isSkipping || html.includes("vn-prop-card")) {
       this.isTyping = false;
       this.textContainer.innerHTML = html;
       this.onBeatSettled();
+      if (html.includes("vn-prop-card") && this.ttsEngine?.isEnabled()) {
+        this.ttsEngine.speak(beat.text, beat.speaker);
+      }
       return;
     }
 

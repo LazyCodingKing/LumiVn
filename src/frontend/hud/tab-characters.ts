@@ -180,6 +180,9 @@ function normalizeRoutine(r: any): {
 export class CharactersTab {
   public root: HTMLElement;
   private selectedActorId: string | null = null;
+  private showFullImage: boolean = false;
+  private currentManifest?: AssetManifest;
+  private currentLedger: LedgerData = {};
   private ttsEngine?: VnTtsEngine;
 
   constructor(ttsEngine?: VnTtsEngine) {
@@ -189,6 +192,8 @@ export class CharactersTab {
   }
 
   public render(ledger: LedgerData, manifest?: AssetManifest): void {
+    this.currentLedger = ledger;
+    this.currentManifest = manifest;
     this.root.innerHTML = "";
     const actors: Record<string, ActorDossier> = { ...(ledger.actors || {}) };
 
@@ -296,7 +301,11 @@ export class CharactersTab {
         ${rosterItem?.loc ? `<span style="font-size: 9px; color: #64748b; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${rosterItem.loc}</span>` : ""}
       `;
       item.addEventListener("click", () => {
-        this.selectedActorId = id;
+        if (this.selectedActorId === id) {
+          this.showFullImage = !this.showFullImage;
+        } else {
+          this.selectedActorId = id;
+        }
         this.render(ledger, manifest);
       });
       ribbon.appendChild(item);
@@ -341,6 +350,9 @@ export class CharactersTab {
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:8px; border-bottom:1px solid #334155; padding-bottom:6px;">
         <div style="display:flex; align-items:center; gap:8px;">
           <h4 style="margin:0; font-size:15px; color:#f8fafc;">${displayName}</h4>
+          <button id="vn-toggle-portrait-btn" title="Toggle Full Character Portrait" style="background: ${this.showFullImage ? "linear-gradient(135deg, #0284c7, #38bdf8)" : "#0f172a"}; border: 1px solid ${this.showFullImage ? "#38bdf8" : "#475569"}; color: ${this.showFullImage ? "#fff" : "#38bdf8"}; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; box-shadow: ${this.showFullImage ? "0 0 8px rgba(56,189,248,0.4)" : "none"};">
+            <span>🖼️</span> <span>${this.showFullImage ? "Hide Image" : "Show Image"}</span>
+          </button>
           <span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe;">
             ${life.occupation || "Resident"}
           </span>
@@ -393,6 +405,11 @@ export class CharactersTab {
         </div>
       ` : ""}
     `;
+
+    banner.querySelector("#vn-toggle-portrait-btn")?.addEventListener("click", () => {
+      this.showFullImage = !this.showFullImage;
+      this.render(ledger, this.currentManifest);
+    });
 
     // Passions Snapshot Badges
     const rawPassions = actor.passions;
@@ -1171,6 +1188,49 @@ export class CharactersTab {
       });
     }
 
-    this.root.appendChild(container);
+    const layoutWrapper = document.createElement("div");
+    layoutWrapper.style.cssText = "display: flex; gap: 16px; align-items: flex-start; width: 100%; box-sizing: border-box;";
+
+    const cleanId = (actor.id || "").toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+    let fullImageUrl = "";
+    if (this.currentManifest?.characters?.[cleanId]) {
+      const charData = this.currentManifest.characters[cleanId]!;
+      const outfits = charData.outfits || (charData as any);
+      const defaultSet = outfits?.["default"] || (outfits ? Object.values(outfits)[0] : undefined);
+      fullImageUrl = defaultSet?.["neutral"] || defaultSet?.["smile"] || (defaultSet ? Object.values(defaultSet)[0] : "") || "";
+    }
+    if (!fullImageUrl) {
+      fullImageUrl = (actor.appearance as any)?.avatar || (actor.appearance as any)?.image || "";
+    }
+
+    if (this.showFullImage) {
+      const portraitCard = document.createElement("div");
+      portraitCard.className = "vn-character-portrait-card";
+      portraitCard.style.cssText = "width: 260px; min-width: 260px; background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 20px rgba(56, 189, 248, 0.25); position: sticky; top: 10px; display: flex; flex-direction: column;";
+      portraitCard.innerHTML = `
+        <div style="width: 100%; height: 380px; position: relative; background: #020617; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+          ${fullImageUrl ? `
+            <img src="${fullImageUrl}" alt="${displayName}" style="width: 100%; height: 100%; object-fit: contain; transition: transform 0.2s;" />
+          ` : `
+            <div style="font-size: 54px; color: #475569;">👤</div>
+          `}
+          <button id="vn-close-portrait-btn" style="position: absolute; top: 8px; right: 8px; background: rgba(15,23,42,0.85); border: 1px solid #475569; color: #fff; border-radius: 50%; width: 26px; height: 26px; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center;">✕</button>
+        </div>
+        <div style="padding: 10px 12px; background: #0b1120; border-top: 1px solid #1e293b; text-align: center;">
+          <strong style="color: #f8fafc; font-size: 13px;">${displayName}</strong>
+          <div style="font-size: 11px; color: #38bdf8; margin-top: 2px;">${life.occupation || "Resident"}</div>
+        </div>
+      `;
+      portraitCard.querySelector("#vn-close-portrait-btn")?.addEventListener("click", () => {
+        this.showFullImage = false;
+        this.render(ledger, this.currentManifest);
+      });
+      layoutWrapper.appendChild(portraitCard);
+    }
+
+    container.style.flex = "1";
+    container.style.minWidth = "0";
+    layoutWrapper.appendChild(container);
+    this.root.appendChild(layoutWrapper);
   }
 }

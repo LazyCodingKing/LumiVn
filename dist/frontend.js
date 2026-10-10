@@ -35,6 +35,140 @@ function parseTwineChoices(text) {
 }
 
 // src/frontend/stage/rich-text.ts
+var PROP_TEMPLATES_CATALOG = [
+  {
+    id: "phone",
+    name: "Smartphone / SMS",
+    icon: "\uD83D\uDCF1",
+    description: "Modern dark-mode mobile messenger bubble with sender tag and timestamp.",
+    sampleTag: '<prop:phone from="Maya" time="23:14">Hey, are you awake? We need to talk about what happened.</prop:phone>'
+  },
+  {
+    id: "doc",
+    name: "Letter / Dossier",
+    icon: "\uD83D\uDCDC",
+    description: "Parchment document with title header, wax seal stamp, and aged typography.",
+    sampleTag: '<prop:doc title="Guild Contract" seal="SEALED">The undersigned party agrees to non-disclosure under penalty of forfeit.</prop:doc>'
+  },
+  {
+    id: "tv",
+    name: "TV / Broadcast",
+    icon: "\uD83D\uDCFA",
+    description: "Retro CRT television monitor with live scanlines and lower-third ticker.",
+    sampleTag: '<prop:tv station="K-NEWS 7" ticker="District 4 Substation Offline">Breaking: Severe temporal fluctuations detected in upper district.</prop:tv>'
+  },
+  {
+    id: "notice",
+    name: "Corkboard Pin Note",
+    icon: "\uD83D\uDCCC",
+    description: "Tilted corkboard paper slip with pushpin and author citation.",
+    sampleTag: '<prop:notice pin="red" author="Innkeeper">Tavern cellar is strictly off-limits until the exterminator arrives.</prop:notice>'
+  },
+  {
+    id: "poster",
+    name: "Wanted / Poster",
+    icon: "\uD83E\uDD20",
+    description: "Distressed bounty or warning poster with bold headline and reward badge.",
+    sampleTag: '<prop:poster title="WANTED FOR REBELLION" reward="10,000 Credits">Identity unknown. Approach with extreme caution.</prop:poster>'
+  },
+  {
+    id: "terminal",
+    name: "Hacker Console",
+    icon: "\uD83D\uDCBB",
+    description: "Green phosphor CRT terminal window with prompt header and mono code body.",
+    sampleTag: '<prop:terminal user="guest@subnet" path="/sec/archive">Bypassing encryption layer 3... Decrypting payload [OK].</prop:terminal>'
+  },
+  {
+    id: "banner",
+    name: "RPG Quest Banner",
+    icon: "⚡",
+    description: "Visual novel / JRPG event notification banner (quest, danger, loot, status).",
+    sampleTag: '<prop:banner type="quest" title="Quest Updated">Investigate the abandoned warehouse on 5th Street.</prop:banner>'
+  },
+  {
+    id: "thought",
+    name: "Inner Thought",
+    icon: "\uD83D\uDCAD",
+    description: "Ethereal translucent thought bubble with glowing accent for internal monologue.",
+    sampleTag: '<prop:thought who="Alice">Something feels wrong here. She is deliberately hiding her hands.</prop:thought>'
+  }
+];
+function parsePropAttrs(rawAttrStr) {
+  const unescaped = rawAttrStr.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&").trim();
+  const attrs = {};
+  const re = /([a-zA-Z0-9_-]+)=["']([^"']*)["']|([a-zA-Z0-9_-]+)=([^"'\s>]+)/g;
+  let m;
+  while ((m = re.exec(unescaped)) !== null) {
+    const key = (m[1] || m[3] || "").toLowerCase();
+    const val = m[2] !== undefined ? m[2] : m[4] || "";
+    attrs[key] = val;
+  }
+  return attrs;
+}
+function renderPropCard(type, attrs, content) {
+  const normType = (type || "custom").toLowerCase();
+  switch (normType) {
+    case "phone":
+    case "sms":
+    case "message": {
+      const from = attrs.from || attrs.sender || "Incoming Message";
+      const time = attrs.time ? `<span class="vn-prop-phone-time">${attrs.time}</span>` : "";
+      return `<div class="vn-prop-card vn-prop-phone"><div class="vn-prop-phone-header"><span class="vn-prop-phone-from">\uD83D\uDCF1 ${from}</span>${time}</div><div class="vn-prop-phone-body">${content}</div></div>`;
+    }
+    case "doc":
+    case "document":
+    case "letter":
+    case "dossier": {
+      const title = attrs.title || attrs.heading || "Official Document";
+      const seal = attrs.seal ? `<span class="vn-prop-seal">${attrs.seal}</span>` : "";
+      return `<div class="vn-prop-card vn-prop-doc"><div class="vn-prop-doc-header"><span class="vn-prop-doc-title">\uD83D\uDCDC ${title}</span>${seal}</div><div class="vn-prop-doc-body">${content}</div></div>`;
+    }
+    case "tv":
+    case "broadcast":
+    case "news": {
+      const station = attrs.station || attrs.channel || "BROADCAST";
+      const ticker = attrs.ticker ? `<div class="vn-prop-tv-ticker"><span class="vn-ticker-text">${attrs.ticker}</span></div>` : "";
+      return `<div class="vn-prop-card vn-prop-tv"><div class="vn-prop-tv-scanlines"></div><div class="vn-prop-tv-header"><span class="vn-prop-tv-badge">● LIVE</span><span class="vn-prop-tv-station">${station}</span></div><div class="vn-prop-tv-body">${content}</div>${ticker}</div>`;
+    }
+    case "notice":
+    case "note":
+    case "memo": {
+      const author = attrs.author || attrs.by ? `<span class="vn-prop-notice-author">— ${attrs.author || attrs.by}</span>` : "";
+      return `<div class="vn-prop-card vn-prop-notice"><div class="vn-prop-pin">\uD83D\uDCCC</div><div class="vn-prop-notice-body">${content}</div>${author}</div>`;
+    }
+    case "poster":
+    case "wanted":
+    case "bounty": {
+      const title = attrs.title || "NOTICE";
+      const reward = attrs.reward ? `<div class="vn-prop-poster-reward">BOUNTY: ${attrs.reward}</div>` : "";
+      return `<div class="vn-prop-card vn-prop-poster"><div class="vn-prop-poster-title">★ ${title} ★</div><div class="vn-prop-poster-body">${content}</div>${reward}</div>`;
+    }
+    case "terminal":
+    case "console": {
+      const user = attrs.user || "guest@subnet";
+      const path = attrs.path ? `:${attrs.path}` : ":~";
+      return `<div class="vn-prop-card vn-prop-terminal"><div class="vn-prop-term-bar">● ● ● [${user}${path}]</div><div class="vn-prop-term-body"><span class="vn-term-prompt">&gt; </span>${content}</div></div>`;
+    }
+    case "banner":
+    case "alert":
+    case "quest":
+    case "status": {
+      const title = attrs.title || "STATUS UPDATE";
+      const bType = attrs.type || normType;
+      return `<div class="vn-prop-card vn-prop-banner vn-banner-${bType}"><div class="vn-prop-banner-header">⚡ ${title}</div><div class="vn-prop-banner-body">${content}</div></div>`;
+    }
+    case "thought":
+    case "whisper":
+    case "internal": {
+      const who = attrs.who ? `<span class="vn-prop-thought-who">${attrs.who}:</span> ` : "";
+      return `<div class="vn-prop-card vn-prop-thought"><div class="vn-prop-thought-body">\uD83D\uDCAD <i>${who}${content}</i></div></div>`;
+    }
+    default: {
+      const title = attrs.title || normType.toUpperCase();
+      return `<div class="vn-prop-card vn-prop-custom vn-prop-${normType}"><div class="vn-prop-custom-header">\uD83D\uDCE6 ${title}</div><div class="vn-prop-custom-body">${content}</div></div>`;
+    }
+  }
+}
 function formatDialogueHtml(rawText) {
   const { cleanText, choices } = parseTwineChoices(rawText);
   let formatted = escapeHtml(cleanText);
@@ -42,6 +176,15 @@ function formatDialogueHtml(rawText) {
     const cleanAct = act.replace(/&amp;/g, "&").replace(/&quot;/g, '"');
     const cleanLbl = lbl.replace(/&amp;/g, "&");
     return `<button class="vn-inline-choice" data-action="${cleanAct}">${cleanLbl}</button>`;
+  });
+  formatted = formatted.replace(/&lt;prop:([a-zA-Z0-9_-]+)([\s\S]*?)&gt;([\s\S]*?)&lt;\/prop:\1&gt;/gi, (_m, tag, rawAttrs, content) => {
+    const attrs = parsePropAttrs(rawAttrs);
+    return renderPropCard(tag, attrs, content);
+  });
+  formatted = formatted.replace(/&lt;prop\s+([\s\S]*?)&gt;([\s\S]*?)&lt;\/prop&gt;/gi, (_m, rawAttrs, content) => {
+    const attrs = parsePropAttrs(rawAttrs);
+    const type = attrs.type || "custom";
+    return renderPropCard(type, attrs, content);
   });
   for (const tag of TEXT_EFFECT_IDS) {
     const openRe = new RegExp(`&lt;${tag}&gt;`, "gi");
@@ -136,6 +279,300 @@ var TEXT_EFFECTS_CSS = `
   border-color: #818cf8;
   color: #ffffff;
   transform: translateY(-1px);
+}
+
+/* =========================================================================
+   Roleplay Props & Game Cards (HTML/CSS Widgets)
+   ========================================================================= */
+.vn-prop-card {
+  margin: 10px 0;
+  border-radius: 8px;
+  box-sizing: border-box;
+  overflow: hidden;
+  font-family: inherit;
+  font-size: 0.95em;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.vn-prop-card:hover {
+  transform: translateY(-1px);
+}
+
+/* 1. Phone / SMS */
+.vn-prop-phone {
+  background: #090d16;
+  border: 1px solid #38bdf8;
+  box-shadow: 0 4px 16px rgba(56, 189, 248, 0.18);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+.vn-prop-phone-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.25);
+  padding-bottom: 5px;
+  margin-bottom: 8px;
+}
+.vn-prop-phone-time {
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 500;
+}
+.vn-prop-phone-body {
+  color: #f1f5f9;
+  line-height: 1.5;
+}
+
+/* 2. Document / Letter */
+.vn-prop-doc {
+  background: linear-gradient(145deg, #1e2029, #171821);
+  border: 1px solid #ca8a04;
+  box-shadow: 0 4px 18px rgba(202, 138, 4, 0.15);
+  border-radius: 6px;
+  padding: 14px 16px;
+  font-family: "Georgia", serif;
+}
+.vn-prop-doc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(202, 138, 4, 0.3);
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+}
+.vn-prop-doc-title {
+  color: #fde047;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 12px;
+}
+.vn-prop-seal {
+  border: 1px solid #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  padding: 2px 8px;
+  font-size: 9px;
+  font-weight: 800;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.vn-prop-doc-body {
+  color: #fef08a;
+  line-height: 1.6;
+  font-size: 0.95em;
+}
+
+/* 3. TV / Broadcast */
+.vn-prop-tv {
+  background: #020617;
+  border: 2px solid #6366f1;
+  border-radius: 8px;
+  padding: 12px 14px;
+  position: relative;
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.25);
+  color: #c7d2fe;
+}
+.vn-prop-tv-scanlines {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.18), rgba(0,0,0,0.18) 1px, transparent 1px, transparent 2px);
+  border-radius: 6px;
+}
+.vn-prop-tv-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.vn-prop-tv-badge {
+  background: #ef4444;
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  animation: vn-pulse 1s infinite;
+}
+.vn-prop-tv-station {
+  color: #a5b4fc;
+}
+.vn-prop-tv-body {
+  line-height: 1.5;
+  position: relative;
+  z-index: 1;
+}
+.vn-prop-tv-ticker {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #475569;
+  font-size: 10px;
+  color: #f59e0b;
+  font-family: monospace;
+  font-weight: 600;
+}
+
+/* 4. Notice / Sticky Pin */
+.vn-prop-notice {
+  background: #2a2518;
+  border: 1px solid #eab308;
+  border-radius: 4px;
+  padding: 14px 16px;
+  position: relative;
+  box-shadow: 2px 4px 12px rgba(0,0,0,0.4);
+  transform: rotate(-0.5deg);
+}
+.vn-prop-pin {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 14px;
+}
+.vn-prop-notice-body {
+  color: #fef9c3;
+  line-height: 1.5;
+}
+.vn-prop-notice-author {
+  display: block;
+  text-align: right;
+  margin-top: 8px;
+  font-size: 11px;
+  color: #fef08a;
+  font-style: italic;
+}
+
+/* 5. Poster / Wanted */
+.vn-prop-poster {
+  background: #1c1917;
+  border: 2px solid #78716c;
+  border-radius: 4px;
+  padding: 14px;
+  text-align: center;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+}
+.vn-prop-poster-title {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: #facc15;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.vn-prop-poster-body {
+  color: #e7e5e4;
+  line-height: 1.5;
+  font-size: 0.95em;
+}
+.vn-prop-poster-reward {
+  margin-top: 10px;
+  border-top: 1px solid #78716c;
+  padding-top: 6px;
+  font-weight: 800;
+  color: #ef4444;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+/* 6. Terminal / Console */
+.vn-prop-terminal {
+  background: #000;
+  border: 1px solid #22c55e;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  box-shadow: 0 0 14px rgba(34, 197, 94, 0.2);
+}
+.vn-prop-term-bar {
+  font-size: 10px;
+  color: #16a34a;
+  border-bottom: 1px solid #14532d;
+  padding-bottom: 4px;
+  margin-bottom: 8px;
+}
+.vn-term-prompt {
+  color: #22c55e;
+  font-weight: 800;
+}
+.vn-prop-term-body {
+  color: #4ade80;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+/* 7. Banner / RPG Quest */
+.vn-prop-banner {
+  background: linear-gradient(90deg, #1e1b4b, #312e81);
+  border-left: 4px solid #a855f7;
+  border-radius: 4px;
+  padding: 8px 14px;
+}
+.vn-prop-banner.vn-banner-quest {
+  border-left-color: #f59e0b;
+  background: linear-gradient(90deg, #451a03, #292524);
+}
+.vn-prop-banner.vn-banner-danger {
+  border-left-color: #ef4444;
+  background: linear-gradient(90deg, #450a0a, #1f2937);
+}
+.vn-prop-banner.vn-banner-success {
+  border-left-color: #10b981;
+  background: linear-gradient(90deg, #064e3b, #1e293b);
+}
+.vn-prop-banner-header {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #c084fc;
+  letter-spacing: 0.5px;
+}
+.vn-prop-banner.vn-banner-quest .vn-prop-banner-header { color: #fbbf24; }
+.vn-prop-banner.vn-banner-danger .vn-prop-banner-header { color: #f87171; }
+.vn-prop-banner.vn-banner-success .vn-prop-banner-header { color: #34d399; }
+.vn-prop-banner-body {
+  color: #f1f5f9;
+  margin-top: 4px;
+  font-size: 0.95em;
+  line-height: 1.4;
+}
+
+/* 8. Inner Thought */
+.vn-prop-thought {
+  background: rgba(88, 28, 135, 0.2);
+  border-left: 3px solid #c084fc;
+  border-radius: 4px;
+  padding: 8px 12px;
+  color: #e9d5ff;
+}
+.vn-prop-thought-body {
+  line-height: 1.5;
+}
+.vn-prop-thought-who {
+  font-weight: 700;
+  color: #d8b4fe;
+}
+
+/* Custom / Generic fallback */
+.vn-prop-custom {
+  background: #0f172a;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #e2e8f0;
+}
+.vn-prop-custom-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+  margin-bottom: 6px;
 }
 `;
 
@@ -1256,10 +1693,13 @@ class DialogueBox {
     }
     const { html } = formatDialogueHtml(beat.text);
     this.prevBtn.disabled = this.currentBeatIndex === 0;
-    if (this.isSkipping) {
+    if (this.isSkipping || html.includes("vn-prop-card")) {
       this.isTyping = false;
       this.textContainer.innerHTML = html;
       this.onBeatSettled();
+      if (html.includes("vn-prop-card") && this.ttsEngine?.isEnabled()) {
+        this.ttsEngine.speak(beat.text, beat.speaker);
+      }
       return;
     }
     this.isTyping = true;
@@ -1542,6 +1982,9 @@ function normalizeRoutine(r) {
 class CharactersTab {
   root;
   selectedActorId = null;
+  showFullImage = false;
+  currentManifest;
+  currentLedger = {};
   ttsEngine;
   constructor(ttsEngine) {
     this.ttsEngine = ttsEngine;
@@ -1549,6 +1992,8 @@ class CharactersTab {
     this.root.className = "vn-hud-tab vn-tab-characters";
   }
   render(ledger, manifest) {
+    this.currentLedger = ledger;
+    this.currentManifest = manifest;
     this.root.innerHTML = "";
     const actors = { ...ledger.actors || {} };
     if (ledger.roster && Array.isArray(ledger.roster)) {
@@ -1643,7 +2088,11 @@ class CharactersTab {
         ${rosterItem?.loc ? `<span style="font-size: 9px; color: #64748b; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${rosterItem.loc}</span>` : ""}
       `;
       item.addEventListener("click", () => {
-        this.selectedActorId = id;
+        if (this.selectedActorId === id) {
+          this.showFullImage = !this.showFullImage;
+        } else {
+          this.selectedActorId = id;
+        }
         this.render(ledger, manifest);
       });
       ribbon.appendChild(item);
@@ -1680,6 +2129,9 @@ class CharactersTab {
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:8px; border-bottom:1px solid #334155; padding-bottom:6px;">
         <div style="display:flex; align-items:center; gap:8px;">
           <h4 style="margin:0; font-size:15px; color:#f8fafc;">${displayName}</h4>
+          <button id="vn-toggle-portrait-btn" title="Toggle Full Character Portrait" style="background: ${this.showFullImage ? "linear-gradient(135deg, #0284c7, #38bdf8)" : "#0f172a"}; border: 1px solid ${this.showFullImage ? "#38bdf8" : "#475569"}; color: ${this.showFullImage ? "#fff" : "#38bdf8"}; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; box-shadow: ${this.showFullImage ? "0 0 8px rgba(56,189,248,0.4)" : "none"};">
+            <span>\uD83D\uDDBC️</span> <span>${this.showFullImage ? "Hide Image" : "Show Image"}</span>
+          </button>
           <span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(99,102,241,0.2); border:1px solid #6366f1; color:#c7d2fe;">
             ${life.occupation || "Resident"}
           </span>
@@ -1732,6 +2184,10 @@ class CharactersTab {
         </div>
       ` : ""}
     `;
+    banner.querySelector("#vn-toggle-portrait-btn")?.addEventListener("click", () => {
+      this.showFullImage = !this.showFullImage;
+      this.render(ledger, this.currentManifest);
+    });
     const rawPassions = actor.passions;
     if (rawPassions) {
       let passionBadges = [];
@@ -2420,7 +2876,47 @@ class CharactersTab {
         });
       });
     }
-    this.root.appendChild(container);
+    const layoutWrapper = document.createElement("div");
+    layoutWrapper.style.cssText = "display: flex; gap: 16px; align-items: flex-start; width: 100%; box-sizing: border-box;";
+    const cleanId = (actor.id || "").toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+    let fullImageUrl = "";
+    if (this.currentManifest?.characters?.[cleanId]) {
+      const charData = this.currentManifest.characters[cleanId];
+      const outfits = charData.outfits || charData;
+      const defaultSet = outfits?.["default"] || (outfits ? Object.values(outfits)[0] : undefined);
+      fullImageUrl = defaultSet?.["neutral"] || defaultSet?.["smile"] || (defaultSet ? Object.values(defaultSet)[0] : "") || "";
+    }
+    if (!fullImageUrl) {
+      fullImageUrl = actor.appearance?.avatar || actor.appearance?.image || "";
+    }
+    if (this.showFullImage) {
+      const portraitCard = document.createElement("div");
+      portraitCard.className = "vn-character-portrait-card";
+      portraitCard.style.cssText = "width: 260px; min-width: 260px; background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 20px rgba(56, 189, 248, 0.25); position: sticky; top: 10px; display: flex; flex-direction: column;";
+      portraitCard.innerHTML = `
+        <div style="width: 100%; height: 380px; position: relative; background: #020617; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+          ${fullImageUrl ? `
+            <img src="${fullImageUrl}" alt="${displayName}" style="width: 100%; height: 100%; object-fit: contain; transition: transform 0.2s;" />
+          ` : `
+            <div style="font-size: 54px; color: #475569;">\uD83D\uDC64</div>
+          `}
+          <button id="vn-close-portrait-btn" style="position: absolute; top: 8px; right: 8px; background: rgba(15,23,42,0.85); border: 1px solid #475569; color: #fff; border-radius: 50%; width: 26px; height: 26px; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center;">✕</button>
+        </div>
+        <div style="padding: 10px 12px; background: #0b1120; border-top: 1px solid #1e293b; text-align: center;">
+          <strong style="color: #f8fafc; font-size: 13px;">${displayName}</strong>
+          <div style="font-size: 11px; color: #38bdf8; margin-top: 2px;">${life.occupation || "Resident"}</div>
+        </div>
+      `;
+      portraitCard.querySelector("#vn-close-portrait-btn")?.addEventListener("click", () => {
+        this.showFullImage = false;
+        this.render(ledger, this.currentManifest);
+      });
+      layoutWrapper.appendChild(portraitCard);
+    }
+    container.style.flex = "1";
+    container.style.minWidth = "0";
+    layoutWrapper.appendChild(container);
+    this.root.appendChild(layoutWrapper);
   }
 }
 
@@ -3454,9 +3950,9 @@ class MapTab {
   }
   renderIndoorSvg(group, ledger, currentPlace) {
     const scopePrefix = currentPlace.includes(":") ? currentPlace.split(":")[0] : "building";
-    const currentRoom = currentPlace.includes(":") ? currentPlace.split(":")[1] : currentPlace;
+    const currentRoom = currentPlace.replace(/^@/, "").includes(":") ? currentPlace.replace(/^@/, "").split(":")[1] : currentPlace.replace(/^@/, "");
     const knownPlaces = Object.keys(ledger.places || {});
-    const indoorKeys = knownPlaces.filter((p) => p.startsWith(`${scopePrefix}:`) || !p.includes(":"));
+    const indoorKeys = knownPlaces.filter((p) => p.replace(/^@/, "").startsWith(`${scopePrefix}:`) || !p.includes(":"));
     const rawKeys = indoorKeys.length > 0 ? indoorKeys : ["entrance", "living_room", "kitchen", "hallway", "bedroom", "courtyard", "bathroom"];
     const layouts = [];
     const cols = 3;
@@ -3467,7 +3963,7 @@ class MapTab {
     const startX = 60;
     const startY = 40;
     rawKeys.forEach((key, idx) => {
-      const clean = key.includes(":") ? key.split(":")[1] : key;
+      const clean = key.replace(/^@/, "").includes(":") ? key.replace(/^@/, "").split(":")[1] : key.replace(/^@/, "");
       const c = idx % cols;
       const r = Math.floor(idx / cols);
       layouts.push({
@@ -3683,14 +4179,14 @@ class MapTab {
   renderSidebar(sidebar, ledger, currentPlace) {
     sidebar.innerHTML = "";
     const selected = this.selectedNodeId || currentPlace;
-    const cleanName = selected.includes(":") ? selected.split(":")[1] : selected;
+    const cleanName = selected.replace(/^@/, "").includes(":") ? selected.replace(/^@/, "").split(":")[1] : selected.replace(/^@/, "");
     const placeConfig = ledger.places?.[selected] || {};
     const isHere = selected.toLowerCase() === currentPlace.toLowerCase() || cleanName.toLowerCase() === currentPlace.toLowerCase();
     const currentRoutes = ledger.places?.[currentPlace]?.routes || [];
-    const route = currentRoutes.find((r) => typeof r === "object" && (r.to === selected || r.to === cleanName));
+    const route = currentRoutes.find((r) => typeof r === "object" && (r.to === selected || r.to === cleanName || typeof r.to === "string" && r.to.replace(/^@/, "") === cleanName));
     const isGated = Boolean(route?.why_not || route?.requires && Object.keys(route.requires).length > 0);
     const whyNot = route?.why_not;
-    const placeThumbnail = this.manifest?.places?.[selected] || this.manifest?.places?.[cleanName] || this.manifest?.places?.[selected.toLowerCase()] || this.manifest?.places?.[cleanName.toLowerCase()] || "";
+    const placeThumbnail = this.manifest?.places?.[selected] || this.manifest?.places?.[cleanName] || this.manifest?.places?.[selected.replace(/^@/, "")] || this.manifest?.places?.[selected.toLowerCase()] || this.manifest?.places?.[cleanName.toLowerCase()] || "";
     const npcsHere = (ledger.roster || []).filter((r) => {
       const loc = (r.loc || "").toLowerCase();
       return loc === selected.toLowerCase() || loc === cleanName.toLowerCase() || loc.includes(cleanName.toLowerCase());
@@ -3752,10 +4248,24 @@ class MapTab {
           <span style="color: #94a3b8;">Visibility:</span>
           <span>${placeConfig.visibility ?? "—"}</span>
         </div>
+        ${placeConfig.occ ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Occupancy:</span>
+            <span style="color: #38bdf8; font-weight: 600;">${placeConfig.occ}</span>
+          </div>
+        ` : ""}
         ${placeConfig.population ? `
           <div style="display: flex; justify-content: space-between;">
             <span style="color: #94a3b8;">Population:</span>
             <span>${placeConfig.population}</span>
+          </div>
+        ` : ""}
+        ${Array.isArray(placeConfig.cohorts) && placeConfig.cohorts.length > 0 ? `
+          <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 2px;">
+            <span style="color: #94a3b8;">Active Cohorts:</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 3px;">
+              ${placeConfig.cohorts.map((c) => `<span style="background: rgba(148, 163, 184, 0.15); border: 1px solid #475569; padding: 1px 5px; border-radius: 4px; font-size: 10px; color: #cbd5e1;">\uD83D\uDC65 ${c}</span>`).join("")}
+            </div>
           </div>
         ` : ""}
       </div>
@@ -8769,6 +9279,69 @@ ${note.directorNote}`;
         }, 1500);
       }
     });
+    const propsCard = document.createElement("div");
+    propsCard.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;";
+    propsCard.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <strong style="color: #38bdf8; font-size: 13px;">\uD83C\uDFAD Roleplay Prop & UI Templates</strong>
+        <span style="font-size: 10px; background: rgba(56, 189, 248, 0.2); border: 1px solid #0284c7; color: #7dd3fc; padding: 2px 6px; border-radius: 4px;">HTML/CSS Props</span>
+      </div>
+      <p style="margin: 0; font-size: 11px; color: #94a3b8;">
+        Inspect game-style prop widgets and copy standard tags for prose & Director notes:
+      </p>
+      <div id="vn-diag-prop-tabs" style="display: flex; gap: 4px; flex-wrap: wrap;">
+        ${PROP_TEMPLATES_CATALOG.map((p, idx) => `
+          <button class="vn-diag-prop-btn" data-prop-id="${p.id}" style="padding: 3px 8px; font-size: 11px; background: ${idx === 0 ? "#0284c7" : "#1e293b"}; border: 1px solid ${idx === 0 ? "#38bdf8" : "#475569"}; color: #fff; border-radius: 4px; cursor: pointer;">
+            ${p.icon} ${p.name}
+          </button>
+        `).join("")}
+      </div>
+      <div style="background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span id="vn-diag-prop-desc" style="font-size: 10px; color: #94a3b8;">${PROP_TEMPLATES_CATALOG[0]?.description}</span>
+          <button id="vn-diag-copy-prop-btn" style="padding: 2px 8px; font-size: 10px; font-weight: 700; background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 4px; cursor: pointer;">
+            \uD83D\uDCCB Copy Tag
+          </button>
+        </div>
+        <div id="vn-diag-prop-preview" style="min-height: 60px;">
+          ${formatDialogueHtml(PROP_TEMPLATES_CATALOG[0]?.sampleTag || "").html}
+        </div>
+      </div>
+    `;
+    this.root.appendChild(propsCard);
+    let activeProp = PROP_TEMPLATES_CATALOG[0];
+    const diagDesc = propsCard.querySelector("#vn-diag-prop-desc");
+    const diagPreview = propsCard.querySelector("#vn-diag-prop-preview");
+    const diagCopyBtn = propsCard.querySelector("#vn-diag-copy-prop-btn");
+    propsCard.querySelectorAll(".vn-diag-prop-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const propId = btn.getAttribute("data-prop-id");
+        const found = PROP_TEMPLATES_CATALOG.find((p) => p.id === propId);
+        if (found) {
+          activeProp = found;
+          if (diagDesc)
+            diagDesc.textContent = found.description;
+          if (diagPreview)
+            diagPreview.innerHTML = formatDialogueHtml(found.sampleTag).html;
+          propsCard.querySelectorAll(".vn-diag-prop-btn").forEach((b) => {
+            b.style.background = b === btn ? "#0284c7" : "#1e293b";
+            b.style.borderColor = b === btn ? "#38bdf8" : "#475569";
+          });
+        }
+      });
+    });
+    diagCopyBtn?.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(activeProp.sampleTag).catch(() => {});
+      if (diagCopyBtn) {
+        const orig = diagCopyBtn.textContent;
+        diagCopyBtn.textContent = "✓ Copied Tag!";
+        diagCopyBtn.style.borderColor = "#10b981";
+        setTimeout(() => {
+          diagCopyBtn.textContent = orig;
+          diagCopyBtn.style.borderColor = "#38bdf8";
+        }, 1500);
+      }
+    });
     const bottomSplit = document.createElement("div");
     bottomSplit.style.cssText = "flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 220px; overflow: hidden;";
     const consoleBox = document.createElement("div");
@@ -10957,6 +11530,52 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
         </div>
       </div>
 
+      <!-- Roleplay Prop & UI Templates Card -->
+      <details class="vn-props-card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #38bdf8; border-radius: 10px; padding: 12px;">
+        <summary style="font-size: 13px; font-weight: 700; color: #38bdf8; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none;">
+          <span>\uD83C\uDFAD Roleplay Prop & UI Templates</span>
+          <span style="font-size: 10px; background: rgba(56, 189, 248, 0.2); border: 1px solid #0284c7; color: #7dd3fc; padding: 2px 6px; border-radius: 4px;">HTML/CSS Props</span>
+        </summary>
+        <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">
+          <p style="margin: 0; font-size: 11px; color: #94a3b8;">
+            Select a prop widget to inspect live game styling and copy its prompt tag:
+          </p>
+          <div id="vn-prop-tabs" style="display: flex; gap: 4px; flex-wrap: wrap;">
+            ${PROP_TEMPLATES_CATALOG.map((p, idx) => `
+              <button class="vn-prop-select-btn" data-prop-id="${p.id}" style="padding: 3px 8px; font-size: 11px; background: ${idx === 0 ? "#0284c7" : "#1e293b"}; border: 1px solid ${idx === 0 ? "#38bdf8" : "#475569"}; color: #fff; border-radius: 4px; cursor: pointer;">
+                ${p.icon} ${p.name}
+              </button>
+            `).join("")}
+          </div>
+
+          <!-- Live Preview Box -->
+          <div style="background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span id="vn-prop-desc" style="font-size: 10px; color: #94a3b8;">${PROP_TEMPLATES_CATALOG[0]?.description}</span>
+              <button id="vn-copy-prop-tag-btn" style="padding: 2px 8px; font-size: 10px; font-weight: 700; background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 4px; cursor: pointer;">
+                \uD83D\uDCCB Copy Tag
+              </button>
+            </div>
+            <div id="vn-prop-preview-container" style="min-height: 60px;">
+              ${formatDialogueHtml(PROP_TEMPLATES_CATALOG[0]?.sampleTag || "").html}
+            </div>
+          </div>
+
+          <!-- Custom Prop CSS Overrides -->
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label for="vn-custom-css-input" style="font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: uppercase;">
+                Custom Prop CSS Overrides
+              </label>
+              <button id="vn-save-custom-css-btn" style="padding: 2px 8px; font-size: 10px; background: #0284c7; border: none; color: #fff; border-radius: 4px; cursor: pointer; font-weight: 700;">
+                \uD83D\uDCBE Save CSS
+              </button>
+            </div>
+            <textarea id="vn-custom-css-input" rows="3" placeholder="/* Add custom CSS rules for .vn-prop-card or custom classes */" style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 6px; resize: vertical;"></textarea>
+          </div>
+        </div>
+      </details>
+
       <!-- Engine & Director Impact Console -->
       <div style="flex: 1; display: flex; flex-direction: column; background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; min-height: 220px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -11047,6 +11666,71 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
     if (saveBtn) {
       saveBtn.textContent = "✓ Saved!";
       setTimeout(() => saveBtn.textContent = "Save Directives", 1500);
+    }
+  });
+  let styleEl = document.getElementById("lumivn-custom-prop-styles");
+  if (!styleEl) {
+    styleEl = document.createElement("style");
+    styleEl.id = "lumivn-custom-prop-styles";
+    document.head.appendChild(styleEl);
+  }
+  let savedCustomCss = "";
+  try {
+    savedCustomCss = localStorage.getItem("lumivn_custom_prop_css") || "";
+  } catch {}
+  styleEl.textContent = `${TEXT_EFFECTS_CSS}
+${savedCustomCss}`;
+  let selectedPropDef = PROP_TEMPLATES_CATALOG[0];
+  const propDesc = root.querySelector("#vn-prop-desc");
+  const propPreview = root.querySelector("#vn-prop-preview-container");
+  const copyTagBtn = root.querySelector("#vn-copy-prop-tag-btn");
+  const customCssInput = root.querySelector("#vn-custom-css-input");
+  const saveCustomCssBtn = root.querySelector("#vn-save-custom-css-btn");
+  if (customCssInput) {
+    customCssInput.value = savedCustomCss;
+  }
+  root.querySelectorAll(".vn-prop-select-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const propId = btn.getAttribute("data-prop-id");
+      const found = PROP_TEMPLATES_CATALOG.find((p) => p.id === propId);
+      if (found) {
+        selectedPropDef = found;
+        if (propDesc)
+          propDesc.textContent = found.description;
+        if (propPreview)
+          propPreview.innerHTML = formatDialogueHtml(found.sampleTag).html;
+        root.querySelectorAll(".vn-prop-select-btn").forEach((b) => {
+          b.style.background = b === btn ? "#0284c7" : "#1e293b";
+          b.style.borderColor = b === btn ? "#38bdf8" : "#475569";
+        });
+      }
+    });
+  });
+  copyTagBtn?.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(selectedPropDef.sampleTag).catch(() => {});
+    if (copyTagBtn) {
+      const orig = copyTagBtn.textContent;
+      copyTagBtn.textContent = "✓ Copied Tag!";
+      copyTagBtn.style.borderColor = "#10b981";
+      setTimeout(() => {
+        copyTagBtn.textContent = orig;
+        copyTagBtn.style.borderColor = "#38bdf8";
+      }, 1500);
+    }
+  });
+  saveCustomCssBtn?.addEventListener("click", () => {
+    const cssVal = customCssInput?.value || "";
+    try {
+      localStorage.setItem("lumivn_custom_prop_css", cssVal);
+    } catch {}
+    if (styleEl) {
+      styleEl.textContent = `${TEXT_EFFECTS_CSS}
+${cssVal}`;
+    }
+    if (saveCustomCssBtn) {
+      const orig = saveCustomCssBtn.textContent;
+      saveCustomCssBtn.textContent = "✓ Saved!";
+      setTimeout(() => saveCustomCssBtn.textContent = orig, 1500);
     }
   });
   root.querySelector("#vn-clear-log-btn")?.addEventListener("click", () => {

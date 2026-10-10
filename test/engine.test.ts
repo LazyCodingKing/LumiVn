@@ -269,6 +269,32 @@ describe("LumiVN Rich Text & Twine Action Triggers", () => {
     expect(html).toContain('<span data-vn-text-fx="shake">Look out!</span>');
     expect(html).toContain('<span data-vn-text-fx="rainbow">gem</span>');
   });
+
+  test("parses shorthand and generic prop cards into structured game UI widgets", () => {
+    // 1. Shorthand phone prop
+    const phoneRaw = '<prop:phone from="Maya" time="23:14">Hey, meet me at midnight.</prop:phone>';
+    const phoneHtml = formatDialogueHtml(phoneRaw).html;
+    expect(phoneHtml).toContain('class="vn-prop-card vn-prop-phone"');
+    expect(phoneHtml).toContain('📱 Maya');
+    expect(phoneHtml).toContain('23:14');
+    expect(phoneHtml).toContain('Hey, meet me at midnight.');
+
+    // 2. Shorthand doc prop
+    const docRaw = '<prop:doc title="Guild Notice" seal="VERIFIED">All bounties are temporarily doubled.</prop:doc>';
+    const docHtml = formatDialogueHtml(docRaw).html;
+    expect(docHtml).toContain('class="vn-prop-card vn-prop-doc"');
+    expect(docHtml).toContain('📜 Guild Notice');
+    expect(docHtml).toContain('VERIFIED');
+    expect(docHtml).toContain('All bounties are temporarily doubled.');
+
+    // 3. Generic tv prop
+    const tvRaw = '<prop type="tv" station="K-NEWS" ticker="Substation offline">District blackout warning.</prop>';
+    const tvHtml = formatDialogueHtml(tvRaw).html;
+    expect(tvHtml).toContain('class="vn-prop-card vn-prop-tv"');
+    expect(tvHtml).toContain('K-NEWS');
+    expect(tvHtml).toContain('Substation offline');
+    expect(tvHtml).toContain('District blackout warning.');
+  });
 });
 
 import { splitParagraphIntoBeats, inferEmotionFromText, inferActionFromText } from "../src/frontend/stage/beat-splitter.js";

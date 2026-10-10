@@ -303,6 +303,21 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     // Life model & Want
     expect(html).toContain("Immediate Want:");
     expect(html).toContain("Settle into the mansion");
+
+    // Toggle portrait button exists
+    const toggleBtn = tab.root.querySelector("#vn-toggle-portrait-btn") as HTMLButtonElement;
+    expect(toggleBtn).not.toBeNull();
+    expect(toggleBtn.textContent).toContain("Show Image");
+
+    // Click toggle button -> expands full size portrait card on the left
+    toggleBtn.click();
+    expect(tab.root.innerHTML).toContain("vn-character-portrait-card");
+    const closeBtn = tab.root.querySelector("#vn-close-portrait-btn") as HTMLButtonElement;
+    expect(closeBtn).not.toBeNull();
+
+    // Click close button -> collapses portrait card
+    closeBtn.click();
+    expect(tab.root.querySelector(".vn-character-portrait-card")).toBeNull();
   });
 
   test("4. StatsTab renders cleanly without crashing on empty user relations, and displays 21-stat matrix", () => {

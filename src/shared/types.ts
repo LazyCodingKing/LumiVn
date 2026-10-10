@@ -146,6 +146,18 @@ export interface ActorDossier {
   stats?: Record<string, number | unknown>;
   voice?: string | { connectionId?: string; voice?: string; speed?: number };
   speech_style?: string;
+  somatic?: Record<string, unknown>;
+  psyche?: Record<string, unknown>;
+  habits?: Record<string, unknown>;
+  mot?: Record<string, unknown>;
+  soc?: Record<string, unknown>;
+  sec?: Record<string, unknown>;
+  vec?: Record<string, unknown>;
+  competence?: Record<string, unknown>;
+  now?: Record<string, unknown>;
+  sense?: Record<string, unknown>;
+  goal_active?: Record<string, unknown>;
+  need_active?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -158,12 +170,15 @@ export interface PlaceRoute {
 
 export interface PlaceNode {
   function?: string;
+  users?: string;
   traffic?: number;
   privacy?: number;
   visibility?: number;
   access?: string;
   norm?: string;
   rhythm?: string;
+  occ?: string;
+  cohorts?: string[];
   resources?: string[];
   indoors?: boolean;
   population?: string;

@@ -93,6 +93,27 @@ SELF-DIRECTED: Acting against own values/commitments: guilt+ by values, EMP, att
 THIRD-PARTY: Witnessed cruelty/violence/value-violation: F+ if self could be the target; R/A/disgust(conduct) by NPC values.
 SCOPE: Mutate only involved actors, those whose goal/bond/status is touched, and witnesses at LOD>=2. LOD<2 and transients appraise statelessly; write edges on promotion. Offscreen: only the two involved mutate; others learn via R/I.
 EXTREME TRAITS (obsession, jealousy, sadism, dependency, volatility): trigger -> threshold -> expression -> restraint (impulse_control/STB) -> mask. Under isolation or abuse, attachment may rise while T/A fall. Extreme traits widen passion swings (cap +50%) but never lift the BOUNDS on edges.
+
+<population>
+Population: Occ: band | basis
+Cohorts: [Nx Type@Place/activity(flux); flux = stable|entering|leaving]
+
+Who is here derives from place, time, and reasons, never from {{user}}'s presence or a wish for activity.
+LADDER (escalate only when causally necessary): COHORT = background people in \`scene_cohorts\` (Nx Type@Place/activity(stable|entering|leaving)), non-interactive. LATENT = plausible optional person not yet present. TRANSIENT = manifested person in \`transients\`. PERSISTENT = full \`cast_<Name>__*\` entry.
+PLACE PROFILE (\`place_<Name>\`; same underscore string as scene_loc), one line: function | users (who belongs; what legitimate outsiders come) | traffic 0-3 | privacy 0-3 | visibility 0-3 | access | norm | rhythm | routes | resources | disturbances | layout. Rhythm has SIX values in band order dawn,morning,midday,afternoon,evening,night using L/M/H/0, e.g. \`rhythm:L,M,H,M,L,0\`. Layout = areas as label=level,surface; connections. Derive once on first entry from setting, culture, and established facts; no stock templates. Change only by a logged cause.
+OCCUPANCY = traffic x rhythm(band), +/-1 weather/events, 0 if closed, plus persistent-NPC routines. 0=Empty, L=Quiet/Light, M=Busy, H=Crowded. Write \`Occ: band | basis\`; re-derive on band/weather change, event, arrival, departure. Empty is valid.
+LATENT (\`latent\`): id | loc | purpose | trait | need | window HH:MM-HH:MM | from | why
+purpose = reason to be here; trait = temperament/ethics/confidence typical of the setting's population (opportunists, sellers, thieves, drunks, officials where the setting supports them); need = want; from = adjacent place/route. why REQUIRED: one stored reference (profile field, rhythm band, persistent-NPC routine, cascade id, weather, adjacent destination, or a visible opening such as an empty house, an unattended target, a lone customer); never {{user}}'s presence alone or drama. No valid why = invalid.
+REFRESH ONLY ON: entering a place; time-band change; weather/event change; a persistent NPC's routine placing someone on a route here.
+CAPS by traffic: 0 -> 0-1; 1 -> 1; 2 -> 2; 3 -> 4. Unused latents expire silently. On location change delete old-place latents; return regenerates from profile and clock.
+ARRIVAL: a latent surfaces only as a selected candidate with an open window, a route passing here, an opening, and a stated reason. Max 1 new actor per beat, max 3 transients present. Persistent NPCs arrive via away/cascade.
+TRANSIENT (\`transients\`): latent fields plus attn 0/1/2 | risk L/M/H | knows | exit. It is a compact drive: purpose = Want, need = pressure, exit = Due.
+EXIT (any one): goal done; window reached; new obligation; discomfort; danger; recognition of someone; better opportunity; weather; staying is useless. STAY: a stimulus, opportunity, or obligation that fits their need and trait may replace purpose and defer the exit; write the new purpose. A PRESENT PERSISTENT NPC may also leave or turn away on a stimulus, mood, or obligation: write their away (loc | activity | ETA | lastTick) and render the departure. A departing transient with an unfinished purpose or a recurring routine becomes an arrival/appointment cascade (seed = its id); otherwise delete it.
+PROMOTION to persistent when one holds: second interaction in a distinct scene; relationship change; cascade-linked secret; drive Due outliving exit; {{user}} actively seeks them. Name or pleasant chat alone is not promotion.
+ATTENTION: an actor notices a stimulus only if REACH (line of sight, earshot, light, noise masking, facing) AND DRAW (salience, novelty, or need match exceeds absorption). T2/T3 in reach are always noticed. Not noticed = no reaction, and narration must not treat them as aware.
+AUDIENCE SHIFT: arrival/departure/new attention makes actors with pending optional acts re-evaluate Cost (continue, retreat, reword, conceal, delay, leave).
+ENVIRONMENT: STATE -> AFFORDANCE -> ACTOR INTERACTION -> CONSEQUENCE. Props and portals are stored state (prop_<Name>, portal_<Name>) and may carry an owner or linked drive; a prop records its holder and hand. Weather, wetness, dirt, injury, noise, and smell attach only through stored state or a caused event; outside conditions reach an interior only as far as a portal or wall lets them. Weather is stored in env_weather and changes only by a logged cause or an AMBIENT event.
+</population>
 </stat_rules>`;
 
 export const DEFAULT_LEDGER_PROMPT = `LEDGER (after prose; authoritative world state):
@@ -107,7 +128,7 @@ export const DEFAULT_LEDGER_PROMPT = `LEDGER (after prose; authoritative world s
   * Journal: only the new event(s) from THIS reply (\`EVT-n\`); never reprint past records.
   * Actors with no state or gear shift this turn: omit dossier entirely.
 3. Props exist in exactly one place (hand slot, container, or local \`places.resources\`); transfers are zero-sum.
-4. Place keys MUST be \`<unique_scope_name>:<room>\` (e.g. \`tendo_residence:kitchen\`, \`nerima_high:classroom_2a\`) so backgrounds map without room-name collisions.
+4. Place keys MUST be prefixed with scope markers: use '@common:<name>' or '@public:<name>' for shared, town, or public places (e.g. '@public:district_square', '@common:tavern_hearth'), and '@<scope>:<room>' for private or enclosed premises (e.g. '@mansion:kitchen', '@nerima_high:classroom_2a'). This prevents background collision and distinguishes public zones from private quarters.
 5. ALWAYS EMIT: clock, scene, roster, journal, open opportunities, bplots (\`id\` + changed fields only; ripple, status, due, carrier changes count as changed).
 6. DIRECTOR INTEGRATION: Record each Director SEED once, as an NPC dossier stub, bplot, front, or world.facts line, then continue it from the ledger. On 'PROMOTE: id', raise that NPC to LOD 3, write a full dossier with edges starting at 0 toward {{user}}, and update the roster. Write journal memories and grudges into the NPC's dossier so the Response Gate can read them next turn. When a place is first entered or has resources: [], seed places.resources with 3-6 ordinary objects that fit its function, era, and setting (one large fixture, one small portable item, one item an inhabitant would use), with no plot value unless a ledger cause supports it. Add any fixture contents the Director gives in CANON to places.resources. Props exist in one place only; moves and consumption are zero-sum.
 
@@ -143,21 +164,21 @@ init: complete or pending
 
 \`\`\`yaml
 places:
-  scope:place_id:
-    function:
+  "@scope:place_id": # e.g. @common:district_plaza or @mansion:kitchen
+    function: "Primary social or functional role"
+    users: "Who belongs here and legitimate outsiders"
     traffic: 0-3
     privacy: 0-3
     visibility: 0-3
-    access:
-    norm:
-    rhythm:
+    access: "open | restricted | locked"
+    norm: "Formal | Casual | Sacred | Dangerous | Private"
+    rhythm: "L,M,H,M,L,0" # 6 bands: dawn, morning, midday, afternoon, evening, night
+    occ: "band | basis" # e.g. "M | lunch rush", "0 | closed"
+    cohorts: [] # background crowd: ["3x Commuter@Platform/waiting(stable)"]
     resources: []
-    population:
-    hazards:
-    barriers:
     affordances: []
     routes:
-      - { to: "scope:place_id", minutes: 5 }
+      - { to: "@scope:place_id", minutes: 5 }
 travel:
   - { actor: "", purpose: "", from: "", to: "", depart: "", eta: "", status: "" }
 \`\`\`
@@ -166,7 +187,7 @@ travel:
 
 \`\`\`yaml
 roster:
-  - { id: "actor_id", name: "Display Name", lod: 3, status: "Active", loc: "scope:place_id", record: "full", tick: 1 }
+  - { id: "actor_id", name: "Display Name", lod: 3, status: "Active", loc: "@scope:place_id", record: "full", tick: 1 }
 \`\`\`
 
 ## Actor dossiers
@@ -186,25 +207,50 @@ user:
   combat: { tier: 1, lv: 1, exp: "0/100", hp: "100/100", mp: "50/50", eff_pwr: 15, eff_agi: 15, pwr: 15, agi: 15, int: 10, talent: [] }
   passions: { anger: 0, shame: 0, arousal: 0, fear: 0, stress: 0, pain: 0, exhaustion: 0, suspicion: 0, disgust: 0, sadness: 0, guilt: 0, joy: 10 }
   outfit: { top: "t-shirt", bottom: "jeans", underwear_top: "none", underwear_bottom: "boxers", shoes: "sneakers", accessories: [], state: "clean" }
-  inventory: { in_hand: { L: "Empty", R: "Empty" }, carried: [], room: [], room_location: "user_residence:bedroom" }
+  inventory: { in_hand: { L: "Empty", R: "Empty" }, carried: [], room: [], room_location: "@user_residence:bedroom" }
   agency:
     want_now: "explore area"
 
 actor_id:
   name: "Actor Name"
-  appearance: {age: , traits: , appeal: 0-100, style: , condition: }
-  money: {in_hand: 0, in_bank: 0, currency: "$"}
-  combat: {tier: 1-10, lv: 0-10, exp: "0/100", hp: "cur/max", mp: "cur/max", eff_pwr: , eff_agi: , pwr: , agi: , int: , talent: []}
-  life_model: { orientation: "pansexual", romantic_history: "none", upbringing: "strict", family: [], occupation: "student", residence: "tendo_residence:room", routines: [["morning", "tea", "tendo_residence:kitchen", "07:00"]], worldview: "stoic", self_concept: "competent" }
+  voice: "" # host TTS voice tag or connection
+  speech_style: ""
+  appearance: { age: 18, traits: "", appeal: 0-100, style: "", condition: "" }
+  somatic: { face: "[features]", wound: "[scar→origin→somatic]", sensory: "[gating/limits]", cycles: "[metabolism/vulnerabilities]", instincts: "[primal drives]" }
+  psyche:
+    ethos: "[type]"
+    worldview: "[axiom]"
+    self_story: "[self-belief]"
+    misbelief: "[misbelief]"
+    blindspot: "[blindspot]"
+    contradictions: "[A↔B; C↔D]"
+    mask: { pub: "[persona]", priv: "[intimate]", deep: "[truth]" }
+    drv: { want: "[goal]", need: "[requirement]", fear: "[dread]" }
+    patience: { erosion: "[triggers]", warn: "[tell]", break: "[at zero]", recov: "[method+duration]" }
+    coping: { prim: "[type]", sec: "[fallback]" }
+    comp: 0-100
+  habits: { hab: "[trigger→behavior→cost]", pol: ["[trigger→tendency]"] }
+  trauma: { origin: "[event]", fear: "[dread]", cascade: "[behaviors]" }
+  mot: { goal: "[obj]", want: "[desire]", amb: "[Step1→Step2→Terminal]", hard: "[refusal]", soft: "[negotiable]", ceil: "[ceiling]", break: "[shatter trigger]", praise: "[yield trigger]", tempt: "[vice hook]" }
+  soc: { reg: { up: "[superior]", peer: "[equal]", down: "[subordinate]", stranger: "[unknown]" }, disgust: "[stimulus→contempt]", dependents: [], allegiance: "[faction|depth]", asset: "[leverage]" }
+  sec: { fact: "[truth]", cover: "[story]", holder: [], risk: 0-5, lev: "[target→asset→cost]" }
+  vec: { E: "[Ethos]", C: "[Coping]", A: "[Attachment]", D: "[Dynamic]" }
+  competence: { master: ["[stress-immune skills]"], journeyman: ["[panic-degraded]"], novice: ["[stress-collapsing]"] }
+  now: { urge: "[impulse]", def: "[coping defense]", mask: "[active persona]", focus: "[attention target]", thought: "[internal assessment]", action: "[movement/positioning]", spoken: "[dialogue per voice/register]" }
+  sense: { focus: "[stimulus]", gaze: "Av|Lk|Co|Gl", load: "N|M|H" }
+  goal_active: { task: "[obj]", step: "1/3", act: "[action]", preocc: "[concern]", plan: "[next]" }
+  need_active: { drive: "Want:[motive]→Plan:[method]→Progress:[status]", conflict: "Opp:[target]|Stakes:[lvl]|Threat:[0–5]", instinct: "Core:[archetype]|Trigger:[trigger]|State:[state]", override: 0, impulse: "[urge]" }
+  money: { in_hand: 0, in_bank: 0, currency: "$" }
+  combat: { tier: 1-10, lv: 0-10, exp: "0/100", hp: "cur/max", mp: "cur/max", eff_pwr: 15, eff_agi: 15, pwr: 15, agi: 15, int: 10, talent: [] }
+  life_model: { orientation: "pansexual", romantic_history: "none", upbringing: "strict", family: [], occupation: "student", residence: "@tendo_residence:room", routines: [["morning", "tea", "@tendo_residence:kitchen", "07:00"]], worldview: "stoic", self_concept: "competent" }
   wounds: { physical: [], psychological: [] }
-  trauma: []
   passions: { anger: 0, shame: 0, arousal: 0, fear: 0, stress: 10, pain: 0, exhaustion: 0, suspicion: 15, disgust: 0, sadness: 0, guilt: 0, joy: 5 }
   constraints: ""
-  outfit: {top: , bottom: , underwear_top: , underwear_bottom: , shoes: , accessories: [], state: }
-  inventory: {in_hand: {L: "Empty", R: "Empty"}, carried: [], room: [], room_location: ""}
- profile:
+  outfit: { top: "", bottom: "", underwear_top: "", underwear_bottom: "", shoes: "", accessories: [], state: "" }
+  inventory: { in_hand: { L: "Empty", R: "Empty" }, carried: [], room: [], room_location: "" }
+  profile:
     public_roles: []
-    dispositions: {risk: , assertiveness: , empathy: , impulse_control: , curiosity: , sociability: , status_sensitivity: , acquisitiveness: , persistence: }
+    dispositions: { risk: 50, assertiveness: 50, empathy: 50, impulse_control: 50, curiosity: 50, sociability: 50, status_sensitivity: 50, acquisitiveness: 50, persistence: 50 }
     capabilities: {}
     values: []
     self_concept: []
@@ -212,15 +258,15 @@ actor_id:
     red_lines: []
     defense: ""
     blind_spot: ""
-    tells: {lying: "", hurt: "", shame: ""}
+    tells: { lying: "", hurt: "", shame: "" }
     stress_default:
-  state: {condition: , needs: {name: urgency}, affect: {valence: , arousal: , control: , episodes: []}, resources: {}}
+  state: { condition: "", needs: {}, affect: { valence: 0, arousal: 0, control: 0, episodes: [] }, resources: {} }
   agency:
-    goals: [id, intent, priority, commitment, deadline, cause, progress, status]
-    plans: [goal, steps, now, preconditions, revisions]
-    policies: [id, when, effects, strength, origin]
+    goals: []
+    plans: []
+    policies: []
     commitments: []
-    want_now: want (source, cost)
+    want_now: "want (source, cost)"
   relations:
     user: { affinity: 0, trust: 0, respect: 0, attraction: 0, grudge: 0, fear: 0, familiarity: 0, attachment: 0, loyalty: 0, sacrifice_willingness: 0, betrayal_threshold: 50, shared_secrets: [], leverage: [], grievances: [], obligations: [] }
   knowledge:

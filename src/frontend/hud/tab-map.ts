@@ -202,11 +202,11 @@ export class MapTab {
 
   private renderIndoorSvg(group: SVGGElement, ledger: LedgerData, currentPlace: string): void {
     const scopePrefix = currentPlace.includes(":") ? currentPlace.split(":")[0]! : "building";
-    const currentRoom = currentPlace.includes(":") ? currentPlace.split(":")[1]! : currentPlace;
+    const currentRoom = currentPlace.replace(/^@/, "").includes(":") ? currentPlace.replace(/^@/, "").split(":")[1]! : currentPlace.replace(/^@/, "");
 
     // Collect rooms
     const knownPlaces = Object.keys(ledger.places || {});
-    const indoorKeys = knownPlaces.filter((p) => p.startsWith(`${scopePrefix}:`) || !p.includes(":"));
+    const indoorKeys = knownPlaces.filter((p) => p.replace(/^@/, "").startsWith(`${scopePrefix}:`) || !p.includes(":"));
     const rawKeys = indoorKeys.length > 0
       ? indoorKeys
       : ["entrance", "living_room", "kitchen", "hallway", "bedroom", "courtyard", "bathroom"];
@@ -231,7 +231,7 @@ export class MapTab {
     const startY = 40;
 
     rawKeys.forEach((key, idx) => {
-      const clean = key.includes(":") ? key.split(":")[1]! : key;
+      const clean = key.replace(/^@/, "").includes(":") ? key.replace(/^@/, "").split(":")[1]! : key.replace(/^@/, "");
       const c = idx % cols;
       const r = Math.floor(idx / cols);
       layouts.push({
@@ -501,19 +501,20 @@ export class MapTab {
   private renderSidebar(sidebar: HTMLElement, ledger: LedgerData, currentPlace: string): void {
     sidebar.innerHTML = "";
     const selected = this.selectedNodeId || currentPlace;
-    const cleanName = selected.includes(":") ? selected.split(":")[1]! : selected;
+    const cleanName = selected.replace(/^@/, "").includes(":") ? selected.replace(/^@/, "").split(":")[1]! : selected.replace(/^@/, "");
     const placeConfig = (ledger.places?.[selected] || {}) as PlaceNode;
     const isHere = selected.toLowerCase() === currentPlace.toLowerCase() || cleanName.toLowerCase() === currentPlace.toLowerCase();
 
     // Check routing gating
     const currentRoutes = (ledger.places?.[currentPlace]?.routes || []) as PlaceRoute[];
-    const route = currentRoutes.find((r) => typeof r === "object" && (r.to === selected || r.to === cleanName));
+    const route = currentRoutes.find((r) => typeof r === "object" && (r.to === selected || r.to === cleanName || (typeof r.to === "string" && r.to.replace(/^@/, "") === cleanName)));
     const isGated = Boolean(route?.why_not || (route?.requires && Object.keys(route.requires).length > 0));
     const whyNot = route?.why_not;
 
     const placeThumbnail =
       this.manifest?.places?.[selected] ||
       this.manifest?.places?.[cleanName] ||
+      this.manifest?.places?.[selected.replace(/^@/, "")] ||
       this.manifest?.places?.[selected.toLowerCase()] ||
       this.manifest?.places?.[cleanName.toLowerCase()] ||
       "";
@@ -580,10 +581,24 @@ export class MapTab {
           <span style="color: #94a3b8;">Visibility:</span>
           <span>${placeConfig.visibility ?? "—"}</span>
         </div>
+        ${placeConfig.occ ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Occupancy:</span>
+            <span style="color: #38bdf8; font-weight: 600;">${placeConfig.occ}</span>
+          </div>
+        ` : ''}
         ${placeConfig.population ? `
           <div style="display: flex; justify-content: space-between;">
             <span style="color: #94a3b8;">Population:</span>
             <span>${placeConfig.population}</span>
+          </div>
+        ` : ''}
+        ${Array.isArray(placeConfig.cohorts) && placeConfig.cohorts.length > 0 ? `
+          <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 2px;">
+            <span style="color: #94a3b8;">Active Cohorts:</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 3px;">
+              ${placeConfig.cohorts.map((c: string) => `<span style="background: rgba(148, 163, 184, 0.15); border: 1px solid #475569; padding: 1px 5px; border-radius: 4px; font-size: 10px; color: #cbd5e1;">👥 ${c}</span>`).join("")}
+            </div>
           </div>
         ` : ''}
       </div>

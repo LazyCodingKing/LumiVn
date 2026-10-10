@@ -1,6 +1,7 @@
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { LedgerData, AssetManifest, StatRulesSettings } from "../../shared/types.js";
 import { diagBus, type LogEntry } from "../utils/diag-bus.js";
+import { PROP_TEMPLATES_CATALOG, formatDialogueHtml } from "../stage/rich-text.js";
 
 export class DiagnosticsTab {
   public root: HTMLElement;
@@ -258,6 +259,72 @@ export class DiagnosticsTab {
         saveRulesBtn.textContent = "✓ Saved!";
         setTimeout(() => {
           saveRulesBtn.textContent = orig;
+        }, 1500);
+      }
+    });
+
+    // Dedicated Roleplay Prop & UI Templates Card
+    const propsCard = document.createElement("div");
+    propsCard.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;";
+    propsCard.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <strong style="color: #38bdf8; font-size: 13px;">🎭 Roleplay Prop & UI Templates</strong>
+        <span style="font-size: 10px; background: rgba(56, 189, 248, 0.2); border: 1px solid #0284c7; color: #7dd3fc; padding: 2px 6px; border-radius: 4px;">HTML/CSS Props</span>
+      </div>
+      <p style="margin: 0; font-size: 11px; color: #94a3b8;">
+        Inspect game-style prop widgets and copy standard tags for prose & Director notes:
+      </p>
+      <div id="vn-diag-prop-tabs" style="display: flex; gap: 4px; flex-wrap: wrap;">
+        ${PROP_TEMPLATES_CATALOG.map((p, idx) => `
+          <button class="vn-diag-prop-btn" data-prop-id="${p.id}" style="padding: 3px 8px; font-size: 11px; background: ${idx === 0 ? "#0284c7" : "#1e293b"}; border: 1px solid ${idx === 0 ? "#38bdf8" : "#475569"}; color: #fff; border-radius: 4px; cursor: pointer;">
+            ${p.icon} ${p.name}
+          </button>
+        `).join("")}
+      </div>
+      <div style="background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span id="vn-diag-prop-desc" style="font-size: 10px; color: #94a3b8;">${PROP_TEMPLATES_CATALOG[0]?.description}</span>
+          <button id="vn-diag-copy-prop-btn" style="padding: 2px 8px; font-size: 10px; font-weight: 700; background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 4px; cursor: pointer;">
+            📋 Copy Tag
+          </button>
+        </div>
+        <div id="vn-diag-prop-preview" style="min-height: 60px;">
+          ${formatDialogueHtml(PROP_TEMPLATES_CATALOG[0]?.sampleTag || "").html}
+        </div>
+      </div>
+    `;
+    this.root.appendChild(propsCard);
+
+    let activeProp = PROP_TEMPLATES_CATALOG[0]!;
+    const diagDesc = propsCard.querySelector("#vn-diag-prop-desc") as HTMLElement | null;
+    const diagPreview = propsCard.querySelector("#vn-diag-prop-preview") as HTMLElement | null;
+    const diagCopyBtn = propsCard.querySelector("#vn-diag-copy-prop-btn") as HTMLButtonElement | null;
+
+    propsCard.querySelectorAll(".vn-diag-prop-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const propId = btn.getAttribute("data-prop-id");
+        const found = PROP_TEMPLATES_CATALOG.find((p) => p.id === propId);
+        if (found) {
+          activeProp = found;
+          if (diagDesc) diagDesc.textContent = found.description;
+          if (diagPreview) diagPreview.innerHTML = formatDialogueHtml(found.sampleTag).html;
+          propsCard.querySelectorAll(".vn-diag-prop-btn").forEach((b) => {
+            (b as HTMLElement).style.background = b === btn ? "#0284c7" : "#1e293b";
+            (b as HTMLElement).style.borderColor = b === btn ? "#38bdf8" : "#475569";
+          });
+        }
+      });
+    });
+
+    diagCopyBtn?.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(activeProp.sampleTag).catch(() => {});
+      if (diagCopyBtn) {
+        const orig = diagCopyBtn.textContent;
+        diagCopyBtn.textContent = "✓ Copied Tag!";
+        diagCopyBtn.style.borderColor = "#10b981";
+        setTimeout(() => {
+          diagCopyBtn.textContent = orig;
+          diagCopyBtn.style.borderColor = "#38bdf8";
         }, 1500);
       }
     });
