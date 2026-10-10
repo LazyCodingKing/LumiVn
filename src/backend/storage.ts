@@ -1,9 +1,17 @@
 import type { SpindleAPI } from "lumiverse-spindle-types";
-import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry } from "../shared/types.js";
+import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry, StatRulesSettings } from "../shared/types.js";
+import { DEFAULT_STAT_RULES, DEFAULT_LEDGER_PROMPT } from "./default-rules.js";
 
 const DEFAULT_MANIFEST: AssetManifest = {
   places: {},
   characters: {},
+};
+
+export const DEFAULT_STAT_RULES_SETTINGS: StatRulesSettings = {
+  statRules: DEFAULT_STAT_RULES,
+  ledgerPrompt: DEFAULT_LEDGER_PROMPT,
+  enabled: true,
+  mode: "mvu_quiet",
 };
 
 export const DEFAULT_DIRECTOR_SETTINGS: DirectorSettings = {
@@ -46,6 +54,7 @@ export class StorageManager {
   private manifestDirty = false;
   private chatStateCache: Map<string, LedgerData> = new Map();
   private directorSettingsCache: DirectorSettings | null = null;
+  private statRulesSettingsCache: StatRulesSettings | null = null;
 
   constructor(spindle: SpindleAPI) {
     this.spindle = spindle;
@@ -250,6 +259,32 @@ export class StorageManager {
       await this.spindle.storage.write("director_settings.json", JSON.stringify(settings, null, 2));
     } catch (e) {
       console.error("[LumiVN] Failed to save director_settings.json:", e);
+    }
+  }
+
+  // ── Stat Rules & Ledger Settings ──
+
+  async getStatRulesSettings(): Promise<StatRulesSettings> {
+    if (this.statRulesSettingsCache) return this.statRulesSettingsCache;
+    try {
+      if (await this.spindle.storage.exists("stat_rules_settings.json")) {
+        const raw = await this.spindle.storage.read("stat_rules_settings.json");
+        this.statRulesSettingsCache = { ...DEFAULT_STAT_RULES_SETTINGS, ...JSON.parse(raw) };
+        return this.statRulesSettingsCache;
+      }
+    } catch (e) {
+      console.warn("[LumiVN] Failed to read stat_rules_settings.json, using defaults:", e);
+    }
+    this.statRulesSettingsCache = { ...DEFAULT_STAT_RULES_SETTINGS };
+    return this.statRulesSettingsCache;
+  }
+
+  async saveStatRulesSettings(settings: StatRulesSettings): Promise<void> {
+    this.statRulesSettingsCache = settings;
+    try {
+      await this.spindle.storage.write("stat_rules_settings.json", JSON.stringify(settings, null, 2));
+    } catch (e) {
+      console.error("[LumiVN] Failed to save stat_rules_settings.json:", e);
     }
   }
 

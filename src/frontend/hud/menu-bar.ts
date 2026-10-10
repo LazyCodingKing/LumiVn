@@ -91,7 +91,7 @@ export class MenuBar {
     this.phoneTab = new PhoneTab(options.ctx, options.onAction, options.isOverlayActive);
     this.journalTab = new JournalTab();
     this.sceneTab = new SceneTab(options.ctx, options.onTransformChange);
-    this.diagnosticsTab = new DiagnosticsTab();
+    this.diagnosticsTab = new DiagnosticsTab(options.ctx);
 
     // Render bar buttons
     const barItems: Array<{ id: HudTabId; icon: string; label: string }> = [
@@ -164,6 +164,10 @@ export class MenuBar {
     if (this.activeTabId === "characters" || this.activeTabId === "scene") {
       this.renderActiveTab();
     }
+  }
+
+  public setStatRulesSettings(settings: any): void {
+    this.diagnosticsTab.setStatRulesSettings(settings);
   }
 
   public openTab(tabId: HudTabId): void {

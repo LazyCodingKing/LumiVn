@@ -370,4 +370,16 @@ export interface DiagnosticData {
   bgUrl: string;
 }
 
+export interface StatRulesSettings {
+  statRules: string;
+  ledgerPrompt: string;
+  enabled: boolean;
+  mode: "mvu_quiet" | "inline_interceptor" | "passive";
+}
+
+export interface StatRulesSettingsPayload {
+  type: "vn_stat_rules_settings";
+  settings: StatRulesSettings;
+}
+
 

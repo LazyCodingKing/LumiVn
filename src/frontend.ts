@@ -253,6 +253,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       }
     } else if (payload.type === "vn_director_note" && payload.data) {
       diagBus.setDirectorNote(payload.data as any);
+    } else if (payload.type === "vn_stat_rules_settings" && payload.settings) {
+      overlay.setStatRulesSettings(payload.settings as any);
     } else if (payload.type === "vn_director_settings" && payload.settings) {
       diagDrawer?.setDirectorSettings(payload.settings as any);
     } else if (payload.type === "vn_director_log" && payload.log) {

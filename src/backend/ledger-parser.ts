@@ -73,15 +73,15 @@ export function detectSpeaker(paragraph: string, defaultSpeaker = "Narrator"): {
 export function extractLedgerRaw(rawContent: string): string | null {
   if (!rawContent) return null;
 
-  const matches: string[] = [];
+  // 1. Try closed details blocks, prioritizing the ledger/state block
+  const closedMatches: string[] = [];
   let m: RegExpExecArray | null;
   DETAILS_BLOCK_EXTRACT_RE.lastIndex = 0;
   while ((m = DETAILS_BLOCK_EXTRACT_RE.exec(rawContent)) !== null) {
-    if (m[1]) matches.push(m[1]);
+    if (m[1]) closedMatches.push(m[1]);
   }
 
-  // Prioritize block containing state indicators
-  for (const block of matches) {
+  for (const block of closedMatches) {
     if (
       block.includes("actors:") ||
       block.includes("scene:") ||
@@ -89,27 +89,29 @@ export function extractLedgerRaw(rawContent: string): string | null {
       block.includes("passions:") ||
       block.includes("combat:") ||
       block.includes("relations:") ||
-      block.includes("world:")
+      block.includes("world:") ||
+      block.includes("places:") ||
+      block.includes("alethea:") ||
+      block.includes("```yaml") ||
+      block.includes("```yml")
     ) {
       return block.replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
     }
   }
 
-  // Second pass: any details block containing a yaml codefence
-  for (const block of matches) {
-    if (block.includes("```yaml") || block.includes("```yml")) {
-      return block.replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
-    }
-  }
-
-  // Fallback if details exist but didn't hit keywords (and not pure director note)
-  if (matches.length > 0) {
-    const candidate = matches[matches.length - 1]!;
+  // 2. If no specific keywords matched but closed details exist
+  if (closedMatches.length > 0) {
+    const candidate = closedMatches[closedMatches.length - 1]!;
     if (!candidate.includes("director_note")) {
       return candidate.replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
     }
   }
 
+  // 3. Fallback for truncated/unclosed details
+  const openMatch = rawContent.match(/<details\b[^>]*>([\s\S]*)$/i);
+  if (openMatch && openMatch[1]) {
+    return openMatch[1].replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
+  }
   return null;
 }
 
@@ -237,6 +239,37 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
     Object.assign(actors, combined.actors);
   }
 
+  // Player Template String Extraction
+  const loadoutMatch = rawLedgerText.match(/Loadout:\s*L:\[(.*?)\]\s*R:\[(.*?)\]\s*│\s*Pkt:\[(.*?)\]\s*│\s*Bnk:\[(.*?)\]\s*│\s*Carried:\[(.*?)\]/i);
+  if (loadoutMatch) {
+    if (!actors["user"]) actors["user"] = { id: "user" };
+    if (!actors["user"].inventory) actors["user"].inventory = {};
+    actors["user"].inventory.in_hand = { L: loadoutMatch[1], R: loadoutMatch[2] };
+    actors["user"].inventory.carried = loadoutMatch[5] ? loadoutMatch[5].split(",").map(s => s.trim()) : [];
+  }
+  const attireMatch = rawLedgerText.match(/Attire:\s*Top:\[(.*?)\]\s*Bot:\[(.*?)\]\s*UW:\[(.*?)\]\/\[(.*?)\]\s*Shoes:\[(.*?)\]\s*Cond:\[(.*?)\]/i);
+  if (attireMatch) {
+    if (!actors["user"]) actors["user"] = { id: "user" };
+    actors["user"].outfit = {
+      top: attireMatch[1],
+      bottom: attireMatch[2],
+      underwear_top: attireMatch[3],
+      underwear_bottom: attireMatch[4],
+      shoes: attireMatch[5],
+      state: attireMatch[6]
+    };
+  }
+
+  // Normalize 21-Stat Network
+  for (const [key, val] of Object.entries(actors)) {
+    const anyVal = val as any;
+    if (anyVal["Relationship Network"]?.stats) {
+      anyVal.stats = { ...(anyVal.stats || {}), ...anyVal["Relationship Network"].stats };
+    } else if (anyVal.relationship_network?.stats) {
+      anyVal.stats = { ...(anyVal.stats || {}), ...anyVal.relationship_network.stats };
+    }
+  }
+
   const result: Partial<LedgerData> = {
     world: combined.world as Record<string, unknown> | undefined,
     clock: combined.clock as LedgerData["clock"] | undefined,
@@ -290,34 +323,60 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
     actors: { ...base.actors },
     bplots: delta.bplots && delta.bplots.length > 0 ? delta.bplots : base.bplots || [],
     opportunities: delta.opportunities && delta.opportunities.length > 0 ? delta.opportunities : base.opportunities || [],
-    journal: [...(base.journal || []), ...(delta.journal || [])],
+    journal: [],
   };
+
+  const existingJournal = base.journal || [];
+  const newJournal = delta.journal || [];
+  const journalMap = new Map<string, JournalEntry>();
+  existingJournal.forEach(e => journalMap.set(e.id, e));
+  newJournal.forEach(e => journalMap.set(e.id, e));
+  merged.journal = Array.from(journalMap.values());
 
   if (delta.actors) {
     for (const [actorId, actorDelta] of Object.entries(delta.actors)) {
       const baseActor = base.actors?.[actorId] || {};
+
+      // Deep merge relations per target
+      const mergedRelations = { ...(baseActor.relations || {}) };
+      if (actorDelta.relations) {
+        for (const [tgt, rData] of Object.entries(actorDelta.relations)) {
+          mergedRelations[tgt] = {
+            ...(mergedRelations[tgt] || {}),
+            ...(rData as any)
+          };
+        }
+      }
+
       merged.actors![actorId] = {
         ...baseActor,
         ...actorDelta,
         appearance: { ...baseActor.appearance, ...actorDelta.appearance },
         money: { ...baseActor.money, ...actorDelta.money },
         passions: { ...baseActor.passions, ...actorDelta.passions },
+        combat: { ...baseActor.combat, ...actorDelta.combat },
+        life_model: { ...baseActor.life_model, ...actorDelta.life_model },
+        profile: { ...baseActor.profile, ...actorDelta.profile },
+        agency: { ...baseActor.agency, ...actorDelta.agency },
+        knowledge: { ...baseActor.knowledge, ...actorDelta.knowledge },
+        stats: { ...baseActor.stats, ...actorDelta.stats },
+        wounds: { ...baseActor.wounds, ...actorDelta.wounds },
         outfit: {
           ...baseActor.outfit,
           ...actorDelta.outfit,
           accessories: actorDelta.outfit?.accessories || baseActor.outfit?.accessories || [],
           scent: actorDelta.outfit?.scent !== undefined ? actorDelta.outfit.scent : baseActor.outfit?.scent,
           residue: actorDelta.outfit?.residue !== undefined ? actorDelta.outfit.residue : (baseActor.outfit?.residue || []),
-          integrity: actorDelta.outfit?.integrity !== undefined ? actorDelta.outfit.integrity : (baseActor.outfit?.integrity ?? 100),
+          integrity: actorDelta.outfit?.integrity !== undefined ? actorDelta.outfit.integrity : (baseActor.outfit?.integrity ?? 100)
         },
         inventory: {
           ...baseActor.inventory,
           ...actorDelta.inventory,
           in_hand: { ...baseActor.inventory?.in_hand, ...actorDelta.inventory?.in_hand },
           carried: actorDelta.inventory?.carried || baseActor.inventory?.carried || [],
-          room: actorDelta.inventory?.room || baseActor.inventory?.room || [],
+          room: actorDelta.inventory?.room || baseActor.inventory?.room || []
         },
-        relations: { ...baseActor.relations, ...actorDelta.relations },
+        relations: mergedRelations,
       };
     }
   }

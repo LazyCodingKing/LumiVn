@@ -8307,13 +8307,28 @@ var diagBus = new DiagnosticBus;
 // src/frontend/hud/tab-diagnostics.ts
 class DiagnosticsTab {
   root;
+  ctx;
   currentLedger = {};
   currentManifest;
   activeFilter = "all";
   unsubscribeBus;
-  constructor() {
+  statRulesSettings = null;
+  constructor(ctx) {
+    this.ctx = ctx;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-diagnostics";
+  }
+  setStatRulesSettings(settings) {
+    this.statRulesSettings = settings;
+    const modeSelect = this.root.querySelector("#vn-mvu-mode-select");
+    const rulesInput = this.root.querySelector("#vn-stat-rules-input");
+    const ledgerInput = this.root.querySelector("#vn-ledger-prompt-input");
+    if (modeSelect)
+      modeSelect.value = settings.mode;
+    if (rulesInput)
+      rulesInput.value = settings.statRules;
+    if (ledgerInput)
+      ledgerInput.value = settings.ledgerPrompt;
   }
   render(ledger, manifest) {
     this.currentLedger = ledger;
@@ -8486,6 +8501,60 @@ ${note.directorNote}`;
       </div>
     `;
     this.root.appendChild(directorCard);
+    const rulesCard = document.createElement("div");
+    rulesCard.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;";
+    rulesCard.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <strong style="color: #38bdf8; font-size: 13px;">⚖️ Stat Rules & MVU Ledger Config</strong>
+        <select id="vn-mvu-mode-select" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 2px 6px; font-size: 11px;">
+          <option value="mvu_quiet">MVU Mode (Quiet LLM Evaluator)</option>
+          <option value="inline_interceptor">Inline Mode (Prompt Injection)</option>
+          <option value="passive">Passive Mode (Parse only)</option>
+        </select>
+      </div>
+      <label style="font-size: 10px; color: #94a3b8;">Stat Rules Formulation:</label>
+      <textarea id="vn-stat-rules-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema:</label>
+      <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      <div style="display:flex; justify-content:flex-end;">
+        <button id="vn-save-rules-btn" style="background: #0284c7; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; font-size: 11px; font-weight: 700; cursor: pointer;">\uD83D\uDCBE Save & Update Rules</button>
+      </div>
+    `;
+    this.root.appendChild(rulesCard);
+    const modeSelect = rulesCard.querySelector("#vn-mvu-mode-select");
+    const rulesInput = rulesCard.querySelector("#vn-stat-rules-input");
+    const ledgerInput = rulesCard.querySelector("#vn-ledger-prompt-input");
+    const saveRulesBtn = rulesCard.querySelector("#vn-save-rules-btn");
+    if (this.statRulesSettings) {
+      if (modeSelect)
+        modeSelect.value = this.statRulesSettings.mode;
+      if (rulesInput)
+        rulesInput.value = this.statRulesSettings.statRules;
+      if (ledgerInput)
+        ledgerInput.value = this.statRulesSettings.ledgerPrompt;
+    } else {
+      this.ctx?.sendToBackend?.({ type: "vn_get_stat_rules_settings" });
+    }
+    saveRulesBtn?.addEventListener("click", () => {
+      const updated = {
+        mode: modeSelect?.value || "mvu_quiet",
+        statRules: rulesInput?.value || "",
+        ledgerPrompt: ledgerInput?.value || "",
+        enabled: true
+      };
+      this.statRulesSettings = updated;
+      this.ctx?.sendToBackend?.({
+        type: "vn_save_stat_rules_settings",
+        settings: updated
+      });
+      if (saveRulesBtn) {
+        const orig = saveRulesBtn.textContent;
+        saveRulesBtn.textContent = "✓ Saved!";
+        setTimeout(() => {
+          saveRulesBtn.textContent = orig;
+        }, 1500);
+      }
+    });
     const bottomSplit = document.createElement("div");
     bottomSplit.style.cssText = "flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 220px; overflow: hidden;";
     const consoleBox = document.createElement("div");
@@ -8636,7 +8705,7 @@ class MenuBar {
     this.phoneTab = new PhoneTab(options.ctx, options.onAction, options.isOverlayActive);
     this.journalTab = new JournalTab;
     this.sceneTab = new SceneTab(options.ctx, options.onTransformChange);
-    this.diagnosticsTab = new DiagnosticsTab;
+    this.diagnosticsTab = new DiagnosticsTab(options.ctx);
     const barItems = [
       { id: "characters", icon: "\uD83D\uDC65", label: "Cast" },
       { id: "bplots", icon: "\uD83D\uDCE1", label: "B-Plots" },
@@ -8698,6 +8767,9 @@ class MenuBar {
     if (this.activeTabId === "characters" || this.activeTabId === "scene") {
       this.renderActiveTab();
     }
+  }
+  setStatRulesSettings(settings) {
+    this.diagnosticsTab.setStatRulesSettings(settings);
   }
   openTab(tabId) {
     this.activeTabId = tabId;
@@ -9362,6 +9434,9 @@ class StageOverlay {
   }
   openHudTab(tabId) {
     this.menuBar.openTab(tabId);
+  }
+  setStatRulesSettings(settings) {
+    this.menuBar.setStatRulesSettings(settings);
   }
   getCurrentChatId() {
     return this.resolveChatId() || null;
@@ -10846,6 +10921,8 @@ function setup(ctx) {
       }
     } else if (payload.type === "vn_director_note" && payload.data) {
       diagBus.setDirectorNote(payload.data);
+    } else if (payload.type === "vn_stat_rules_settings" && payload.settings) {
+      overlay.setStatRulesSettings(payload.settings);
     } else if (payload.type === "vn_director_settings" && payload.settings) {
       diagDrawer?.setDirectorSettings(payload.settings);
     } else if (payload.type === "vn_director_log" && payload.log) {

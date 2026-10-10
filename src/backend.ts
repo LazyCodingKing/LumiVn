@@ -28,7 +28,8 @@ import {
   computeDirectorImpactDiff,
   extractChatId,
 } from "./backend/director.js";
-import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry } from "./shared/types.js";
+import { evaluateMvuLedgerDelta } from "./backend/mvu-evaluator.js";
+import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry, StatRulesSettings } from "./shared/types.js";
 
 declare const spindle: SpindleAPI;
 
@@ -258,7 +259,8 @@ async function processChatTurn(
       // Ignore malformed JSON chunks
     }
 
-    // Extract State Delta: 1. State Details Block (YAML), 2. TOON format, 3. Prose Heuristics Fallback
+    // Extract State Delta: 1. State Details Block (YAML), 2. TOON format, 3. MVU Quiet LLM, 4. Prose Heuristics Fallback
+    const statRulesSettings = await storage.getStatRulesSettings();
     const rawLedger = extractLedgerRaw(targetMessage.content);
     const rawToon = rawLedger ? null : extractToonRaw(targetMessage.content);
     const prevLedger: LedgerData | null = cumulativeLedger
@@ -270,6 +272,14 @@ async function processChatTurn(
       delta = parseLedgerYaml(rawLedger);
     } else if (rawToon) {
       delta = parseToonDelta(rawToon);
+    } else if (statRulesSettings.enabled && statRulesSettings.mode === "mvu_quiet") {
+      delta = await evaluateMvuLedgerDelta(
+        spindle,
+        chatId,
+        extractProse(targetMessage.content),
+        cumulativeLedger || { scene: { place: "default" }, actors: {} },
+        statRulesSettings
+      );
     } else {
       const prose = extractProse(targetMessage.content);
       delta = inferProseEmotionDelta(prose, characterId || "char");
@@ -627,6 +637,26 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         spindle.sendToFrontend({
           type: "vn_log",
           message: "Director prompt and scene notes saved.",
+          level: "info",
+        });
+      }
+      break;
+    }
+
+    case "vn_get_stat_rules_settings": {
+      const settings = await storage.getStatRulesSettings();
+      spindle.sendToFrontend({ type: "vn_stat_rules_settings", settings });
+      break;
+    }
+
+    case "vn_save_stat_rules_settings": {
+      const settings = payload.settings as StatRulesSettings;
+      if (settings) {
+        await storage.saveStatRulesSettings(settings);
+        spindle.sendToFrontend({ type: "vn_stat_rules_settings", settings });
+        spindle.sendToFrontend({
+          type: "vn_log",
+          message: "Stat rules and ledger schema updated.",
           level: "info",
         });
       }

@@ -116,6 +116,10 @@ export class StageOverlay {
     this.menuBar.openTab(tabId);
   }
 
+  public setStatRulesSettings(settings: any): void {
+    this.menuBar.setStatRulesSettings(settings);
+  }
+
   public getCurrentChatId(): string | null {
     return this.resolveChatId() || null;
   }
