@@ -82,7 +82,7 @@ export class MenuBar {
     });
 
     // Instantiate tab views
-    this.charactersTab = new CharactersTab(options.ttsEngine);
+    this.charactersTab = new CharactersTab(options.ttsEngine, options.ctx);
     this.bplotsTab = new BPlotsTab();
     this.wardrobeTab = new WardrobeTab(options.onAction);
     this.statsTab = new StatsTab();

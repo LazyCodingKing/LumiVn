@@ -5,7 +5,74 @@ import { DEFAULT_STAT_RULES, DEFAULT_LEDGER_PROMPT } from "./default-rules.js";
 const DEFAULT_MANIFEST: AssetManifest = {
   places: {},
   characters: {},
+  library: [],
 };
+
+export function syncManifestLibrary(manifest: AssetManifest): AssetManifest {
+  if (!manifest.places) manifest.places = {};
+  if (!manifest.characters) manifest.characters = {};
+  if (!manifest.library) manifest.library = [];
+  const existingUrls = new Set(manifest.library.map((item) => item.url));
+
+  // Sync places
+  for (const [placeKey, url] of Object.entries(manifest.places)) {
+    if (url && !existingUrls.has(url)) {
+      manifest.library.push({
+        id: `place_${placeKey.replace(/[^a-z0-9_-]/gi, "_")}`,
+        name: `📍 ${placeKey}`,
+        url,
+        category: "places",
+        placeId: placeKey,
+        uploadedAt: new Date().toISOString(),
+      });
+      existingUrls.add(url);
+    }
+  }
+
+  // Sync characters
+  for (const [actorId, actorData] of Object.entries(manifest.characters)) {
+    if (!actorData || typeof actorData !== "object") continue;
+    const outfits = actorData.outfits || (actorData as any);
+    if (outfits && typeof outfits === "object") {
+      for (const [outfit, exprs] of Object.entries(outfits)) {
+        if (exprs && typeof exprs === "object") {
+          for (const [expr, url] of Object.entries(exprs as Record<string, string>)) {
+            if (url && typeof url === "string" && !existingUrls.has(url)) {
+              manifest.library.push({
+                id: `char_${actorId}_${outfit}_${expr}`,
+                name: `👤 ${actorId} (${outfit}/${expr})`,
+                url,
+                category: "characters",
+                actorId,
+                outfit,
+                expression: expr,
+                uploadedAt: new Date().toISOString(),
+              });
+              existingUrls.add(url);
+            }
+          }
+        }
+      }
+    }
+    if (actorData.actions) {
+      for (const [act, url] of Object.entries(actorData.actions)) {
+        if (url && typeof url === "string" && !existingUrls.has(url)) {
+          manifest.library.push({
+            id: `act_${actorId}_${act}`,
+            name: `⚡ ${actorId} [${act}]`,
+            url,
+            category: "actions",
+            actorId,
+            uploadedAt: new Date().toISOString(),
+          });
+          existingUrls.add(url);
+        }
+      }
+    }
+  }
+
+  return manifest;
+}
 
 export const DEFAULT_STAT_RULES_SETTINGS: StatRulesSettings = {
   statRules: DEFAULT_STAT_RULES,
@@ -103,17 +170,18 @@ export class StorageManager {
       const exists = await this.spindle.storage.exists("asset_manifest.json");
       if (exists) {
         const raw = await this.spindle.storage.read("asset_manifest.json");
-        this.manifestCache = JSON.parse(raw) as AssetManifest;
+        this.manifestCache = syncManifestLibrary(JSON.parse(raw) as AssetManifest);
         return this.manifestCache;
       }
     } catch (e) {
       console.warn("[LumiVN] Failed to read asset_manifest.json, using default:", e);
     }
-    this.manifestCache = { ...DEFAULT_MANIFEST };
+    this.manifestCache = syncManifestLibrary({ ...DEFAULT_MANIFEST });
     return this.manifestCache;
   }
 
   async saveManifest(manifest: AssetManifest): Promise<void> {
+    syncManifestLibrary(manifest);
     this.manifestCache = manifest;
     try {
       await this.spindle.storage.write("asset_manifest.json", JSON.stringify(manifest, null, 2));

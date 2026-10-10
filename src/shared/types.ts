@@ -347,13 +347,30 @@ export interface AssetRecord {
   uploadedAt?: string;
 }
 
+export interface AssetLibraryItem {
+  id: string;
+  name: string;
+  url: string;
+  category?: string;
+  actorId?: string;
+  outfit?: string;
+  expression?: string;
+  placeId?: string;
+  uploadedAt: string;
+}
+
+export interface CharacterManifestEntry {
+  outfits?: Record<string, Record<string, string>>; // outfit -> expression -> url
+  actions?: Record<string, string>;                 // action -> url
+  avatarFocus?: { x?: number; y?: number };         // face focal point in % (e.g. x: 50, y: 15)
+  [key: string]: unknown;
+}
+
 export interface AssetManifest {
   places: Record<string, string>; // key: "scope:placeId" or "placeId" -> url
-  characters: Record<string, {
-    outfits?: Record<string, Record<string, string>>; // outfit -> expression -> url
-    actions?: Record<string, string>;                 // action -> url
-  }>;
+  characters: Record<string, CharacterManifestEntry>;
   cgs?: Record<string, string>; // event action/cg name -> url
+  library?: AssetLibraryItem[];
 }
 
 export interface DirectorSettings {

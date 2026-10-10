@@ -66,7 +66,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const diagDrawer = registerDiagnosticsDrawer(ctx, toggleStage);
 
   // 1b. Native Spindle Drawer Tabs (Cast & Stats)
-  const charactersDrawerTab = new CharactersTab();
+  const charactersDrawerTab = new CharactersTab(undefined, ctx);
   const statsDrawerTab = new StatsTab();
 
   let nativeCastTabHandle: any = null;

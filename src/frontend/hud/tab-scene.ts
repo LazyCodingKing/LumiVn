@@ -2,6 +2,7 @@ import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { LedgerData, AssetManifest } from "../../shared/types.js";
 import { resolveOutfitName } from "../../backend/asset-resolver.js";
 import { getSpriteTransform, type SpriteTransform } from "../stage/sprite-transform.js";
+import { openAssetPicker } from "./asset-picker.js";
 
 export class SceneTab {
   public root: HTMLElement;
@@ -90,6 +91,9 @@ export class SceneTab {
       </div>
     `;
 
+    const bgBtnRow = document.createElement("div");
+    bgBtnRow.style.cssText = "display: flex; gap: 8px; flex-wrap: wrap;";
+
     const bgUploadBtn = document.createElement("button");
     bgUploadBtn.className = "vn-btn vn-btn-primary";
     bgUploadBtn.textContent = `📁 Upload Background Media`;
@@ -137,7 +141,33 @@ export class SceneTab {
       }
     });
 
-    bgSec.appendChild(bgUploadBtn);
+    const bgPickBtn = document.createElement("button");
+    bgPickBtn.className = "vn-btn vn-btn-secondary";
+    bgPickBtn.textContent = `🖼️ Pick from Library`;
+    bgPickBtn.addEventListener("click", () => {
+      const scope = (bgSec.querySelector("#vn-bg-scope") as HTMLInputElement).value.trim();
+      const place = (bgSec.querySelector("#vn-bg-place") as HTMLInputElement).value.trim() || placeId;
+      openAssetPicker({
+        manifest: this.currentManifest,
+        title: `Choose Background for ${scope ? `${scope}:${place}` : place}`,
+        category: "places",
+        onSelect: (item) => {
+          const { chatId } = this.getContextIds();
+          this.ctx.sendToBackend({
+            type: "vn_assign_asset",
+            category: "places",
+            scope,
+            placeId: place,
+            url: item.url,
+            chatId,
+          });
+        },
+      });
+    });
+
+    bgBtnRow.appendChild(bgUploadBtn);
+    bgBtnRow.appendChild(bgPickBtn);
+    bgSec.appendChild(bgBtnRow);
     this.root.appendChild(bgSec);
 
     // ── 2. Character Sprites & Custom Expressions ──
@@ -227,7 +257,33 @@ export class SceneTab {
           }
         });
 
+        const pickSpriteBtn = document.createElement("button");
+        pickSpriteBtn.className = "vn-btn vn-btn-sm vn-btn-secondary";
+        pickSpriteBtn.textContent = `🖼️ Pick from Library`;
+        pickSpriteBtn.addEventListener("click", () => {
+          const outfit = (card.querySelector(".vn-input-outfit") as HTMLInputElement).value.trim().toLowerCase();
+          const expression = (card.querySelector(".vn-input-expr") as HTMLInputElement).value.trim().toLowerCase() || "neutral";
+          openAssetPicker({
+            manifest: this.currentManifest,
+            title: `Assign Sprite for ${actorDossier?.name || rawActorId} (${outfit}/${expression})`,
+            category: "characters",
+            onSelect: (item) => {
+              const { chatId } = this.getContextIds();
+              this.ctx.sendToBackend({
+                type: "vn_assign_asset",
+                category: "characters",
+                actorId,
+                outfit,
+                expression,
+                url: item.url,
+                chatId,
+              });
+            },
+          });
+        });
+
         btnRow.appendChild(uploadSpriteBtn);
+        btnRow.appendChild(pickSpriteBtn);
         card.appendChild(btnRow);
 
         // ── Sprite Size & Positioning Alignment ──
@@ -371,53 +427,134 @@ export class SceneTab {
       }
     });
 
+    const pickActionBtn = document.createElement("button");
+    pickActionBtn.className = "vn-btn vn-btn-secondary";
+    pickActionBtn.textContent = `🖼️ Pick from Library`;
+    pickActionBtn.addEventListener("click", () => {
+      const actorId = (actionSec.querySelector("#vn-action-actor") as HTMLInputElement).value.trim().toLowerCase();
+      const actionName = (actionSec.querySelector("#vn-action-name") as HTMLInputElement).value.trim().toLowerCase();
+
+      if (!actorId || !actionName) {
+        alert("Please specify both an Actor ID and Action Keyword.");
+        return;
+      }
+
+      openAssetPicker({
+        manifest: this.currentManifest,
+        title: `Assign Action Pose for ${actorId} [${actionName}]`,
+        category: "characters",
+        onSelect: (item) => {
+          const { chatId } = this.getContextIds();
+          this.ctx.sendToBackend({
+            type: "vn_assign_asset",
+            category: "actions",
+            actorId,
+            actionName,
+            url: item.url,
+            chatId,
+          });
+        },
+      });
+    });
+
     actionBtnRow.appendChild(uploadActionBtn);
+    actionBtnRow.appendChild(pickActionBtn);
     actionSec.appendChild(actionBtnRow);
     this.root.appendChild(actionSec);
 
-    // ── 4. Uploaded Assets Gallery with Delete ──
+    // ── 4. Uploaded Assets Gallery with Delete & Reuse ──
     const gallerySec = document.createElement("div");
     gallerySec.className = "vn-section";
-    gallerySec.innerHTML = `<h4>📁 Uploaded Assets Manager</h4>`;
 
     const manifestData = this.currentManifest;
+    const libraryItems = manifestData?.library || [];
+
+    const galleryTopRow = document.createElement("div");
+    galleryTopRow.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;";
+    galleryTopRow.innerHTML = `
+      <h4 style="margin: 0;">📁 Uploaded Assets Manager (${libraryItems.length > 0 ? libraryItems.length : Object.keys(manifestData?.places || {}).length + Object.keys(manifestData?.characters || {}).length})</h4>
+      <button id="vn-lib-open-picker-btn" class="vn-btn vn-btn-sm vn-btn-secondary">🖼️ Open Library Modal</button>
+    `;
+    galleryTopRow.querySelector("#vn-lib-open-picker-btn")?.addEventListener("click", () => {
+      openAssetPicker({
+        manifest: this.currentManifest,
+        onSelect: (item) => {
+          const targetActor = prompt("Assign this asset to which character ID (e.g. alethea, user)?");
+          if (targetActor) {
+            const clean = targetActor.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+            const { chatId } = this.getContextIds();
+            this.ctx.sendToBackend({
+              type: "vn_assign_asset",
+              category: "characters",
+              actorId: clean,
+              outfit: "default",
+              expression: "neutral",
+              url: item.url,
+              chatId,
+            });
+          }
+        },
+      });
+    });
+    gallerySec.appendChild(galleryTopRow);
+
     const galleryList = document.createElement("div");
     galleryList.style.cssText = "display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; padding-right: 4px;";
 
     let assetCount = 0;
+    const seenUrls = new Set<string>();
 
-    // List Places
-    if (manifestData?.places) {
-      for (const [key, url] of Object.entries(manifestData.places)) {
-        assetCount++;
-        galleryList.appendChild(this.createAssetCard("places", `📍 Place: ${key}`, url, () => {
-          this.deleteAsset({ category: "places", key });
-        }));
+    if (libraryItems.length > 0) {
+      for (const item of libraryItems) {
+        if (!seenUrls.has(item.url)) {
+          assetCount++;
+          seenUrls.add(item.url);
+          galleryList.appendChild(this.createAssetCard(item.category || "library", item.name, item.url, () => {
+            this.deleteAsset({ category: "library", libraryId: item.id, url: item.url });
+          }));
+        }
       }
-    }
-
-    // List Character Outfits/Expressions
-    if (manifestData?.characters) {
-      for (const [actorId, actorData] of Object.entries(manifestData.characters)) {
-        const outfits = actorData.outfits || (actorData as any);
-        for (const [outfit, exprs] of Object.entries(outfits)) {
-          if (exprs && typeof exprs === "object") {
-            for (const [expr, url] of Object.entries(exprs as Record<string, string>)) {
-              assetCount++;
-              galleryList.appendChild(this.createAssetCard("characters", `👤 ${actorId} (${outfit}/${expr})`, url, () => {
-                this.deleteAsset({ category: "characters", actorId, outfit, expression: expr });
-              }));
-            }
+    } else {
+      // Fallback: Places & Characters
+      if (manifestData?.places) {
+        for (const [key, url] of Object.entries(manifestData.places)) {
+          if (!seenUrls.has(url)) {
+            assetCount++;
+            seenUrls.add(url);
+            galleryList.appendChild(this.createAssetCard("places", `📍 Place: ${key}`, url, () => {
+              this.deleteAsset({ category: "places", key });
+            }));
           }
         }
-
-        // List Actions
-        if (actorData.actions) {
-          for (const [actionName, url] of Object.entries(actorData.actions)) {
-            assetCount++;
-            galleryList.appendChild(this.createAssetCard("actions", `⚡ ${actorId} [${actionName}]`, url, () => {
-              this.deleteAsset({ category: "actions", actorId, actionName });
-            }));
+      }
+      if (manifestData?.characters) {
+        for (const [actorId, actorData] of Object.entries(manifestData.characters)) {
+          const outfits = actorData.outfits || (actorData as any);
+          if (outfits && typeof outfits === "object") {
+            for (const [outfit, exprs] of Object.entries(outfits)) {
+              if (exprs && typeof exprs === "object") {
+                for (const [expr, url] of Object.entries(exprs as Record<string, string>)) {
+                  if (url && !seenUrls.has(url)) {
+                    assetCount++;
+                    seenUrls.add(url);
+                    galleryList.appendChild(this.createAssetCard("characters", `👤 ${actorId} (${outfit}/${expr})`, url, () => {
+                      this.deleteAsset({ category: "characters", actorId, outfit, expression: expr });
+                    }));
+                  }
+                }
+              }
+            }
+          }
+          if (actorData.actions) {
+            for (const [actionName, url] of Object.entries(actorData.actions)) {
+              if (url && !seenUrls.has(url)) {
+                assetCount++;
+                seenUrls.add(url);
+                galleryList.appendChild(this.createAssetCard("actions", `⚡ ${actorId} [${actionName}]`, url, () => {
+                  this.deleteAsset({ category: "actions", actorId, actionName });
+                }));
+              }
+            }
           }
         }
       }
@@ -433,16 +570,47 @@ export class SceneTab {
 
   private createAssetCard(category: string, title: string, url: string, onDelete: () => void): HTMLElement {
     const card = document.createElement("div");
-    card.style.cssText = "display:flex; justify-content:space-between; align-items:center; background:#1e293b; border:1px solid #334155; border-radius:8px; padding:6px 10px;";
+    card.style.cssText = "display:flex; justify-content:space-between; align-items:center; background:#1e293b; border:1px solid #334155; border-radius:8px; padding:6px 10px; gap:8px;";
     card.innerHTML = `
-      <div style="display:flex; align-items:center; gap:10px; overflow:hidden;">
-        <img src="${url}" style="width:36px; height:36px; object-fit:cover; border-radius:4px; background:#0f172a;" alt="" onerror="this.style.display='none'" />
-        <span style="font-size:12px; color:#f8fafc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${title}</span>
+      <div style="display:flex; align-items:center; gap:10px; overflow:hidden; flex:1; min-width:0;">
+        <img src="${url}" style="width:36px; height:36px; object-fit:cover; border-radius:4px; background:#0f172a; flex-shrink:0;" alt="" onerror="this.style.display='none'" />
+        <span style="font-size:12px; color:#f8fafc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${title}">${title}</span>
       </div>
-      <button class="vn-btn vn-btn-sm vn-btn-danger" style="padding:4px 8px; font-size:11px;">🗑️ Delete</button>
+      <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+        <button class="vn-btn vn-btn-sm vn-btn-secondary vn-btn-assign" style="padding:3px 7px; font-size:10px;" title="Assign to a character">⚡ Assign</button>
+        <button class="vn-btn vn-btn-sm vn-btn-secondary vn-btn-copy" style="padding:3px 7px; font-size:10px;" title="Copy asset URL">📋 URL</button>
+        <button class="vn-btn vn-btn-sm vn-btn-danger vn-btn-del" style="padding:3px 7px; font-size:10px;">🗑️ Delete</button>
+      </div>
     `;
 
-    card.querySelector("button")?.addEventListener("click", () => {
+    card.querySelector(".vn-btn-assign")?.addEventListener("click", () => {
+      const targetActor = prompt("Enter character ID to assign this asset to (e.g. alethea, user):");
+      if (targetActor) {
+        const clean = targetActor.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+        const { chatId } = this.getContextIds();
+        this.ctx.sendToBackend({
+          type: "vn_assign_asset",
+          category: "characters",
+          actorId: clean,
+          outfit: "default",
+          expression: "neutral",
+          url,
+          chatId,
+        });
+      }
+    });
+
+    const copyBtn = card.querySelector(".vn-btn-copy") as HTMLButtonElement;
+    copyBtn?.addEventListener("click", () => {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => {
+          copyBtn.textContent = "✓ Copied";
+          setTimeout(() => { copyBtn.textContent = "📋 URL"; }, 1500);
+        }).catch(() => {});
+      }
+    });
+
+    card.querySelector(".vn-btn-del")?.addEventListener("click", () => {
       if (confirm(`Remove this asset (${title})?`)) {
         onDelete();
       }

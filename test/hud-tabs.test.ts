@@ -24,6 +24,7 @@ import { BPlotsTab } from "../src/frontend/hud/tab-bplots.js";
 import { MenuBar } from "../src/frontend/hud/menu-bar.js";
 import { DiagnosticsTab } from "../src/frontend/hud/tab-diagnostics.js";
 import { diagBus } from "../src/frontend/utils/diag-bus.js";
+import { syncManifestLibrary } from "../src/backend/storage.js";
 
 const FENCE = "```";
 const REALISTIC_MY_WORLD_YAML =
@@ -542,5 +543,67 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     expect(html).toContain("delivery_courier");
     expect(html).toContain("heatwave");
     expect(html).toContain("Pressure 4/5");
+  });
+
+  test("13. syncManifestLibrary indexes places, characters, and actions into reusable library", () => {
+    const rawManifest = {
+      places: {
+        "mansion:parlor": "/images/places/parlor.png",
+      },
+      characters: {
+        alethea: {
+          outfits: {
+            casual: { neutral: "/images/alethea_casual.png" },
+          },
+          actions: {
+            cast_spell: "/images/alethea_magic.png",
+          },
+        },
+      },
+    };
+
+    const synced = syncManifestLibrary(rawManifest as any);
+    expect(synced.library).toBeDefined();
+    expect(synced.library!.length).toBe(3);
+    const urls = synced.library!.map((item) => item.url);
+    expect(urls).toContain("/images/places/parlor.png");
+    expect(urls).toContain("/images/alethea_casual.png");
+    expect(urls).toContain("/images/alethea_magic.png");
+  });
+
+  test("14. CharactersTab renders avatar face framing controls and applies object-position to icons", () => {
+    const tab = new CharactersTab();
+    const manifest = {
+      places: {},
+      characters: {
+        alethea: {
+          outfits: {
+            default: { neutral: "/images/alethea_neutral.png" },
+          },
+          avatarFocus: { x: 50, y: 18 },
+        },
+      },
+    };
+
+    tab.render(
+      {
+        actors: {
+          alethea: {
+            id: "alethea",
+            name: "Alethea",
+            agency: { want_now: "Solve puzzle" },
+          },
+        },
+      },
+      manifest as any
+    );
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("vn-avatar-framing-box");
+    expect(html).toContain("Avatar Icon &amp; Face Positioning");
+    expect(html).toContain("Vertical Position (Face Alignment):");
+    expect(html).toContain("vn-slider-focus-y");
+    expect(html).toContain("Drag to pan");
+    expect(html).toContain("object-position: 50% 18%");
   });
 });

@@ -1851,6 +1851,232 @@ class DialogueBox {
   }
 }
 
+// src/frontend/hud/asset-picker.ts
+function openAssetPicker(options) {
+  const items = [];
+  const seenUrls = new Set;
+  if (options.manifest?.library) {
+    for (const item of options.manifest.library) {
+      if (item.url && !seenUrls.has(item.url)) {
+        items.push(item);
+        seenUrls.add(item.url);
+      }
+    }
+  }
+  if (options.manifest?.places) {
+    for (const [key, url] of Object.entries(options.manifest.places)) {
+      if (url && !seenUrls.has(url)) {
+        items.push({
+          id: `place_${key}`,
+          name: `\uD83D\uDCCD ${key}`,
+          url,
+          category: "places",
+          placeId: key,
+          uploadedAt: new Date().toISOString()
+        });
+        seenUrls.add(url);
+      }
+    }
+  }
+  if (options.manifest?.characters) {
+    for (const [actorId, actorData] of Object.entries(options.manifest.characters)) {
+      if (!actorData || typeof actorData !== "object")
+        continue;
+      const outfits = actorData.outfits || actorData;
+      if (outfits && typeof outfits === "object") {
+        for (const [outfit, exprs] of Object.entries(outfits)) {
+          if (exprs && typeof exprs === "object") {
+            for (const [expr, url] of Object.entries(exprs)) {
+              if (url && typeof url === "string" && !seenUrls.has(url)) {
+                items.push({
+                  id: `char_${actorId}_${outfit}_${expr}`,
+                  name: `\uD83D\uDC64 ${actorId} (${outfit}/${expr})`,
+                  url,
+                  category: "characters",
+                  actorId,
+                  outfit,
+                  expression: expr,
+                  uploadedAt: new Date().toISOString()
+                });
+                seenUrls.add(url);
+              }
+            }
+          }
+        }
+      }
+      if (actorData.actions) {
+        for (const [act, url] of Object.entries(actorData.actions)) {
+          if (url && typeof url === "string" && !seenUrls.has(url)) {
+            items.push({
+              id: `act_${actorId}_${act}`,
+              name: `⚡ ${actorId} [${act}]`,
+              url,
+              category: "actions",
+              actorId,
+              uploadedAt: new Date().toISOString()
+            });
+            seenUrls.add(url);
+          }
+        }
+      }
+    }
+  }
+  const modalOverlay = document.createElement("div");
+  modalOverlay.className = "vn-asset-picker-overlay";
+  modalOverlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(2, 6, 23, 0.75);
+    backdrop-filter: blur(4px);
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  `;
+  const modalBox = document.createElement("div");
+  modalBox.style.cssText = `
+    background: #0f172a;
+    border: 1px solid #38bdf8;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+    width: 600px;
+    max-width: 90vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  `;
+  const close = () => {
+    if (modalOverlay.parentElement) {
+      modalOverlay.parentElement.removeChild(modalOverlay);
+    }
+  };
+  modalOverlay.addEventListener("click", (e) => {
+    if (e.target === modalOverlay)
+      close();
+  });
+  const header = document.createElement("div");
+  header.style.cssText = `
+    padding: 12px 16px;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  `;
+  header.innerHTML = `
+    <div>
+      <h3 style="margin: 0; font-size: 15px; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+        <span>\uD83D\uDDBC️</span> <span>${options.title || "Reusable Asset Library"}</span>
+      </h3>
+      <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+        ${items.length} saved asset${items.length === 1 ? "" : "s"} ready to assign
+      </div>
+    </div>
+    <button id="vn-picker-close-btn" style="background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer; padding: 4px;">✕</button>
+  `;
+  header.querySelector("#vn-picker-close-btn")?.addEventListener("click", close);
+  modalBox.appendChild(header);
+  let activeFilter = options.category || "all";
+  const filterBar = document.createElement("div");
+  filterBar.style.cssText = `
+    padding: 8px 16px;
+    background: #0b1120;
+    border-bottom: 1px solid #1e293b;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  `;
+  const renderFilterButtons = () => {
+    filterBar.innerHTML = `
+      <span style="font-size: 11px; color: #64748b;">Filter:</span>
+      <button class="vn-picker-filter-btn" data-filter="all" style="background: ${activeFilter === "all" ? "#38bdf8" : "#1e293b"}; color: ${activeFilter === "all" ? "#0f172a" : "#cbd5e1"}; border: 1px solid #334155; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; font-weight: ${activeFilter === "all" ? "700" : "500"};">All (${items.length})</button>
+      <button class="vn-picker-filter-btn" data-filter="characters" style="background: ${activeFilter === "characters" ? "#38bdf8" : "#1e293b"}; color: ${activeFilter === "characters" ? "#0f172a" : "#cbd5e1"}; border: 1px solid #334155; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; font-weight: ${activeFilter === "characters" ? "700" : "500"};">\uD83D\uDC64 Characters</button>
+      <button class="vn-picker-filter-btn" data-filter="places" style="background: ${activeFilter === "places" ? "#38bdf8" : "#1e293b"}; color: ${activeFilter === "places" ? "#0f172a" : "#cbd5e1"}; border: 1px solid #334155; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; font-weight: ${activeFilter === "places" ? "700" : "500"};">\uD83D\uDCCD Places</button>
+    `;
+    filterBar.querySelectorAll(".vn-picker-filter-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        activeFilter = btn.dataset.filter || "all";
+        renderFilterButtons();
+        renderGrid();
+      });
+    });
+  };
+  renderFilterButtons();
+  modalBox.appendChild(filterBar);
+  const contentArea = document.createElement("div");
+  contentArea.style.cssText = `
+    padding: 14px 16px;
+    overflow-y: auto;
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
+  `;
+  const renderGrid = () => {
+    contentArea.innerHTML = "";
+    const filtered = items.filter((it) => {
+      if (activeFilter === "all")
+        return true;
+      if (activeFilter === "characters")
+        return it.category === "characters" || it.actorId || it.name.startsWith("\uD83D\uDC64");
+      if (activeFilter === "places")
+        return it.category === "places" || it.placeId || it.name.startsWith("\uD83D\uDCCD");
+      return true;
+    });
+    if (filtered.length === 0) {
+      contentArea.innerHTML = `
+        <div style="grid-column: 1/-1; text-align: center; color: #64748b; font-size: 12px; padding: 40px 10px;">
+          No matching uploaded assets found in this category.
+        </div>
+      `;
+      return;
+    }
+    for (const item of filtered) {
+      const card = document.createElement("div");
+      card.style.cssText = `
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        overflow: hidden;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        transition: transform 0.15s, border-color 0.15s;
+      `;
+      card.addEventListener("mouseenter", () => {
+        card.style.borderColor = "#38bdf8";
+        card.style.transform = "scale(1.03)";
+      });
+      card.addEventListener("mouseleave", () => {
+        card.style.borderColor = "#334155";
+        card.style.transform = "scale(1)";
+      });
+      card.innerHTML = `
+        <div style="width: 100%; height: 96px; background: #020617; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;">
+          <img src="${item.url}" style="width: 100%; height: 100%; object-fit: cover;" alt="${item.name}" onerror="this.style.display='none'" />
+        </div>
+        <div style="padding: 6px; font-size: 11px; text-align: center; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: #1e293b;">
+          ${item.name}
+        </div>
+      `;
+      card.addEventListener("click", () => {
+        options.onSelect(item);
+        close();
+      });
+      contentArea.appendChild(card);
+    }
+  };
+  renderGrid();
+  modalBox.appendChild(contentArea);
+  modalOverlay.appendChild(modalBox);
+  document.body.appendChild(modalOverlay);
+}
+
 // src/frontend/hud/tab-characters.ts
 function normalizeGoal(g) {
   if (Array.isArray(g)) {
@@ -1986,8 +2212,10 @@ class CharactersTab {
   currentManifest;
   currentLedger = {};
   ttsEngine;
-  constructor(ttsEngine) {
+  ctx;
+  constructor(ttsEngine, ctx) {
     this.ttsEngine = ttsEngine;
+    this.ctx = ctx;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-characters";
   }
@@ -2068,18 +2296,26 @@ class CharactersTab {
       const cleanId = id.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
       const rosterItem = rosterMap.get(id.toLowerCase());
       let avatarUrl = "";
-      if (manifest?.characters?.[cleanId]) {
-        const charData = manifest.characters[cleanId];
+      const charData = manifest?.characters?.[cleanId];
+      if (charData) {
         const outfits = charData.outfits || charData;
         const defaultSet = outfits?.["default"] || (outfits ? Object.values(outfits)[0] : undefined);
         avatarUrl = defaultSet?.["neutral"] || defaultSet?.["smile"] || (defaultSet ? Object.values(defaultSet)[0] : "") || "";
       }
+      if (!avatarUrl) {
+        avatarUrl = actor.appearance?.avatar || actor.appearance?.image || "";
+      }
+      const focus = charData?.avatarFocus || { x: 50, y: 15 };
+      const focusX = focus.x ?? 50;
+      const focusY = focus.y ?? 15;
       const item = document.createElement("div");
+      item.className = "vn-actor-ribbon-item";
+      item.dataset.actorId = id;
       item.style.cssText = `display: flex; flex-direction: column; align-items: center; cursor: pointer; min-width: 68px; transition: transform 0.15s ease;`;
       const displayName = id.toLowerCase() === "user" ? "Player (You)" : actor.name || id;
       item.innerHTML = `
-        <div style="width: 52px; height: 52px; border-radius: 50%; overflow: hidden; border: 2px solid ${isSelected ? "#818cf8" : "#475569"}; box-shadow: ${isSelected ? "0 0 10px rgba(99,102,241,0.6)" : "none"}; background: #1e293b; display: flex; align-items: center; justify-content: center; position: relative;">
-          ${avatarUrl ? `<img src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="${displayName}" />` : `<span style="font-size: 22px;">\uD83D\uDC64</span>`}
+        <div style="width: 52px; height: 52px; border-radius: 50%; overflow: hidden; border: 2px solid ${isSelected ? "#818cf8" : "#475569"}; box-shadow: ${isSelected ? "0 0 10px rgba(99,102,241,0.6)" : "none"}; background: #0f172a; display: flex; align-items: center; justify-content: center; position: relative;">
+          ${avatarUrl ? `<img class="vn-ribbon-avatar-img" src="${avatarUrl}" style="width: 100%; height: 100%; object-fit: cover; object-position: ${focusX}% ${focusY}%;" alt="${displayName}" />` : `<span style="font-size: 22px;">\uD83D\uDC64</span>`}
           ${rosterItem ? `<span style="position: absolute; bottom: 0; right: 0; font-size: 9px; background: #0f172a; padding: 1px 3px; border-radius: 3px; border: 1px solid #334155; color: #a5b4fc; font-weight: 700;">L${rosterItem.lod ?? 1}</span>` : ""}
         </div>
         <span style="font-size: 11px; margin-top: 5px; color: ${isSelected ? "#f8fafc" : "#94a3b8"}; font-weight: ${isSelected ? "700" : "500"}; max-width: 68px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
@@ -2219,6 +2455,154 @@ class CharactersTab {
       }
     }
     container.appendChild(banner);
+    const cleanActorId = (actor.id || "").toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+    const actorManifestData = this.currentManifest?.characters?.[cleanActorId];
+    const actorOutfits = actorManifestData?.outfits || actorManifestData;
+    const actorDefaultSet = actorOutfits?.["default"] || (actorOutfits ? Object.values(actorOutfits)[0] : undefined);
+    let actorAvatarUrl = actorDefaultSet?.["neutral"] || actorDefaultSet?.["smile"] || (actorDefaultSet ? Object.values(actorDefaultSet)[0] : "") || "";
+    if (!actorAvatarUrl) {
+      actorAvatarUrl = actor.appearance?.avatar || actor.appearance?.image || "";
+    }
+    const actorFocus = actorManifestData?.avatarFocus || { x: 50, y: 15 };
+    let curFocusX = actorFocus.x ?? 50;
+    let curFocusY = actorFocus.y ?? 15;
+    const avatarBox = document.createElement("div");
+    avatarBox.className = "vn-section vn-avatar-framing-box";
+    avatarBox.style.cssText = "background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px;";
+    avatarBox.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #334155; padding-bottom: 6px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 13px;">\uD83D\uDDBC️</span>
+          <strong style="color: #f8fafc; font-size: 12px;">Avatar Icon & Face Positioning</strong>
+          <span style="font-size: 10px; color: #94a3b8;">(Align face in circular icon)</span>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button id="vn-reuse-asset-btn" title="Choose from already uploaded library images" style="background: #0f172a; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+            <span>\uD83D\uDDBC️</span> <span>Reuse Asset</span>
+          </button>
+          <button id="vn-upload-char-btn" title="Upload new image for this character" style="background: #38bdf8; border: none; color: #0f172a; border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+            <span>\uD83D\uDCC1</span> <span>Upload</span>
+          </button>
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+        <!-- Circular Preview with Drag to Pan -->
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
+          <div id="vn-avatar-drag-circle" title="Click and drag up/down to pan face into view" style="width: 58px; height: 58px; border-radius: 50%; overflow: hidden; border: 2px solid #38bdf8; box-shadow: 0 0 10px rgba(56,189,248,0.3); background: #0f172a; cursor: grab; position: relative; user-select: none; display: flex; align-items: center; justify-content: center;">
+            ${actorAvatarUrl ? `<img id="vn-avatar-drag-img" src="${actorAvatarUrl}" style="width: 100%; height: 100%; object-fit: cover; object-position: ${curFocusX}% ${curFocusY}%; pointer-events: none;" alt="" />` : `<span style="font-size: 26px;">\uD83D\uDC64</span>`}
+          </div>
+          <span style="font-size: 9px; color: #64748b;">Drag to pan</span>
+        </div>
+
+        <!-- Sliders & Presets -->
+        <div style="flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 6px;">
+          <div>
+            <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+              <span>Vertical Position (Face Alignment):</span>
+              <strong id="vn-val-focus-y" style="color: #38bdf8;">${curFocusY}%</strong>
+            </div>
+            <input id="vn-slider-focus-y" type="range" min="0" max="100" step="1" value="${curFocusY}" style="width: 100%; cursor: pointer;" />
+          </div>
+
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <span style="font-size: 10px; color: #64748b;">Presets:</span>
+            <button class="vn-preset-btn" data-y="15" style="background: #0f172a; border: 1px solid #475569; color: #cbd5e1; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83D\uDC64 Face (15%)</button>
+            <button class="vn-preset-btn" data-y="35" style="background: #0f172a; border: 1px solid #475569; color: #cbd5e1; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83D\uDC54 Upper (35%)</button>
+            <button class="vn-preset-btn" data-y="50" style="background: #0f172a; border: 1px solid #475569; color: #cbd5e1; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83E\uDDCD Center (50%)</button>
+            <span id="vn-avatar-saved-indicator" style="font-size: 10px; color: #10b981; margin-left: auto; display: none;">✓ Saved</span>
+          </div>
+        </div>
+      </div>
+    `;
+    const dragCircle = avatarBox.querySelector("#vn-avatar-drag-circle");
+    const dragImg = avatarBox.querySelector("#vn-avatar-drag-img");
+    const sliderY = avatarBox.querySelector("#vn-slider-focus-y");
+    const valY = avatarBox.querySelector("#vn-val-focus-y");
+    const savedIndicator = avatarBox.querySelector("#vn-avatar-saved-indicator");
+    const updateVisuals = () => {
+      valY.textContent = `${curFocusY}%`;
+      if (dragImg)
+        dragImg.style.objectPosition = `${curFocusX}% ${curFocusY}%`;
+      const ribbonImg = this.root.querySelector(`.vn-actor-ribbon-item[data-actor-id="${actor.id}"] .vn-ribbon-avatar-img`);
+      if (ribbonImg)
+        ribbonImg.style.objectPosition = `${curFocusX}% ${curFocusY}%`;
+    };
+    let saveTimeout = null;
+    const saveFocus = () => {
+      if (!this.currentManifest)
+        this.currentManifest = { places: {}, characters: {} };
+      if (!this.currentManifest.characters[cleanActorId])
+        this.currentManifest.characters[cleanActorId] = {};
+      this.currentManifest.characters[cleanActorId].avatarFocus = { x: curFocusX, y: curFocusY };
+      if (saveTimeout)
+        clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => {
+        this.ctx?.sendToBackend({
+          type: "vn_save_actor_avatar_focus",
+          actorId: cleanActorId,
+          x: curFocusX,
+          y: curFocusY
+        });
+        if (savedIndicator) {
+          savedIndicator.style.display = "inline";
+          setTimeout(() => {
+            savedIndicator.style.display = "none";
+          }, 1500);
+        }
+      }, 300);
+    };
+    sliderY.addEventListener("input", () => {
+      curFocusY = Number(sliderY.value);
+      updateVisuals();
+      saveFocus();
+    });
+    avatarBox.querySelectorAll(".vn-preset-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        curFocusY = Number(btn.dataset.y);
+        sliderY.value = String(curFocusY);
+        updateVisuals();
+        saveFocus();
+      });
+    });
+    let isDragging = false;
+    let startY = 0;
+    let initialY = curFocusY;
+    dragCircle.addEventListener("mousedown", (e) => {
+      isDragging = true;
+      startY = e.clientY;
+      initialY = curFocusY;
+      dragCircle.style.cursor = "grabbing";
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!isDragging)
+        return;
+      const dy = e.clientY - startY;
+      curFocusY = Math.max(0, Math.min(100, Math.round(initialY - dy * 0.7)));
+      sliderY.value = String(curFocusY);
+      updateVisuals();
+    });
+    window.addEventListener("mouseup", () => {
+      if (isDragging) {
+        isDragging = false;
+        dragCircle.style.cursor = "grab";
+        saveFocus();
+      }
+    });
+    avatarBox.querySelector("#vn-reuse-asset-btn")?.addEventListener("click", () => {
+      openAssetPicker({
+        manifest: this.currentManifest,
+        title: `Assign Asset to ${displayName}`,
+        category: "characters",
+        onSelect: (item) => {
+          this.assignAssetToActor(cleanActorId, item.url);
+        }
+      });
+    });
+    avatarBox.querySelector("#vn-upload-char-btn")?.addEventListener("click", () => {
+      this.uploadImageForActor(cleanActorId);
+    });
+    container.appendChild(avatarBox);
     const disps = prof.dispositions;
     if (disps && typeof disps === "object" && Object.keys(disps).length > 0) {
       const dispSection = document.createElement("div");
@@ -2905,11 +3289,28 @@ class CharactersTab {
         <div style="padding: 10px 12px; background: #0b1120; border-top: 1px solid #1e293b; text-align: center;">
           <strong style="color: #f8fafc; font-size: 13px;">${displayName}</strong>
           <div style="font-size: 11px; color: #38bdf8; margin-top: 2px;">${life.occupation || "Resident"}</div>
+          <div style="display: flex; gap: 6px; justify-content: center; margin-top: 8px;">
+            <button id="vn-portrait-reuse-btn" style="background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 4px; padding: 3px 8px; font-size: 10px; cursor: pointer;">\uD83D\uDDBC️ Reuse Asset</button>
+            <button id="vn-portrait-upload-btn" style="background: #38bdf8; border: none; color: #0f172a; border-radius: 4px; padding: 3px 8px; font-size: 10px; font-weight: 700; cursor: pointer;">\uD83D\uDCC1 Upload</button>
+          </div>
         </div>
       `;
       portraitCard.querySelector("#vn-close-portrait-btn")?.addEventListener("click", () => {
         this.showFullImage = false;
         this.render(ledger, this.currentManifest);
+      });
+      portraitCard.querySelector("#vn-portrait-reuse-btn")?.addEventListener("click", () => {
+        openAssetPicker({
+          manifest: this.currentManifest,
+          title: `Assign Portrait for ${displayName}`,
+          category: "characters",
+          onSelect: (item) => {
+            this.assignAssetToActor(cleanId, item.url);
+          }
+        });
+      });
+      portraitCard.querySelector("#vn-portrait-upload-btn")?.addEventListener("click", () => {
+        this.uploadImageForActor(cleanId);
       });
       layoutWrapper.appendChild(portraitCard);
     }
@@ -2917,6 +3318,102 @@ class CharactersTab {
     container.style.minWidth = "0";
     layoutWrapper.appendChild(container);
     this.root.appendChild(layoutWrapper);
+  }
+  assignAssetToActor(actorId, url) {
+    if (!this.currentManifest)
+      this.currentManifest = { places: {}, characters: {} };
+    if (!this.currentManifest.characters[actorId])
+      this.currentManifest.characters[actorId] = {};
+    if (!this.currentManifest.characters[actorId].outfits)
+      this.currentManifest.characters[actorId].outfits = {};
+    if (!this.currentManifest.characters[actorId].outfits["default"])
+      this.currentManifest.characters[actorId].outfits["default"] = {};
+    this.currentManifest.characters[actorId].outfits["default"]["neutral"] = url;
+    const ctxAny = this.ctx;
+    const activeChat = ctxAny?.getActiveChat?.();
+    const chatId = activeChat?.id || activeChat?.chatId;
+    this.ctx?.sendToBackend({
+      type: "vn_assign_asset",
+      category: "characters",
+      actorId,
+      outfit: "default",
+      expression: "neutral",
+      url,
+      chatId
+    });
+    this.render(this.currentLedger, this.currentManifest);
+  }
+  async uploadImageForActor(actorId) {
+    if (!this.ctx?.uploads?.pickFile)
+      return;
+    try {
+      const files = await this.ctx.uploads.pickFile({
+        accept: ["image/png", "image/webp", "image/jpeg"],
+        multiple: false
+      });
+      if (!files || files.length === 0)
+        return;
+      const file = files[0];
+      const directUrl = await this.uploadImageFile(file);
+      const ctxAny = this.ctx;
+      const activeChat = ctxAny?.getActiveChat?.();
+      const chatId = activeChat?.id || activeChat?.chatId;
+      const userId = ctxAny?.user?.id || ctxAny?.currentUser?.id || activeChat?.user_id;
+      if (directUrl) {
+        this.ctx.sendToBackend({
+          type: "vn_upload_asset",
+          category: "characters",
+          actorId,
+          outfit: "default",
+          expression: "neutral",
+          filename: file.name,
+          url: directUrl,
+          chatId,
+          userId
+        });
+      } else {
+        const dataUrl = await this.fileToDataUrl(file);
+        this.ctx.sendToBackend({
+          type: "vn_upload_asset",
+          category: "characters",
+          actorId,
+          outfit: "default",
+          expression: "neutral",
+          filename: file.name,
+          dataUrl,
+          chatId,
+          userId
+        });
+      }
+    } catch (err) {
+      console.error("[LumiVN] Actor upload failed:", err);
+    }
+  }
+  async uploadImageFile(file) {
+    try {
+      const formData = new FormData;
+      formData.append("file", new Blob([file.bytes], { type: file.mimeType || "image/png" }), file.name);
+      const resp = await fetch("/api/v1/images", {
+        method: "POST",
+        body: formData
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const url = data.url || data.image_url || (data.id ? `/api/v1/images/${data.id}` : "");
+        if (url)
+          return url;
+      }
+    } catch {}
+    return null;
+  }
+  async fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const blob = new Blob([file.bytes], { type: file.mimeType || "image/png" });
+      const reader = new FileReader;
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
   }
 }
 
@@ -4322,10 +4819,11 @@ class MapTab {
       const outfits = charData?.outfits || charData;
       const defaultSet = outfits?.["default"] || (outfits ? Object.values(outfits)[0] : undefined);
       const avatar = defaultSet?.["neutral"] || (defaultSet ? Object.values(defaultSet)[0] : "") || "";
+      const focus = charData?.avatarFocus || { x: 50, y: 15 };
       return `
                   <div style="background: #1e293b; padding: 4px 8px; border-radius: 6px; font-size: 11px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
                     <div style="display: flex; align-items: center; gap: 6px;">
-                      ${avatar ? `<img src="${avatar}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" alt="" />` : "<span>\uD83D\uDC64</span>"}
+                      ${avatar ? `<img src="${avatar}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover; object-position: ${focus.x ?? 50}% ${focus.y ?? 15}%;" alt="" />` : "<span>\uD83D\uDC64</span>"}
                       <span style="color: #c7d2fe; font-weight: 600;">${n.name || n.id}</span>
                     </div>
                     <span style="color: #94a3b8; font-size: 10px;">${n.posture || n.activity || "Idle"}</span>
@@ -8548,6 +9046,8 @@ class SceneTab {
         </div>
       </div>
     `;
+    const bgBtnRow = document.createElement("div");
+    bgBtnRow.style.cssText = "display: flex; gap: 8px; flex-wrap: wrap;";
     const bgUploadBtn = document.createElement("button");
     bgUploadBtn.className = "vn-btn vn-btn-primary";
     bgUploadBtn.textContent = `\uD83D\uDCC1 Upload Background Media`;
@@ -8592,7 +9092,32 @@ class SceneTab {
         console.error("[LumiVN] Background upload failed:", err);
       }
     });
-    bgSec.appendChild(bgUploadBtn);
+    const bgPickBtn = document.createElement("button");
+    bgPickBtn.className = "vn-btn vn-btn-secondary";
+    bgPickBtn.textContent = `\uD83D\uDDBC️ Pick from Library`;
+    bgPickBtn.addEventListener("click", () => {
+      const scope = bgSec.querySelector("#vn-bg-scope").value.trim();
+      const place = bgSec.querySelector("#vn-bg-place").value.trim() || placeId;
+      openAssetPicker({
+        manifest: this.currentManifest,
+        title: `Choose Background for ${scope ? `${scope}:${place}` : place}`,
+        category: "places",
+        onSelect: (item) => {
+          const { chatId } = this.getContextIds();
+          this.ctx.sendToBackend({
+            type: "vn_assign_asset",
+            category: "places",
+            scope,
+            placeId: place,
+            url: item.url,
+            chatId
+          });
+        }
+      });
+    });
+    bgBtnRow.appendChild(bgUploadBtn);
+    bgBtnRow.appendChild(bgPickBtn);
+    bgSec.appendChild(bgBtnRow);
     this.root.appendChild(bgSec);
     const charSec = document.createElement("div");
     charSec.className = "vn-section";
@@ -8673,7 +9198,32 @@ class SceneTab {
             console.error("[LumiVN] Sprite upload failed:", e);
           }
         });
+        const pickSpriteBtn = document.createElement("button");
+        pickSpriteBtn.className = "vn-btn vn-btn-sm vn-btn-secondary";
+        pickSpriteBtn.textContent = `\uD83D\uDDBC️ Pick from Library`;
+        pickSpriteBtn.addEventListener("click", () => {
+          const outfit = card.querySelector(".vn-input-outfit").value.trim().toLowerCase();
+          const expression = card.querySelector(".vn-input-expr").value.trim().toLowerCase() || "neutral";
+          openAssetPicker({
+            manifest: this.currentManifest,
+            title: `Assign Sprite for ${actorDossier?.name || rawActorId} (${outfit}/${expression})`,
+            category: "characters",
+            onSelect: (item) => {
+              const { chatId } = this.getContextIds();
+              this.ctx.sendToBackend({
+                type: "vn_assign_asset",
+                category: "characters",
+                actorId,
+                outfit,
+                expression,
+                url: item.url,
+                chatId
+              });
+            }
+          });
+        });
         btnRow.appendChild(uploadSpriteBtn);
+        btnRow.appendChild(pickSpriteBtn);
         card.appendChild(btnRow);
         const transform = getSpriteTransform(actorId);
         const transformBox = document.createElement("div");
@@ -8802,43 +9352,123 @@ class SceneTab {
         console.error("[LumiVN] Action upload failed:", err);
       }
     });
+    const pickActionBtn = document.createElement("button");
+    pickActionBtn.className = "vn-btn vn-btn-secondary";
+    pickActionBtn.textContent = `\uD83D\uDDBC️ Pick from Library`;
+    pickActionBtn.addEventListener("click", () => {
+      const actorId = actionSec.querySelector("#vn-action-actor").value.trim().toLowerCase();
+      const actionName = actionSec.querySelector("#vn-action-name").value.trim().toLowerCase();
+      if (!actorId || !actionName) {
+        alert("Please specify both an Actor ID and Action Keyword.");
+        return;
+      }
+      openAssetPicker({
+        manifest: this.currentManifest,
+        title: `Assign Action Pose for ${actorId} [${actionName}]`,
+        category: "characters",
+        onSelect: (item) => {
+          const { chatId } = this.getContextIds();
+          this.ctx.sendToBackend({
+            type: "vn_assign_asset",
+            category: "actions",
+            actorId,
+            actionName,
+            url: item.url,
+            chatId
+          });
+        }
+      });
+    });
     actionBtnRow.appendChild(uploadActionBtn);
+    actionBtnRow.appendChild(pickActionBtn);
     actionSec.appendChild(actionBtnRow);
     this.root.appendChild(actionSec);
     const gallerySec = document.createElement("div");
     gallerySec.className = "vn-section";
-    gallerySec.innerHTML = `<h4>\uD83D\uDCC1 Uploaded Assets Manager</h4>`;
     const manifestData = this.currentManifest;
+    const libraryItems = manifestData?.library || [];
+    const galleryTopRow = document.createElement("div");
+    galleryTopRow.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;";
+    galleryTopRow.innerHTML = `
+      <h4 style="margin: 0;">\uD83D\uDCC1 Uploaded Assets Manager (${libraryItems.length > 0 ? libraryItems.length : Object.keys(manifestData?.places || {}).length + Object.keys(manifestData?.characters || {}).length})</h4>
+      <button id="vn-lib-open-picker-btn" class="vn-btn vn-btn-sm vn-btn-secondary">\uD83D\uDDBC️ Open Library Modal</button>
+    `;
+    galleryTopRow.querySelector("#vn-lib-open-picker-btn")?.addEventListener("click", () => {
+      openAssetPicker({
+        manifest: this.currentManifest,
+        onSelect: (item) => {
+          const targetActor = prompt("Assign this asset to which character ID (e.g. alethea, user)?");
+          if (targetActor) {
+            const clean = targetActor.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+            const { chatId } = this.getContextIds();
+            this.ctx.sendToBackend({
+              type: "vn_assign_asset",
+              category: "characters",
+              actorId: clean,
+              outfit: "default",
+              expression: "neutral",
+              url: item.url,
+              chatId
+            });
+          }
+        }
+      });
+    });
+    gallerySec.appendChild(galleryTopRow);
     const galleryList = document.createElement("div");
     galleryList.style.cssText = "display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; padding-right: 4px;";
     let assetCount = 0;
-    if (manifestData?.places) {
-      for (const [key, url] of Object.entries(manifestData.places)) {
-        assetCount++;
-        galleryList.appendChild(this.createAssetCard("places", `\uD83D\uDCCD Place: ${key}`, url, () => {
-          this.deleteAsset({ category: "places", key });
-        }));
+    const seenUrls = new Set;
+    if (libraryItems.length > 0) {
+      for (const item of libraryItems) {
+        if (!seenUrls.has(item.url)) {
+          assetCount++;
+          seenUrls.add(item.url);
+          galleryList.appendChild(this.createAssetCard(item.category || "library", item.name, item.url, () => {
+            this.deleteAsset({ category: "library", libraryId: item.id, url: item.url });
+          }));
+        }
       }
-    }
-    if (manifestData?.characters) {
-      for (const [actorId, actorData] of Object.entries(manifestData.characters)) {
-        const outfits = actorData.outfits || actorData;
-        for (const [outfit, exprs] of Object.entries(outfits)) {
-          if (exprs && typeof exprs === "object") {
-            for (const [expr, url] of Object.entries(exprs)) {
-              assetCount++;
-              galleryList.appendChild(this.createAssetCard("characters", `\uD83D\uDC64 ${actorId} (${outfit}/${expr})`, url, () => {
-                this.deleteAsset({ category: "characters", actorId, outfit, expression: expr });
-              }));
-            }
+    } else {
+      if (manifestData?.places) {
+        for (const [key, url] of Object.entries(manifestData.places)) {
+          if (!seenUrls.has(url)) {
+            assetCount++;
+            seenUrls.add(url);
+            galleryList.appendChild(this.createAssetCard("places", `\uD83D\uDCCD Place: ${key}`, url, () => {
+              this.deleteAsset({ category: "places", key });
+            }));
           }
         }
-        if (actorData.actions) {
-          for (const [actionName, url] of Object.entries(actorData.actions)) {
-            assetCount++;
-            galleryList.appendChild(this.createAssetCard("actions", `⚡ ${actorId} [${actionName}]`, url, () => {
-              this.deleteAsset({ category: "actions", actorId, actionName });
-            }));
+      }
+      if (manifestData?.characters) {
+        for (const [actorId, actorData] of Object.entries(manifestData.characters)) {
+          const outfits = actorData.outfits || actorData;
+          if (outfits && typeof outfits === "object") {
+            for (const [outfit, exprs] of Object.entries(outfits)) {
+              if (exprs && typeof exprs === "object") {
+                for (const [expr, url] of Object.entries(exprs)) {
+                  if (url && !seenUrls.has(url)) {
+                    assetCount++;
+                    seenUrls.add(url);
+                    galleryList.appendChild(this.createAssetCard("characters", `\uD83D\uDC64 ${actorId} (${outfit}/${expr})`, url, () => {
+                      this.deleteAsset({ category: "characters", actorId, outfit, expression: expr });
+                    }));
+                  }
+                }
+              }
+            }
+          }
+          if (actorData.actions) {
+            for (const [actionName, url] of Object.entries(actorData.actions)) {
+              if (url && !seenUrls.has(url)) {
+                assetCount++;
+                seenUrls.add(url);
+                galleryList.appendChild(this.createAssetCard("actions", `⚡ ${actorId} [${actionName}]`, url, () => {
+                  this.deleteAsset({ category: "actions", actorId, actionName });
+                }));
+              }
+            }
           }
         }
       }
@@ -8851,15 +9481,46 @@ class SceneTab {
   }
   createAssetCard(category, title, url, onDelete) {
     const card = document.createElement("div");
-    card.style.cssText = "display:flex; justify-content:space-between; align-items:center; background:#1e293b; border:1px solid #334155; border-radius:8px; padding:6px 10px;";
+    card.style.cssText = "display:flex; justify-content:space-between; align-items:center; background:#1e293b; border:1px solid #334155; border-radius:8px; padding:6px 10px; gap:8px;";
     card.innerHTML = `
-      <div style="display:flex; align-items:center; gap:10px; overflow:hidden;">
-        <img src="${url}" style="width:36px; height:36px; object-fit:cover; border-radius:4px; background:#0f172a;" alt="" onerror="this.style.display='none'" />
-        <span style="font-size:12px; color:#f8fafc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${title}</span>
+      <div style="display:flex; align-items:center; gap:10px; overflow:hidden; flex:1; min-width:0;">
+        <img src="${url}" style="width:36px; height:36px; object-fit:cover; border-radius:4px; background:#0f172a; flex-shrink:0;" alt="" onerror="this.style.display='none'" />
+        <span style="font-size:12px; color:#f8fafc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${title}">${title}</span>
       </div>
-      <button class="vn-btn vn-btn-sm vn-btn-danger" style="padding:4px 8px; font-size:11px;">\uD83D\uDDD1️ Delete</button>
+      <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+        <button class="vn-btn vn-btn-sm vn-btn-secondary vn-btn-assign" style="padding:3px 7px; font-size:10px;" title="Assign to a character">⚡ Assign</button>
+        <button class="vn-btn vn-btn-sm vn-btn-secondary vn-btn-copy" style="padding:3px 7px; font-size:10px;" title="Copy asset URL">\uD83D\uDCCB URL</button>
+        <button class="vn-btn vn-btn-sm vn-btn-danger vn-btn-del" style="padding:3px 7px; font-size:10px;">\uD83D\uDDD1️ Delete</button>
+      </div>
     `;
-    card.querySelector("button")?.addEventListener("click", () => {
+    card.querySelector(".vn-btn-assign")?.addEventListener("click", () => {
+      const targetActor = prompt("Enter character ID to assign this asset to (e.g. alethea, user):");
+      if (targetActor) {
+        const clean = targetActor.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+        const { chatId } = this.getContextIds();
+        this.ctx.sendToBackend({
+          type: "vn_assign_asset",
+          category: "characters",
+          actorId: clean,
+          outfit: "default",
+          expression: "neutral",
+          url,
+          chatId
+        });
+      }
+    });
+    const copyBtn = card.querySelector(".vn-btn-copy");
+    copyBtn?.addEventListener("click", () => {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => {
+          copyBtn.textContent = "✓ Copied";
+          setTimeout(() => {
+            copyBtn.textContent = "\uD83D\uDCCB URL";
+          }, 1500);
+        }).catch(() => {});
+      }
+    });
+    card.querySelector(".vn-btn-del")?.addEventListener("click", () => {
       if (confirm(`Remove this asset (${title})?`)) {
         onDelete();
       }
@@ -9489,7 +10150,7 @@ class MenuBar {
       if (e.target === this.panelOverlay)
         this.closeTab();
     });
-    this.charactersTab = new CharactersTab(options.ttsEngine);
+    this.charactersTab = new CharactersTab(options.ttsEngine, options.ctx);
     this.bplotsTab = new BPlotsTab;
     this.wardrobeTab = new WardrobeTab(options.onAction);
     this.statsTab = new StatsTab;
@@ -11979,7 +12640,7 @@ function setup(ctx) {
   });
   mountContainer.appendChild(overlay.root);
   const diagDrawer = registerDiagnosticsDrawer(ctx, toggleStage);
-  const charactersDrawerTab = new CharactersTab;
+  const charactersDrawerTab = new CharactersTab(undefined, ctx);
   const statsDrawerTab = new StatsTab;
   let nativeCastTabHandle = null;
   let nativeStatsTabHandle = null;

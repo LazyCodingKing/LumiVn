@@ -659,10 +659,11 @@ export class MapTab {
                 const outfits = charData?.outfits || (charData as any);
                 const defaultSet = outfits?.["default"] || (outfits ? Object.values(outfits)[0] : undefined);
                 const avatar = defaultSet?.["neutral"] || (defaultSet ? Object.values(defaultSet)[0] : "") || "";
+                const focus = charData?.avatarFocus || { x: 50, y: 15 };
                 return `
                   <div style="background: #1e293b; padding: 4px 8px; border-radius: 6px; font-size: 11px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
                     <div style="display: flex; align-items: center; gap: 6px;">
-                      ${avatar ? `<img src="${avatar}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" alt="" />` : '<span>👤</span>'}
+                      ${avatar ? `<img src="${avatar}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover; object-position: ${focus.x ?? 50}% ${focus.y ?? 15}%;" alt="" />` : '<span>👤</span>'}
                       <span style="color: #c7d2fe; font-weight: 600;">${n.name || n.id}</span>
                     </div>
                     <span style="color: #94a3b8; font-size: 10px;">${n.posture || n.activity || "Idle"}</span>

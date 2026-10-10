@@ -812,6 +812,33 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
           manifest.characters[actorId].actions[actionName] = finalUrl;
         }
 
+        const libraryName = category === "places"
+          ? `📍 ${finalPlaceKey || filename}`
+          : category === "characters"
+          ? `👤 ${actorId} (${outfit}/${expression})`
+          : category === "actions"
+          ? `⚡ ${actorId} [${actionName}]`
+          : `📁 ${filename}`;
+
+        if (!manifest.library) manifest.library = [];
+        const existingLibIdx = manifest.library.findIndex((item) => item.url === finalUrl);
+        const libItem = {
+          id: existingLibIdx >= 0 ? manifest.library[existingLibIdx]!.id : `asset_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          name: libraryName,
+          url: finalUrl,
+          category,
+          actorId: actorId || undefined,
+          outfit: outfit || undefined,
+          expression: expression || undefined,
+          placeId: finalPlaceKey || undefined,
+          uploadedAt: new Date().toISOString(),
+        };
+        if (existingLibIdx >= 0) {
+          manifest.library[existingLibIdx] = libItem;
+        } else {
+          manifest.library.unshift(libItem);
+        }
+
         await storage.saveManifest(manifest);
         spindle.sendToFrontend({ type: "vn_manifest", manifest }, effectiveUid);
         spindle.sendToFrontend({
@@ -829,9 +856,74 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
       break;
     }
 
+    case "vn_assign_asset": {
+      try {
+        const category = String(payload.category); // "characters", "places", "actions"
+        const url = String(payload.url || "");
+        const actorId = String(payload.actorId || "").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
+        const outfit = String(payload.outfit || "default").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
+        const expression = String(payload.expression || "neutral").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
+        const actionName = String(payload.actionName || "").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
+        const placeId = String(payload.placeId || "").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
+        const scope = String(payload.scope || "").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
+        const finalPlaceKey = scope ? `${scope}:${placeId}` : placeId;
+        const chatId = String(payload.chatId || "");
+
+        if (!url) throw new Error("No asset URL provided to assign");
+
+        const manifest = await storage.getManifest();
+
+        if (category === "characters" && actorId) {
+          if (!manifest.characters[actorId]) manifest.characters[actorId] = {};
+          if (!manifest.characters[actorId].outfits) manifest.characters[actorId].outfits = {};
+          if (!manifest.characters[actorId].outfits[outfit]) manifest.characters[actorId].outfits[outfit] = {};
+          manifest.characters[actorId].outfits[outfit][expression] = url;
+        } else if (category === "places" && finalPlaceKey) {
+          manifest.places[finalPlaceKey] = url;
+        } else if (category === "actions" && actorId && actionName) {
+          if (!manifest.characters[actorId]) manifest.characters[actorId] = {};
+          if (!manifest.characters[actorId].actions) manifest.characters[actorId].actions = {};
+          manifest.characters[actorId].actions[actionName] = url;
+        }
+
+        await storage.saveManifest(manifest);
+        spindle.sendToFrontend({ type: "vn_manifest", manifest }, effectiveUid);
+        spindle.sendToFrontend({
+          type: "vn_log",
+          message: `Assigned asset: ${category} -> ${finalPlaceKey || `${actorId}/${outfit}/${expression}` || actionName}`,
+          level: "info",
+        }, effectiveUid);
+
+        if (chatId) {
+          await processChatTurn(chatId, undefined, undefined, false, undefined, undefined, effectiveUid);
+        }
+      } catch (err: any) {
+        spindle.sendToFrontend({ type: "vn_error", error: `Assign failed: ${String(err.message || err)}` }, effectiveUid);
+      }
+      break;
+    }
+
+    case "vn_save_actor_avatar_focus": {
+      try {
+        const actorId = String(payload.actorId || "").toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
+        const focusX = typeof payload.x === "number" ? payload.x : 50;
+        const focusY = typeof payload.y === "number" ? payload.y : 15;
+        if (actorId) {
+          const manifest = await storage.getManifest();
+          if (!manifest.characters[actorId]) manifest.characters[actorId] = {};
+          manifest.characters[actorId].avatarFocus = { x: focusX, y: focusY };
+          await storage.saveManifest(manifest);
+          spindle.sendToFrontend({ type: "vn_manifest", manifest }, effectiveUid);
+        }
+      } catch (err: any) {
+        spindle.sendToFrontend({ type: "vn_error", error: `Save focus failed: ${String(err.message || err)}` }, effectiveUid);
+      }
+      break;
+    }
+
     case "vn_delete_asset": {
       try {
-        const category = String(payload.category); // "places", "characters", "actions"
+        const category = String(payload.category); // "places", "characters", "actions", "library"
         const key = String(payload.key || "");
         const actorId = String(payload.actorId || "").toLowerCase();
         const outfit = String(payload.outfit || "");
@@ -843,6 +935,12 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
 
         if (category === "places" && key) {
           delete manifest.places[key];
+        } else if (category === "library") {
+          const libId = String(payload.libraryId || key || "");
+          const delUrl = String(payload.url || "");
+          if (manifest.library) {
+            manifest.library = manifest.library.filter((item) => (libId ? item.id !== libId : item.url !== delUrl));
+          }
         } else if (category === "characters" && actorId && outfit && expression) {
           const charData = manifest.characters[actorId];
           if (charData) {
