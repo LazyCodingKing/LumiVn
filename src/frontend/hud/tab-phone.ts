@@ -1,6 +1,45 @@
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { LedgerData } from "../../shared/types.js";
 
+export interface PhoneGameKeyInput {
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+  action: boolean;
+  restart: boolean;
+}
+
+export function parsePhoneGameKey(e: KeyboardEvent | { key?: string; code?: string }): PhoneGameKeyInput {
+  const k = ((e as any).key || "").toLowerCase();
+  const c = (e as any).code || "";
+
+  const isUp =
+    k === "arrowup" || k === "up" || k === "w" || k === "i" || k === "8" ||
+    c === "ArrowUp" || c === "KeyW" || c === "KeyI" || c === "Numpad8";
+
+  const isDown =
+    k === "arrowdown" || k === "down" || k === "s" || k === "k" || k === "2" ||
+    c === "ArrowDown" || c === "KeyS" || c === "KeyK" || c === "Numpad2";
+
+  const isLeft =
+    k === "arrowleft" || k === "left" || k === "a" || k === "j" || k === "h" || k === "4" ||
+    c === "ArrowLeft" || c === "KeyA" || c === "KeyJ" || c === "KeyH" || c === "Numpad4";
+
+  const isRight =
+    k === "arrowright" || k === "right" || k === "d" || k === "l" || k === "6" ||
+    c === "ArrowRight" || c === "KeyD" || c === "KeyL" || c === "Numpad6";
+
+  const isAction =
+    k === " " || k === "space" || k === "enter" || k === "z" || k === "x" || k === "f" ||
+    c === "Space" || c === "Enter" || c === "KeyZ" || c === "KeyX" || c === "KeyF";
+
+  const isRestart =
+    k === "r" || c === "KeyR" || isAction;
+
+  return { up: isUp, down: isDown, left: isLeft, right: isRight, action: isAction, restart: isRestart };
+}
+
 export class PhoneTab {
   public root: HTMLElement;
   private ctx: SpindleFrontendContext;
@@ -22,6 +61,13 @@ export class PhoneTab {
     this.isOverlayActive = isOverlayActive;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-phone";
+  }
+
+  private isGameInputActive(): boolean {
+    if (!this.root.isConnected || this.root.offsetParent === null) return false;
+    const active = document.activeElement;
+    if (active?.tagName === "INPUT" || active?.tagName === "TEXTAREA") return false;
+    return true;
   }
 
   public render(ledger: LedgerData): void {
@@ -357,7 +403,7 @@ export class PhoneTab {
         <button id="vn-btn-fire" style="background: #dc2626; border: 1px solid #ef4444; border-radius: 8px; color: #fff; flex: 1; height: 38px; font-weight: 800; font-size: 13px; cursor: pointer;">💥 FIRE</button>
         <button id="vn-btn-right" style="background: #1f2937; border: 1px solid #4b5563; border-radius: 8px; color: #fff; width: 60px; height: 38px; font-size: 18px; cursor: pointer;">▶</button>
       </div>
-      <p style="font-size: 10px; color: #6b7280; text-align: center; margin-top: 6px;">Use ◀ / ▶ and Space / Fire to play</p>
+      <p style="font-size: 10px; color: #94a3b8; text-align: center; margin-top: 6px;">🎮 Controls: ◀ ▶ / WASD / IJKL / HJKL / Numpad • Fire: Space / Z / Enter • Restart: R</p>
     `;
 
     container.querySelector("#vn-game-back-btn")?.addEventListener("click", () => {
@@ -367,6 +413,9 @@ export class PhoneTab {
 
     const canvas = container.querySelector("#vn-shooter-canvas") as HTMLCanvasElement;
     if (!canvas) return;
+    canvas.tabIndex = 0;
+    canvas.focus();
+    canvas.style.outline = "none";
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -377,6 +426,7 @@ export class PhoneTab {
     const playerSpeed = 4;
     let moveLeft = false;
     let moveRight = false;
+    const activeKeys = new Set<string>();
 
     const bullets: Array<{ x: number; y: number }> = [];
     const enemies: Array<{ x: number; y: number; vx: number; hp: number }> = [];
@@ -404,39 +454,26 @@ export class PhoneTab {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (this.isOverlayActive && !this.isOverlayActive()) return;
-      if (
-        document.activeElement?.tagName === "INPUT" ||
-        document.activeElement?.tagName === "TEXTAREA"
-      ) {
+      if (!this.isGameInputActive()) return;
+      const input = parsePhoneGameKey(e);
+      if (input.left || input.right || input.action || input.restart) {
+        e.preventDefault();
+      }
+      activeKeys.add(e.code || e.key);
+
+      if (gameOver && input.restart) {
+        fireBullet();
         return;
       }
-      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
-        e.preventDefault();
-        moveLeft = true;
-      }
-      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
-        e.preventDefault();
-        moveRight = true;
-      }
-      if (e.key === " " || e.key === "Enter") {
-        e.preventDefault();
+      if (input.action && !e.repeat) {
         fireBullet();
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (this.isOverlayActive && !this.isOverlayActive()) return;
-      if (
-        document.activeElement?.tagName === "INPUT" ||
-        document.activeElement?.tagName === "TEXTAREA"
-      ) {
-        return;
-      }
-      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
-        moveLeft = false;
-      }
-      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
-        moveRight = false;
+      activeKeys.delete(e.code || e.key);
+      const input = parsePhoneGameKey(e);
+      if (input.left || input.right || input.action) {
+        e.preventDefault();
       }
     };
 
@@ -447,13 +484,13 @@ export class PhoneTab {
     const btnRight = container.querySelector("#vn-btn-right") as HTMLButtonElement;
     const btnFire = container.querySelector("#vn-btn-fire") as HTMLButtonElement;
 
-    btnLeft?.addEventListener("pointerdown", () => { moveLeft = true; });
+    btnLeft?.addEventListener("pointerdown", (e) => { e.preventDefault(); moveLeft = true; (e.target as HTMLElement)?.blur(); });
     btnLeft?.addEventListener("pointerup", () => { moveLeft = false; });
     btnLeft?.addEventListener("pointerleave", () => { moveLeft = false; });
-    btnRight?.addEventListener("pointerdown", () => { moveRight = true; });
+    btnRight?.addEventListener("pointerdown", (e) => { e.preventDefault(); moveRight = true; (e.target as HTMLElement)?.blur(); });
     btnRight?.addEventListener("pointerup", () => { moveRight = false; });
     btnRight?.addEventListener("pointerleave", () => { moveRight = false; });
-    btnFire?.addEventListener("click", fireBullet);
+    btnFire?.addEventListener("click", (e) => { fireBullet(); (e.target as HTMLElement)?.blur(); });
 
     const loop = () => {
       ctx.fillStyle = "#030712";
@@ -468,8 +505,10 @@ export class PhoneTab {
       }
 
       if (!gameOver) {
-        if (moveLeft && playerX > 16) playerX -= playerSpeed;
-        if (moveRight && playerX < 264) playerX += playerSpeed;
+        const isLeftActive = moveLeft || [...activeKeys].some((k) => parsePhoneGameKey({ code: k, key: k }).left);
+        const isRightActive = moveRight || [...activeKeys].some((k) => parsePhoneGameKey({ code: k, key: k }).right);
+        if (isLeftActive && playerX > 16) playerX -= playerSpeed;
+        if (isRightActive && playerX < 264) playerX += playerSpeed;
 
         // Player ship
         ctx.fillStyle = "#38bdf8";
@@ -582,7 +621,7 @@ export class PhoneTab {
         <button id="vn-racer-nitro" style="background: #ea580c; border: 1px solid #f97316; border-radius: 8px; color: #fff; width: 80px; height: 38px; font-weight: 800; font-size: 12px; cursor: pointer;">🔥 NITRO</button>
         <button id="vn-racer-right" style="background: #1f2937; border: 1px solid #4b5563; border-radius: 8px; color: #fff; flex: 1; height: 38px; font-weight: 700; font-size: 14px; cursor: pointer;">Right Lane ▶</button>
       </div>
-      <p style="font-size: 10px; color: #6b7280; text-align: center; margin-top: 6px;">Use ◀ / ▶ or buttons to steer</p>
+      <p style="font-size: 10px; color: #94a3b8; text-align: center; margin-top: 6px;">🎮 Controls: ◀ ▶ / A D / J L / H L to Steer • Nitro: ▲ / W / Space • Restart: R</p>
     `;
 
     container.querySelector("#vn-game-back-btn")?.addEventListener("click", () => {
@@ -592,6 +631,9 @@ export class PhoneTab {
 
     const canvas = container.querySelector("#vn-racer-canvas") as HTMLCanvasElement;
     if (!canvas) return;
+    canvas.tabIndex = 0;
+    canvas.focus();
+    canvas.style.outline = "none";
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -637,35 +679,29 @@ export class PhoneTab {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (this.isOverlayActive && !this.isOverlayActive()) return;
-      if (
-        document.activeElement?.tagName === "INPUT" ||
-        document.activeElement?.tagName === "TEXTAREA"
-      ) {
+      if (!this.isGameInputActive()) return;
+      const input = parsePhoneGameKey(e);
+      if (input.left || input.right || input.up || input.action || input.restart) {
+        e.preventDefault();
+      }
+      if (gameOver && (input.restart || input.left || input.right || input.up || input.action)) {
+        restart();
         return;
       }
-      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
-        e.preventDefault();
+      if (input.left && !e.repeat) {
         steerLeft();
       }
-      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
-        e.preventDefault();
+      if (input.right && !e.repeat) {
         steerRight();
       }
-      if (e.key === "ArrowUp" || e.key === " ") {
-        e.preventDefault();
+      if (input.up || input.action) {
         nitro = true;
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (this.isOverlayActive && !this.isOverlayActive()) return;
-      if (
-        document.activeElement?.tagName === "INPUT" ||
-        document.activeElement?.tagName === "TEXTAREA"
-      ) {
-        return;
-      }
-      if (e.key === "ArrowUp" || e.key === " ") {
+      const input = parsePhoneGameKey(e);
+      if (input.up || input.action) {
+        e.preventDefault();
         nitro = false;
       }
     };
@@ -673,10 +709,10 @@ export class PhoneTab {
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
 
-    container.querySelector("#vn-racer-left")?.addEventListener("click", steerLeft);
-    container.querySelector("#vn-racer-right")?.addEventListener("click", steerRight);
+    container.querySelector("#vn-racer-left")?.addEventListener("click", (e) => { steerLeft(); (e.target as HTMLElement)?.blur(); });
+    container.querySelector("#vn-racer-right")?.addEventListener("click", (e) => { steerRight(); (e.target as HTMLElement)?.blur(); });
     const nitroBtn = container.querySelector("#vn-racer-nitro") as HTMLButtonElement;
-    nitroBtn?.addEventListener("pointerdown", () => { nitro = true; });
+    nitroBtn?.addEventListener("pointerdown", (e) => { e.preventDefault(); nitro = true; (e.target as HTMLElement)?.blur(); });
     nitroBtn?.addEventListener("pointerup", () => { nitro = false; });
     nitroBtn?.addEventListener("pointerleave", () => { nitro = false; });
 
@@ -824,6 +860,7 @@ export class PhoneTab {
         <button id="vn-snake-down" style="background: #1f2937; border: 1px solid #4b5563; border-radius: 8px; color: #fff; height: 36px; font-size: 14px; cursor: pointer;">▼</button>
         <button id="vn-snake-right" style="background: #1f2937; border: 1px solid #4b5563; border-radius: 8px; color: #fff; height: 36px; font-size: 14px; cursor: pointer;">▶</button>
       </div>
+      <p style="font-size: 10px; color: #94a3b8; text-align: center; margin-top: 6px;">🎮 Controls: ▲ ▼ ◀ ▶ / WASD / IJKL / HJKL / Numpad • Restart: R</p>
     `;
 
     container.querySelector("#vn-game-back-btn")?.addEventListener("click", () => {
@@ -833,6 +870,9 @@ export class PhoneTab {
 
     const canvas = container.querySelector("#vn-snake-canvas") as HTMLCanvasElement;
     if (!canvas) return;
+    canvas.tabIndex = 0;
+    canvas.focus();
+    canvas.style.outline = "none";
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -841,6 +881,8 @@ export class PhoneTab {
     let snake = [{ x: 10, y: 10 }, { x: 10, y: 11 }, { x: 10, y: 12 }];
     let dx = 0;
     let dy = -1;
+    let curDx = 0;
+    let curDy = -1;
     let apple = { x: 5, y: 5 };
     let score = 0;
     let gameOver = false;
@@ -857,6 +899,8 @@ export class PhoneTab {
       snake = [{ x: 10, y: 10 }, { x: 10, y: 11 }, { x: 10, y: 12 }];
       dx = 0;
       dy = -1;
+      curDx = 0;
+      curDy = -1;
       score = 0;
       gameOver = false;
       spawnApple();
@@ -869,47 +913,51 @@ export class PhoneTab {
         restart();
         return;
       }
-      if (newDx !== -dx && newDy !== -dy) {
+      if ((newDx !== 0 && curDx === 0) || (newDy !== 0 && curDy === 0)) {
         dx = newDx;
         dy = newDy;
       }
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (this.isOverlayActive && !this.isOverlayActive()) return;
-      if (
-        document.activeElement?.tagName === "INPUT" ||
-        document.activeElement?.tagName === "TEXTAREA"
-      ) {
+      if (!this.isGameInputActive()) return;
+      const input = parsePhoneGameKey(e);
+      if (input.up || input.down || input.left || input.right || input.restart) {
+        e.preventDefault();
+      }
+      if (gameOver && (input.restart || input.up || input.down || input.left || input.right)) {
+        restart();
         return;
       }
-      if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
-        e.preventDefault();
-        setDir(0, -1);
-      }
-      if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") {
-        e.preventDefault();
-        setDir(0, 1);
-      }
-      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
-        e.preventDefault();
-        setDir(-1, 0);
-      }
-      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
-        e.preventDefault();
-        setDir(1, 0);
-      }
+      if (input.up) setDir(0, -1);
+      else if (input.down) setDir(0, 1);
+      else if (input.left) setDir(-1, 0);
+      else if (input.right) setDir(1, 0);
     };
 
     window.addEventListener("keydown", onKeyDown);
 
-    container.querySelector("#vn-snake-up")?.addEventListener("click", () => setDir(0, -1));
-    container.querySelector("#vn-snake-down")?.addEventListener("click", () => setDir(0, 1));
-    container.querySelector("#vn-snake-left")?.addEventListener("click", () => setDir(-1, 0));
-    container.querySelector("#vn-snake-right")?.addEventListener("click", () => setDir(1, 0));
+    container.querySelector("#vn-snake-up")?.addEventListener("click", (e) => {
+      (e.target as HTMLElement)?.blur();
+      setDir(0, -1);
+    });
+    container.querySelector("#vn-snake-down")?.addEventListener("click", (e) => {
+      (e.target as HTMLElement)?.blur();
+      setDir(0, 1);
+    });
+    container.querySelector("#vn-snake-left")?.addEventListener("click", (e) => {
+      (e.target as HTMLElement)?.blur();
+      setDir(-1, 0);
+    });
+    container.querySelector("#vn-snake-right")?.addEventListener("click", (e) => {
+      (e.target as HTMLElement)?.blur();
+      setDir(1, 0);
+    });
 
     const tick = () => {
       if (!gameOver) {
+        curDx = dx;
+        curDy = dy;
         const head = { x: snake[0]!.x + dx, y: snake[0]!.y + dy };
 
         // Wall hit

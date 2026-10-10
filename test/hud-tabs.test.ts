@@ -17,7 +17,7 @@ import { StatsTab } from "../src/frontend/hud/tab-stats.js";
 import { InventoryTab } from "../src/frontend/hud/tab-inventory.js";
 import { WardrobeTab } from "../src/frontend/hud/tab-wardrobe.js";
 import { MapTab } from "../src/frontend/hud/tab-map.js";
-import { PhoneTab } from "../src/frontend/hud/tab-phone.js";
+import { PhoneTab, parsePhoneGameKey } from "../src/frontend/hud/tab-phone.js";
 import { JournalTab } from "../src/frontend/hud/tab-journal.js";
 import { SceneTab } from "../src/frontend/hud/tab-scene.js";
 import { BPlotsTab } from "../src/frontend/hud/tab-bplots.js";
@@ -606,4 +606,42 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     expect(html).toContain("Drag to pan");
     expect(html).toContain("object-position: 50% 18%");
   });
+
+  test("15. parsePhoneGameKey normalizes arrow keys, WASD, IJKL, HJKL, numpad, and actions", () => {
+    // Arrow keys
+    expect(parsePhoneGameKey({ key: "ArrowUp" }).up).toBe(true);
+    expect(parsePhoneGameKey({ key: "ArrowDown" }).down).toBe(true);
+    expect(parsePhoneGameKey({ key: "ArrowLeft" }).left).toBe(true);
+    expect(parsePhoneGameKey({ key: "ArrowRight" }).right).toBe(true);
+
+    // WASD
+    expect(parsePhoneGameKey({ key: "w" }).up).toBe(true);
+    expect(parsePhoneGameKey({ key: "s" }).down).toBe(true);
+    expect(parsePhoneGameKey({ key: "a" }).left).toBe(true);
+    expect(parsePhoneGameKey({ key: "d" }).right).toBe(true);
+
+    // IJKL
+    expect(parsePhoneGameKey({ key: "i" }).up).toBe(true);
+    expect(parsePhoneGameKey({ key: "k" }).down).toBe(true);
+    expect(parsePhoneGameKey({ key: "j" }).left).toBe(true);
+    expect(parsePhoneGameKey({ key: "l" }).right).toBe(true);
+
+    // HJKL Vim keys
+    expect(parsePhoneGameKey({ key: "h" }).left).toBe(true);
+
+    // Numpad
+    expect(parsePhoneGameKey({ code: "Numpad8" }).up).toBe(true);
+    expect(parsePhoneGameKey({ code: "Numpad2" }).down).toBe(true);
+    expect(parsePhoneGameKey({ code: "Numpad4" }).left).toBe(true);
+    expect(parsePhoneGameKey({ code: "Numpad6" }).right).toBe(true);
+
+    // Action keys
+    expect(parsePhoneGameKey({ key: " " }).action).toBe(true);
+    expect(parsePhoneGameKey({ key: "Enter" }).action).toBe(true);
+    expect(parsePhoneGameKey({ key: "z" }).action).toBe(true);
+
+    // Restart key
+    expect(parsePhoneGameKey({ key: "r" }).restart).toBe(true);
+  });
 });
+
