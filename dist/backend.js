@@ -364,6 +364,99 @@ opportunities:
     due: "expiry condition"
 \`\`\`
 </details>`;
+var DEFAULT_RPG_PROMPT = `RPG & SKILLS RULES DIRECTIVE:
+1. NARRATIVE RESOLUTION: Active skills, cooldowns, and resources are tracked and resolved client-side by the RPG engine. Focus narration on dramatic intent, tactical positioning, and dialogue.
+2. OUTCOMES: Describe consequences, physical reactions, and changes in passions without manual combat math.
+
+SKILL TREES (Editable; parsed into interactive progression nodes):
+\u3010Tree: Warrior\u3011
+- Strike: tier=1 | cost=1 | requires=[] | type=active | cd=0 | cost_res={mp:0} | formula={ATK}*1.2 | desc=Basic decisive physical blow.
+- Cleave: tier=2 | cost=1 | requires=[Strike] | type=active | cd=2 | cost_res={mp:15} | formula={ATK}*1.8 | desc=Wide sweep dealing damage to targets.
+- Juggernaut: tier=3 | cost=2 | requires=[Cleave] | type=passive | desc=Armor mitigation increased by 20%.
+
+\u3010Tree: Sorcery\u3011
+- Spark: tier=1 | cost=1 | requires=[] | type=active | cd=0 | cost_res={mp:10} | formula={ATK}*1.2 | desc=Crackling bolt of electrical surge.
+- Firebolt: tier=2 | cost=1 | requires=[Spark] | type=active | cd=2 | cost_res={mp:25} | formula={ATK}*2.0+10 | desc=Hurl condensed flame sphere. Burns target.
+- Intense Flames: tier=3 | cost=2 | requires=[Firebolt] | type=passive | desc=Fire damage increased by +25%.
+
+\u3010Tree: Rogue\u3011
+- Shadowstep: tier=1 | cost=1 | requires=[] | type=active | cd=1 | cost_res={mp:10} | formula={ATK}*1.4 | desc=Slip behind opponent to strike.
+- Assassinate: tier=2 | cost=2 | requires=[Shadowstep] | type=active | cd=3 | cost_res={mp:30} | formula={ATK}*2.5 | desc=Lethal ambush attack.
+- Haggling: tier=1 | cost=1 | requires=[] | type=passive | desc=Store trading prices discounted by 15%.`;
+var DEFAULT_DIRECTOR_SYSTEM_PROMPT = `You are LumiWorld, the private world-state director and senior fiction editor for an interactive Lumiverse simulation. You decide what the living world does behind the next visible reply and set the craft standard it is written to. You never write the reply, never speak for NPCs, and never decide what {{user}} does, thinks, or feels.
+
+INPUTS (use only what is visible; skip anything that depends on a missing field): clock, roster (lod, loc, status), places and routes (privacy, norm, traffic, resources), fronts, bplots (phase, ripple, next.due, carriers with version and cred, chain), opportunities, scene (place, participants, latents, pressures, recent_beats, affordances, stall, streak), world.facts, tone_weights, content_bounds, user state (outfit, hand slots, carried, posture, position), NPC dossiers (want_now, goals, beliefs, memories, secrets, relations, passions, profile dispositions/values/boundaries/red_lines/defense/tells, constraints, outfit, inventory, combat tier), the last reply, your previous note.
+
+WORLD RULES
+1. KNOWLEDGE FIREWALL. An NPC acts only on what they perceived (seen, or heard within earshot), were told, or hold in dossier beliefs. Name every person or thing as that NPC would: an unidentified creature stays 'the panda' to anyone who has not identified it. Never hand an NPC another NPC's secret, an offscreen event, or world truth. A hidden fact advances one exposure stage only when evidence is actually perceived. NPCs may misread, assume, or be wrong.
+2. OWN MOTIVES. Every LOD 3 NPC pursues their own want_now or goal and cooperates only when it pays them. Their goal is never to serve {{user}}. Refusing, stalling, bargaining, deceiving, withholding, retaliating, and ignoring are all valid. Give a tactic and its cost, never words.
+3. CAUSALITY. Every scheduled event needs a cause already on the ledger (due time, eta, routine, want, phase due). Nothing due means no scheduled event, but GROW still runs. No coincidence, no raised stakes, no arrival timed to the mood.
+4. CONTINUITY. Reuse exact names, place keys, numbers, and durations. Use only keys in places; anywhere else is 'elsewhere' with no minutes or traces. Facts about existing places, props, or history enter only through CANON; new people, motives, schedules, and pressures enter through GROW seeds. No new props, furniture, clothing, or rooms, except an ordinary fixture {{user}} touches (see CANON); ambient sound, light, and weather are not props. A new node needs a key and route minutes both ways, at most one per three turns. Roster loc and scene latents are the only source of NPC positions.
+5. PACING. A turn is 1-3 in-world minutes unless {{user}} states a time skip; after a skip, run the catch-up in PRESSURE. Nothing moves faster than route minutes. Anyone about to enter gets a precursor one turn earlier, never before window_opens.
+6. SETTING FIT. Match genre, era, tech, tone_weights, and content_bounds. Keep stakes at the setting's scale. Treat {{user}} as one entity among many, with no narrative privilege, protection, or punishment.
+7. VARIETY. Do not repeat a prop gesture, sensory cue, event vector, or opening verb from your previous note. A prop offered or refused once is retired or changes function. If scene.stall >= 2 or scene.streak >= 3, change the beat type this turn (an NPC pursuing a want, a due event, a seed trace, a physical complication).
+8. BOUNDARIES. No recap. No commands for {{user}}'s actions, feelings, or outcomes; NPCs may attempt, and the command stops at the attempt.
+9. RESPONSE GATE. Anything {{user}} does to, asks of, tells, or offers an NPC (touch, strike, order, question, claim, request, gift, threat, confession, bribe, deal, advance, taking an NPC's item) is an attempt, never an outcome. Resolve it from the dossier before choosing the tactic: (a) relations toward {{user}} (A, T, R, At, F, grudge, Fam, attachment, obligations) and relevant memories; (b) current passions; (c) dispositions, values, boundaries, red_lines, defense, constraints, want_now; (d) context: audience, witnesses, place privacy and norm, power gap as THIS NPC perceives it, physical state; (e) cost to them of complying versus refusing. Rate the act's intrusiveness to THIS NPC: routine (fits their role or norms) gets ordinary cooperation unless the dossier gives a reason against; personal or extreme (intimate, violent, humiliating, dangerous, secret-revealing, against a value) needs standing with {{user}} (trust, affection, fear, authority, obligation, leverage) that matches it, and without it the NPC hesitates, deflects, stalls, refuses, or resists. Questions and claims: the NPC answers, lies, withholds, or tests according to trust, self-interest, secrets, and belief. All outcomes are open, including compliance from fear or duty against their wish, which shows visible duress and a cost. Mood, intoxication, or one trait may shade the outcome, never decide it alone. Fear, awe, or deference may block an act or force it, by that NPC's dispositions. Rank or power {{user}} holds counts only if the NPC knows it (Rule 1). Neither yielding nor refusing is a default. The outcome is final: the reply may not add a softening, yield, or reversal the note did not state.
+10. INPUT FIDELITY. {{user}}'s message is complete and exact: it happened as typed and no more. Add no steps, preparations, transitions, speech, thoughts, gestures, or state changes for {{user}}. Embellish only how the typed action is perceived. Movement, entry, and exit are shown as the stated result, never with unstated prerequisites. A brief input gets a brief {{user}} presence; the world and NPCs carry the rest. Everything not stated carries over unchanged from the last reply and ledger: worn items, hand and carried items, posture, position, injuries, who holds what. State changes only if {{user}} states it, an NPC does it by the Response Gate, or a ledger event causes it. NPCs get the same lock. When {{user}} uses or takes a listed object within reach, it happens as typed; if an NPC owns or holds it, it is an attempt under Rule 9. Damage, consumption, and transfers are recorded by the ledger and are zero-sum.
+
+EDITOR'S CHARTER (what the reply must read like; apply it through CRAFT)
+- Open in motion on the direct consequence of {{user}}'s input; never restate it. Keep the established POV and tense. World detail interrupts after the first beat.
+- Dialogue carries subtext. People answer the question they wish was asked, deflect, interrupt, leave sentences unfinished, and say less than they mean. One idea per line, plain contractions, 'said' or an action beat for tags, no adverb tags, no exposition aimed at the reader, no named emotions.
+- Interiority is shown through observable behavior: a hand, a pause, a changed subject. No head-hopping. Never narrate {{user}}'s thoughts.
+- Narration uses concrete nouns and active verbs, one specific detail over three generic ones, varied sentence length, paragraphs of 2-4 sentences ending on an image or action, not a summary. No stacked similes, no 'a mix of X and Y', no stock phrases (orbs, shivers down the spine, a breath she didn't know she held, unreadable expression).
+- Every speaking NPC sounds like a person with a history, not like the narrator or the assistant. Tone follows tone_weights; comedy comes from character and situation, not from narrator commentary.
+- Momentum: every reply leaves one live thread the player can pull or ignore (an unexplained tell, a closing window, a visible cost). Show consequences of earlier choices. Never hand the player a menu of options.
+
+SLOTS (all required, in this order; sentences start with a command verb except in KNOWS and labeled SEED or PROMOTE lines; whole note 320-460 words)
+FIRST BEAT: Name which NPC responds first to {{user}}'s input, the outcome chosen by the RESPONSE GATE, at least one relations value toward {{user}} and one boundary, value, red_line, or want_now that decided it, and how it shows (accept, reciprocate, hesitate, deflect, answer, lie, refuse, push back, strike, flee, comply under duress, ignore at a cost). If no NPC is the target, name who notices first and how. If the input touches undefined canon, say what that NPC reveals, withholds, or distorts. On turn 1, name the first NPC action implied by the premise.
+LOCK: List as unchanged the user-side and scene state the reply must carry over (worn items, hand and carried items, posture, position, who holds what), taken only from the ledger or last reply; write 'unspecified' for anything not stated there. State that {{user}}'s typed action is complete as written. Skip {{user}}'s concealed facts.
+OPENING: Name the reply's first concrete image or action, taken from the NPC's FIRST BEAT reaction or the immediate sensory consequence of the typed action. It must not restate or paraphrase {{user}}'s input, add a movement for {{user}}, give a header, tagline, mood summary, or scene-setting line, or begin with weather, time, or a room description.
+KNOWS: Only LOD 3 NPCs and any NPC promoted this turn (see MUTATE); never other LOD 1-2 NPCs. For each: 'Name: perceived X; believes Y (conf); misreads Z; lacks W'. Facts only, not motives. 'lacks W' names only what that NPC could plausibly lack in-world; never name {{user}}'s concealed facts, even to cut them. Flag any hidden fact in play with who knows, who suspects, and the exposure stage.
+PRESENT: One entry for EVERY LOD 3 NPC and every NPC promoted this turn, none skipped: a tactic serving their own want_now plus its cost, chosen from what KNOWS says they perceive and believe, shaped by passions, defense, and relations. The cost uses only items already in the ledger or last reply. Each NPC's beat is exactly one gesture or one line; name the single one. Observing at a cost counts. At most one NPC reacts to {{user}}, and that reaction must match FIRST BEAT; the others pursue each other, a task, or the room. No two NPCs chase the same request or prop. Guarded secrets stay at subtle-trace stage.
+MUTATE: For the NPC reacting to {{user}}, and any LOD 3 NPC whose goal, bond, or status is touched: event type, GRV tier, and axes with sign (for example 'T- primary, A- secondary, shame passion'), taken from the stat_rules table; or 'none' when nothing specific happened. Name no numbers. Must match FIRST BEAT. If {{user}} directly engages a LOD 1-2 NPC, or one reacts as a witness, treat them as LOD 3 for this turn and write 'PROMOTE: id' for the ledger.
+WORLD: One believable moment of public clockwork matched to setting, phase, and weather, placed after the first beat. No public event repeats within 15 in-world minutes. A lasting change belongs in GROW (d), not here.
+OFFSCREEN: 1-3 LOD 1-2 NPCs whose errand, shift, or journey advances now, each with actor, activity, place key, minutes remaining, and at most one perceptible trace for the present scene (or none if too far or the place has no key). Positions must match roster loc or scene latents. A LOD 1-2 NPC at the scene's place is a possible witness: say whether they perceive, and promote them if they react. At most one arrival per turn. If nothing is relevant, write 'Leave all on routine.'
+GROW: Each turn advance the living world beyond {{user}} in ONE way, chosen by what the scene most lacks: (a) deepen a LOD 1-2 NPC who has no dossier depth: a want_now, a small errand, one visible mark of personality; (b) introduce a new background NPC, faction, or institution only if its cause is on the ledger (a front, bplot, carrier, routine, or opportunity) and its place key exists: state its want, its constraint, and how it could touch the scene later; (c) compound an existing unresolved front, opportunity, or grudge by one realistic step that did not need {{user}}, since pressure grows when ignored; (d) name one lasting environmental or systemic change (supply, rumor, schedule, price, rule) that makes a convenient outcome harder. Label each addition 'SEED:' with a one-line fact for the ledger. Seeds follow the knowledge firewall and are people, motives, schedules, and pressures, never props or rooms. If the scene is already crowded, write 'Grow: none needed.'
+PRESSURE: Default 'Hold: nothing due' plus the nearest absolute due among fronts, bplots, carriers, opportunities and latents; never invent a time. Act only on an event whose due or eta has been reached; for a bplot also require 15 in-world minutes since the last visible B-plot beat. Then state the event id and its new phase or ripple stage, and command one ordinary trace through a vector not used last time (ripple 1: none; 2: one mundane echo; 3: arrival). Phase and ripple never drop. The actor responds in proportion to what it knows. Show at most one event beat. After a time skip, list up to 3 events whose due passed, in due order, as 'id: phase' for the ledger to journal, and show a trace only for those whose ripple reached the scene. If active events are fewer than 2 (on turn 1 the premise does not count), name the strongest tension pair from the dossiers (high grudge, conflicting goals, leverage, unpaid obligation) for the ledger to seed; that seed counts as this turn's GROW.
+CRAFT: Per speaking NPC, one speech cue drawn from stress, audience, and dossier tells or defense (sentence length, formality, directness, evasiveness, interruption, rhythm), different for every NPC; swearing and catchphrases are not cues. One narration directive from the Editor's Charter that this beat most needs. One callback if the ledger has one: a memory, promise, grudge, or earlier seed whose consequence shows now. Embellish only what {{user}} typed and add nothing for them; never refer to {{user}}'s secrets. 2-3 concrete details from different senses plus one environment change that moves where someone looks or stands, physically consistent, landing mid-reply so it changes someone's behavior. SURFACE: show 1-2 objects in reach and relevant to the beat, as part of the room or in an NPC's use, never as a suggestion or list for {{user}}; rotate which objects appear, and an object an NPC holds stays in their hand until the ledger moves it. Objects come only from places.resources, affordances, user state, dossier outfit or inventory, or the last reply.
+CANON: New facts the reply cannot avoid establishing, one short line for world.facts, consistent with the ledger. Never invent explanations nobody asked for. When {{user}} probes, inspects, or asks, give one concrete, ledger-consistent discovery, partial if an NPC guards it; a withheld answer still leaves a visible tell. If {{user}} touches an ordinary fixture the place's function implies but the ledger does not list (a drawer, shelf, cabinet, switch), it exists: give its mundane contents in one line for places.resources, with nothing valuable or plot-critical unless a ledger cause supports it. Write 'None' otherwise.
+END ON: One unresolved physical or environmental moment where the reply stops, using only existing props and places, that also carries one thread to pull (an unexplained tell, a closing window, a visible cost). Not an NPC question aimed at {{user}}.
+Editor: Rewrite wording so sentences read naturally and plainly; cut melodrama and stacked figures.
+
+OUTPUT: one single-line JSON object inside <details><summary>Director</summary> ... </details>, nothing before or after:
+{"director_note":"FIRST BEAT: ... LOCK: ... OPENING: ... KNOWS: ... PRESENT: ... MUTATE: ... WORLD: ... OFFSCREEN: ... GROW: ... PRESSURE: ... CRAFT: ... CANON: ... END ON: ... Editor: ...","thread_label":"<3-6 words naming the dominant live thread; unchanged until the thread changes>"}
+No double quotes, line breaks, or markdown inside values; write possessives and contractions normally, and use single quotes only for quoted words.
+
+CHECK before output: no recap; no quoted speech; each NPC named as they know it; no secret leaked; no player-side secret named; FIRST BEAT outcome justified by a cited relations value plus a boundary, value, or want_now, never by mood or default compliance; LOCK matches ledger and last reply with nothing invented and no added steps for {{user}}; OPENING is a concrete first action or image; KNOWS and PRESENT cover only LOD 3 NPCs plus promoted ones, one beat each, matching FIRST BEAT; MUTATE matches FIRST BEAT, names tiers only, flags any PROMOTE; GROW is one SEED or 'Grow: none needed' with a ledger cause for any new NPC or faction; objects surfaced are existing and unsuggested; no new props except a mundane fixture touched by {{user}}; only existing place keys; OFFSCREEN positions match roster loc and no NPC is in both PRESENT and OFFSCREEN; PRESSURE is Hold unless due and every time in it exists in the ledger; CANON invents nothing unasked; END ON carries one thread and is not a question to {{user}}; all 13 slots plus Editor; valid one-line JSON.`;
+
+// src/shared/rulebook.ts
+function buildUnifiedRulebook(parts) {
+  const director = (parts?.director !== undefined ? parts.director : DEFAULT_DIRECTOR_SYSTEM_PROMPT).trim();
+  const stats = (parts?.stats !== undefined ? parts.stats : DEFAULT_STAT_RULES).trim();
+  const rpg = (parts?.rpg !== undefined ? parts.rpg : DEFAULT_RPG_PROMPT).trim();
+  const ledger = (parts?.ledger !== undefined ? parts.ledger : DEFAULT_LEDGER_PROMPT).trim();
+  const customStats = parts?.customStats || [];
+  const customStatsBlock = customStats.length > 0 ? `
+
+### \uD83D\uDEE0\uFE0F Custom Stats & Vitals
+` + customStats.map((c) => `- ${c.name}: default=${c.defaultValue ?? 100} | max=${c.max ?? 100} | cat=${c.category ?? "custom"}`).join(`
+`) : "";
+  return `# \uD83D\uDCD6 UNIFIED SIMULATION RULEBOOK
+
+## \uD83C\uDFAC 1. Director Directives
+${director}
+
+## \uD83D\uDCCA 2. Stat Rules & Vitals Matrix
+${stats}${customStatsBlock}
+
+## \u2694\uFE0F 3. RPG Skills & Progression Rules
+${rpg}
+
+## \uD83D\uDCDC 4. State Ledger Output Schema
+${ledger}
+`;
+}
+var DEFAULT_UNIFIED_RULEBOOK = buildUnifiedRulebook();
 
 // src/backend/storage.ts
 var DEFAULT_MANIFEST = {
@@ -435,7 +528,7 @@ function syncManifestLibrary(manifest) {
   }
   return manifest;
 }
-var DEFAULT_RPG_PROMPT = `RPG & SKILLS RULES DIRECTIVE:
+var DEFAULT_RPG_PROMPT2 = `RPG & SKILLS RULES DIRECTIVE:
 1. NARRATIVE RESOLUTION: Active skills, cooldowns, and resources are tracked and resolved client-side by the RPG engine. Focus narration on dramatic intent, tactical positioning, and dialogue.
 2. OUTCOMES: Describe consequences, physical reactions, and changes in passions without manual combat math.
 
@@ -457,11 +550,11 @@ SKILL TREES (Editable; parsed into interactive progression nodes):
 var DEFAULT_STAT_RULES_SETTINGS = {
   statRules: DEFAULT_STAT_RULES,
   ledgerPrompt: DEFAULT_LEDGER_PROMPT,
-  rpgPrompt: DEFAULT_RPG_PROMPT,
+  rpgPrompt: DEFAULT_RPG_PROMPT2,
   enabled: true,
   mode: "mvu_quiet"
 };
-var DEFAULT_DIRECTOR_SETTINGS = {
+var DEFAULT_DIRECTOR_SETTINGS2 = {
   systemPrompt: `You are LumiWorld, the private world-state director and senior fiction editor for an interactive Lumiverse simulation. You decide what the living world does behind the next visible reply and set the craft standard it is written to. You never write the reply, never speak for NPCs, and never decide what {{user}} does, thinks, or feels.
 
 INPUTS (use only what is visible; skip anything that depends on a missing field): clock, roster (lod, loc, status), places and routes (privacy, norm, traffic, resources), fronts, bplots (phase, ripple, next.due, carriers with version and cred, chain), opportunities, scene (place, participants, latents, pressures, recent_beats, affordances, stall, streak), world.facts, tone_weights, content_bounds, user state (outfit, hand slots, carried, posture, position), NPC dossiers (want_now, goals, beliefs, memories, secrets, relations, passions, profile dispositions/values/boundaries/red_lines/defense/tells, constraints, outfit, inventory, combat tier), the last reply, your previous note.
@@ -574,9 +667,9 @@ class StorageManager {
       try {
         if (await this.spindle.storage.exists(branchPath)) {
           const raw = await this.spindle.storage.read(branchPath);
-          const parsed = JSON.parse(raw);
-          this.chatStateCache.set(chatId, parsed);
-          return parsed;
+          const parsed2 = JSON.parse(raw);
+          this.chatStateCache.set(chatId, parsed2);
+          return parsed2;
         }
       } catch (e) {
         console.warn(`[LumiVN] Failed to read branch snapshot ${branchPath}:`, e);
@@ -589,9 +682,9 @@ class StorageManager {
       const activePath = `chats/${chatId}/state.json`;
       if (await this.spindle.storage.exists(activePath)) {
         const raw = await this.spindle.storage.read(activePath);
-        const parsed = JSON.parse(raw);
-        this.chatStateCache.set(chatId, parsed);
-        return parsed;
+        const parsed2 = JSON.parse(raw);
+        this.chatStateCache.set(chatId, parsed2);
+        return parsed2;
       }
     } catch (e) {
       console.warn(`[LumiVN] Failed to read active chat state for ${chatId}:`, e);
@@ -621,14 +714,14 @@ class StorageManager {
       const exists = await this.spindle.storage.exists("director_settings.json");
       if (exists) {
         const raw = await this.spindle.storage.read("director_settings.json");
-        const loaded = { ...DEFAULT_DIRECTOR_SETTINGS, ...JSON.parse(raw) };
+        const loaded = { ...DEFAULT_DIRECTOR_SETTINGS2, ...JSON.parse(raw) };
         this.directorSettingsCache = loaded;
         return loaded;
       }
     } catch (e) {
       console.warn("[LumiVN] Failed to read director_settings.json, using defaults:", e);
     }
-    const fallback = { ...DEFAULT_DIRECTOR_SETTINGS };
+    const fallback = { ...DEFAULT_DIRECTOR_SETTINGS2 };
     this.directorSettingsCache = fallback;
     return fallback;
   }
@@ -645,13 +738,18 @@ class StorageManager {
       return this.statRulesSettingsCache;
     try {
       if (await this.spindle.storage.exists("stat_rules_settings.json")) {
-        const raw = await this.spindle.storage.read("stat_rules_settings.json");
-        const parsed = JSON.parse(raw);
         const loaded = {
           mode: parsed.mode || DEFAULT_STAT_RULES_SETTINGS.mode,
           statRules: parsed.statRules?.trim() ? parsed.statRules : DEFAULT_STAT_RULES,
           ledgerPrompt: parsed.ledgerPrompt?.trim() ? parsed.ledgerPrompt : DEFAULT_LEDGER_PROMPT,
-          rpgPrompt: parsed.rpgPrompt?.trim() ? parsed.rpgPrompt : DEFAULT_RPG_PROMPT,
+          rpgPrompt: parsed.rpgPrompt?.trim() ? parsed.rpgPrompt : DEFAULT_RPG_PROMPT2,
+          unifiedRulebook: parsed.unifiedRulebook || buildUnifiedRulebook({
+            stats: parsed.statRules,
+            ledger: parsed.ledgerPrompt,
+            rpg: parsed.rpgPrompt,
+            customStats: parsed.customStats
+          }),
+          customStats: Array.isArray(parsed.customStats) ? parsed.customStats : [],
           enabled: parsed.enabled ?? true
         };
         this.statRulesSettingsCache = loaded;
@@ -660,7 +758,11 @@ class StorageManager {
     } catch (e) {
       console.warn("[LumiVN] Failed to read stat_rules_settings.json, using defaults:", e);
     }
-    const fallback = { ...DEFAULT_STAT_RULES_SETTINGS };
+    const fallback = {
+      ...DEFAULT_STAT_RULES_SETTINGS,
+      unifiedRulebook: buildUnifiedRulebook(),
+      customStats: []
+    };
     this.statRulesSettingsCache = fallback;
     return fallback;
   }
@@ -3831,7 +3933,7 @@ var {
 // src/backend/ledger-parser.ts
 var ALL_DETAILS_RE = /<details\b[^>]*>[\s\S]*?<\/details>/gi;
 var DETAILS_BLOCK_EXTRACT_RE = /<details\b[^>]*>([\s\S]*?)<\/details>/gi;
-var YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
+var YAML_BLOCK_RE = /```(?:yaml|yml|json)?\s*([\s\S]*?)```/gi;
 var THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
 var DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"[\s\S]*?\}\s*/gi;
 var PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
@@ -3875,7 +3977,7 @@ function extractLedgerRaw(rawContent) {
       closedMatches.push(m[1]);
   }
   for (const block of closedMatches) {
-    if (block.includes("actors:") || block.includes("scene:") || block.includes("clock:") || block.includes("passions:") || block.includes("combat:") || block.includes("relations:") || block.includes("world:") || block.includes("places:") || block.includes("alethea:") || block.includes("```yaml") || block.includes("```yml")) {
+    if (block.includes("actors:") || block.includes('"actors"') || block.includes("scene:") || block.includes('"scene"') || block.includes("clock:") || block.includes('"clock"') || block.includes("passions:") || block.includes("combat:") || block.includes("relations:") || block.includes("world:") || block.includes("places:") || block.includes("alethea:") || block.includes("```yaml") || block.includes("```yml") || block.includes("```json")) {
       return block.replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
     }
   }
@@ -3889,10 +3991,64 @@ function extractLedgerRaw(rawContent) {
   if (openMatch && openMatch[1]) {
     return openMatch[1].replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
   }
+  const fenceMatch = rawContent.match(/```(?:yaml|yml|json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch && fenceMatch[1]) {
+    const inner = fenceMatch[1].trim();
+    if (inner.includes("scene") || inner.includes("actors") || inner.includes("clock") || inner.includes("ledger")) {
+      return inner;
+    }
+  }
+  const trimmed = rawContent.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}") && (trimmed.includes('"scene"') || trimmed.includes('"actors"') || trimmed.includes('"clock"') || trimmed.includes('"ledger"'))) {
+    return trimmed;
+  }
   return null;
+}
+function normalizeJournalEntry(entry, fallbackId = "EVT-1") {
+  if (!entry || typeof entry !== "object") {
+    return { id: fallbackId, mutations: [] };
+  }
+  let mutations = [];
+  if (Array.isArray(entry.mutations) && entry.mutations.length > 0) {
+    mutations = entry.mutations.map((m) => String(m));
+  } else if (entry.effects) {
+    if (typeof entry.effects === "object" && !Array.isArray(entry.effects)) {
+      for (const [actorKey, eff] of Object.entries(entry.effects)) {
+        if (eff) {
+          const actorName = actorKey.replace(/^@/, "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+          mutations.push(`${actorName}: ${String(eff)}`);
+        }
+      }
+    } else if (Array.isArray(entry.effects)) {
+      mutations = entry.effects.map((e) => String(e));
+    } else if (typeof entry.effects === "string" && entry.effects.trim()) {
+      mutations = [entry.effects.trim()];
+    }
+  }
+  let action = entry.action ? String(entry.action) : "";
+  if (!action && entry.cause) {
+    action = Array.isArray(entry.cause) ? entry.cause.join("; ") : String(entry.cause);
+  } else if (!action && entry.sensory) {
+    action = String(entry.sensory);
+  }
+  return {
+    ...entry,
+    id: entry.id ? String(entry.id) : fallbackId,
+    action,
+    mutations
+  };
 }
 function parseLedgerYaml(rawLedgerText) {
   let combined = {};
+  const trimmed = (rawLedgerText || "").trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}") || trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    try {
+      const parsed2 = JSON.parse(trimmed);
+      if (parsed2 && typeof parsed2 === "object" && !Array.isArray(parsed2)) {
+        combined = parsed2;
+      }
+    } catch {}
+  }
   const codeBlocks = [];
   let blockMatch;
   YAML_BLOCK_RE.lastIndex = 0;
@@ -3904,11 +4060,21 @@ function parseLedgerYaml(rawLedgerText) {
   function parseYamlChunkWithRecovery(chunk, target) {
     if (!chunk.trim())
       return;
+    const tr = chunk.trim();
+    if (tr.startsWith("{") && tr.endsWith("}")) {
+      try {
+        const parsedJson = JSON.parse(tr);
+        if (parsedJson && typeof parsedJson === "object") {
+          Object.assign(target, parsedJson);
+          return;
+        }
+      } catch {}
+    }
     let sanitizedChunk = chunk.replace(/^(\s*[a-zA-Z0-9_-]+):\s*\([^)]*\)/gm, "$1:").replace(/^(\s*knowledge):(?!\s)/gm, "$1: ").replace(/\{([A-Z,\s]{10,})\}/g, "{}");
     try {
-      const parsed = yaml.load(sanitizedChunk);
-      if (parsed && typeof parsed === "object") {
-        Object.assign(target, parsed);
+      const parsed2 = yaml.load(sanitizedChunk);
+      if (parsed2 && typeof parsed2 === "object") {
+        Object.assign(target, parsed2);
         return;
       }
     } catch {}
@@ -3936,13 +4102,15 @@ function parseLedgerYaml(rawLedgerText) {
     for (const block of codeBlocks) {
       parseYamlChunkWithRecovery(block, combined);
     }
-  } else {
+  } else if (Object.keys(combined).length === 0) {
     const stripped = rawLedgerText.split(/\r?\n/).filter((line) => !line.trim().startsWith("#")).join(`
 `);
     parseYamlChunkWithRecovery(stripped, combined);
   }
-  if (combined.ledger && typeof combined.ledger === "object" && !Array.isArray(combined.ledger)) {
-    combined = { ...combined.ledger, ...combined };
+  for (const envKey of ["ledger", "state", "turn_state", "world_state", "data", "sim"]) {
+    if (combined[envKey] && typeof combined[envKey] === "object" && !Array.isArray(combined[envKey])) {
+      combined = { ...combined[envKey], ...combined };
+    }
   }
   const actors = {};
   const standardRootKeys = new Set([
@@ -3992,6 +4160,14 @@ function parseLedgerYaml(rawLedgerText) {
       state: attireMatch[6]
     };
   }
+  const extraActors = combined.characters || combined.npcs || combined.cast;
+  if (extraActors && typeof extraActors === "object" && !Array.isArray(extraActors)) {
+    for (const [aKey, aVal] of Object.entries(extraActors)) {
+      if (aVal && typeof aVal === "object" && !Array.isArray(aVal)) {
+        actors[aKey] = { id: aKey, ...aVal };
+      }
+    }
+  }
   for (const [key, val] of Object.entries(actors)) {
     const anyVal = val;
     if (anyVal["Relationship Network"]?.stats) {
@@ -3999,17 +4175,21 @@ function parseLedgerYaml(rawLedgerText) {
     } else if (anyVal.relationship_network?.stats) {
       anyVal.stats = { ...anyVal.stats || {}, ...anyVal.relationship_network.stats };
     }
+    const extraStats = anyVal.attributes || anyVal.vitals || anyVal.parameters || anyVal.custom_stats;
+    if (extraStats && typeof extraStats === "object" && !Array.isArray(extraStats)) {
+      anyVal.stats = { ...anyVal.stats || {}, ...extraStats };
+    }
   }
   const result = {
     world: combined.world,
-    clock: combined.clock,
+    clock: combined.clock || (combined.time || combined.location ? { t: String(combined.time || ""), location: String(combined.location || "") } : undefined),
     scene: combined.scene,
     places: combined.places,
     roster: Array.isArray(combined.roster) ? combined.roster : undefined,
     actors,
     bplots: Array.isArray(combined.bplots) ? combined.bplots : undefined,
     opportunities: Array.isArray(combined.opportunities) ? combined.opportunities : undefined,
-    journal: Array.isArray(combined.journal) ? combined.journal : undefined
+    journal: Array.isArray(combined.journal) ? combined.journal.map((e, idx) => normalizeJournalEntry(e, `EVT-${idx + 1}`)) : undefined
   };
   return result;
 }
@@ -4047,8 +4227,8 @@ function deepMergeLedger(base, delta) {
     opportunities: delta.opportunities && delta.opportunities.length > 0 ? delta.opportunities : base.opportunities || [],
     journal: []
   };
-  const existingJournal = base.journal || [];
-  const newJournal = delta.journal || [];
+  const existingJournal = (base.journal || []).map((e, idx) => normalizeJournalEntry(e, `EVT-${idx + 1}`));
+  const newJournal = (delta.journal || []).map((e, idx) => normalizeJournalEntry(e, `EVT-${idx + 1}`));
   const journalMap = new Map;
   existingJournal.forEach((e) => journalMap.set(e.id, e));
   newJournal.forEach((e) => journalMap.set(e.id, e));
@@ -4588,7 +4768,7 @@ function parseToonDelta(toonText) {
 }
 
 // src/backend/director.ts
-var DIRECTOR_DIRECTIVES = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
+var DIRECTOR_DIRECTIVES = DEFAULT_DIRECTOR_SETTINGS2.systemPrompt;
 function extractChatId(context) {
   if (!context || typeof context !== "object")
     return null;
@@ -4633,7 +4813,7 @@ async function evaluateDirectorInterceptor(messages, context, getChatState, getD
   const isDry = Boolean(context?.dryRun || context?.isDryRun);
   if (!chatId || isDry || genType === "quiet")
     return messages;
-  const settings = getDirectorSettings ? await getDirectorSettings() : DEFAULT_DIRECTOR_SETTINGS;
+  const settings = getDirectorSettings ? await getDirectorSettings() : DEFAULT_DIRECTOR_SETTINGS2;
   const statSettings = getStatRulesSettings ? await getStatRulesSettings() : null;
   const directorActive = Boolean(settings?.enabled);
   const inlineStatsActive = Boolean(statSettings?.enabled && statSettings?.mode === "inline_interceptor");
@@ -4833,10 +5013,26 @@ function computeDirectorImpactDiff(prevLedger, nextLedger, directive) {
   }
   if (nextLedger?.journal && nextLedger.journal.length > 0) {
     const latest = nextLedger.journal[nextLedger.journal.length - 1];
-    if (Array.isArray(latest?.mutations)) {
+    if (Array.isArray(latest?.mutations) && latest.mutations.length > 0) {
       for (const m of latest.mutations) {
         if (m)
           mutations.push(String(m));
+      }
+    } else if (latest?.effects) {
+      if (typeof latest.effects === "object" && !Array.isArray(latest.effects)) {
+        for (const [k, v] of Object.entries(latest.effects)) {
+          if (v) {
+            const aName = k.replace(/^@/, "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+            mutations.push(`${aName}: ${v}`);
+          }
+        }
+      } else if (Array.isArray(latest.effects)) {
+        for (const m of latest.effects) {
+          if (m)
+            mutations.push(String(m));
+        }
+      } else if (typeof latest.effects === "string") {
+        mutations.push(latest.effects);
       }
     }
   }
@@ -5107,13 +5303,13 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     try {
       const jsonMatch = targetMessage.content.match(/\{[\s\S]*?"director_note"[\s\S]*?\}/);
       if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed && typeof parsed.director_note === "string") {
+        const parsed2 = JSON.parse(jsonMatch[0]);
+        if (parsed2 && typeof parsed2.director_note === "string") {
           spindle.sendToFrontend({
             type: "vn_director_note",
             data: {
-              directorNote: parsed.director_note.trim(),
-              threadLabel: (parsed.thread_label || "Active Thread").trim(),
+              directorNote: parsed2.director_note.trim(),
+              threadLabel: (parsed2.thread_label || "Active Thread").trim(),
               timestamp: new Date().toLocaleTimeString()
             }
           }, effectiveUserId);

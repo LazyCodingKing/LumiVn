@@ -1,6 +1,7 @@
 import type { SpindleAPI } from "lumiverse-spindle-types";
 import type { AssetManifest, LedgerData, DirectorSettings, DirectorLogEntry, StatRulesSettings } from "../shared/types.js";
 import { DEFAULT_STAT_RULES, DEFAULT_LEDGER_PROMPT } from "./default-rules.js";
+import { buildUnifiedRulebook } from "../shared/rulebook.js";
 
 const DEFAULT_MANIFEST: AssetManifest = {
   places: {},
@@ -327,13 +328,18 @@ export class StorageManager {
     if (this.statRulesSettingsCache) return this.statRulesSettingsCache;
     try {
       if (await this.spindle.storage.exists("stat_rules_settings.json")) {
-        const raw = await this.spindle.storage.read("stat_rules_settings.json");
-        const parsed = JSON.parse(raw);
         const loaded: StatRulesSettings = {
           mode: parsed.mode || DEFAULT_STAT_RULES_SETTINGS.mode,
           statRules: parsed.statRules?.trim() ? parsed.statRules : DEFAULT_STAT_RULES,
           ledgerPrompt: parsed.ledgerPrompt?.trim() ? parsed.ledgerPrompt : DEFAULT_LEDGER_PROMPT,
           rpgPrompt: parsed.rpgPrompt?.trim() ? parsed.rpgPrompt : DEFAULT_RPG_PROMPT,
+          unifiedRulebook: parsed.unifiedRulebook || buildUnifiedRulebook({
+            stats: parsed.statRules,
+            ledger: parsed.ledgerPrompt,
+            rpg: parsed.rpgPrompt,
+            customStats: parsed.customStats,
+          }),
+          customStats: Array.isArray(parsed.customStats) ? parsed.customStats : [],
           enabled: parsed.enabled ?? true,
         };
         this.statRulesSettingsCache = loaded;
@@ -342,7 +348,11 @@ export class StorageManager {
     } catch (e) {
       console.warn("[LumiVN] Failed to read stat_rules_settings.json, using defaults:", e);
     }
-    const fallback: StatRulesSettings = { ...DEFAULT_STAT_RULES_SETTINGS };
+    const fallback: StatRulesSettings = {
+      ...DEFAULT_STAT_RULES_SETTINGS,
+      unifiedRulebook: buildUnifiedRulebook(),
+      customStats: [],
+    };
     this.statRulesSettingsCache = fallback;
     return fallback;
   }

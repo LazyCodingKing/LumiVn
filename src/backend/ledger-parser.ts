@@ -3,7 +3,7 @@ import type { LedgerData, ActorDossier, PlaceNode, BPlot, Opportunity, JournalEn
 
 const ALL_DETAILS_RE = /<details\b[^>]*>[\s\S]*?<\/details>/gi;
 const DETAILS_BLOCK_EXTRACT_RE = /<details\b[^>]*>([\s\S]*?)<\/details>/gi;
-const YAML_BLOCK_RE = /```(?:yaml|yml)?\s*([\s\S]*?)```/gi;
+const YAML_BLOCK_RE = /```(?:yaml|yml|json)?\s*([\s\S]*?)```/gi;
 const THINK_TAGS_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
 const DIRECTOR_JSON_RE = /\{[\s\S]*?"director_note"[\s\S]*?\}\s*/gi;
 const PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
@@ -87,8 +87,11 @@ export function extractLedgerRaw(rawContent: string): string | null {
   for (const block of closedMatches) {
     if (
       block.includes("actors:") ||
+      block.includes('"actors"') ||
       block.includes("scene:") ||
+      block.includes('"scene"') ||
       block.includes("clock:") ||
+      block.includes('"clock"') ||
       block.includes("passions:") ||
       block.includes("combat:") ||
       block.includes("relations:") ||
@@ -96,7 +99,8 @@ export function extractLedgerRaw(rawContent: string): string | null {
       block.includes("places:") ||
       block.includes("alethea:") ||
       block.includes("```yaml") ||
-      block.includes("```yml")
+      block.includes("```yml") ||
+      block.includes("```json")
     ) {
       return block.replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
     }
@@ -115,10 +119,66 @@ export function extractLedgerRaw(rawContent: string): string | null {
   if (openMatch && openMatch[1]) {
     return openMatch[1].replace(/<summary[^>]*>[\s\S]*?<\/summary>/i, "").trim();
   }
+
+  // 4. Standalone code fence (```yaml or ```json) outside details
+  const fenceMatch = rawContent.match(/```(?:yaml|yml|json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch && fenceMatch[1]) {
+    const inner = fenceMatch[1].trim();
+    if (inner.includes("scene") || inner.includes("actors") || inner.includes("clock") || inner.includes("ledger")) {
+      return inner;
+    }
+  }
+
+  // 5. Standalone JSON root object
+  const trimmed = rawContent.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}") && (trimmed.includes('"scene"') || trimmed.includes('"actors"') || trimmed.includes('"clock"') || trimmed.includes('"ledger"'))) {
+    return trimmed;
+  }
+
   return null;
 }
 
 export const extractDetailsRaw = extractLedgerRaw;
+
+export function normalizeJournalEntry(entry: any, fallbackId: string = "EVT-1"): JournalEntry {
+  if (!entry || typeof entry !== "object") {
+    return { id: fallbackId, mutations: [] };
+  }
+
+  // Normalize mutations from mutations array or fallback to effects
+  let mutations: string[] = [];
+  if (Array.isArray(entry.mutations) && entry.mutations.length > 0) {
+    mutations = entry.mutations.map((m: any) => String(m));
+  } else if (entry.effects) {
+    if (typeof entry.effects === "object" && !Array.isArray(entry.effects)) {
+      for (const [actorKey, eff] of Object.entries(entry.effects)) {
+        if (eff) {
+          const actorName = actorKey.replace(/^@/, "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+          mutations.push(`${actorName}: ${String(eff)}`);
+        }
+      }
+    } else if (Array.isArray(entry.effects)) {
+      mutations = entry.effects.map((e: any) => String(e));
+    } else if (typeof entry.effects === "string" && entry.effects.trim()) {
+      mutations = [entry.effects.trim()];
+    }
+  }
+
+  // Normalize action fallback (if action is empty, fall back to cause or sensory)
+  let action = entry.action ? String(entry.action) : "";
+  if (!action && entry.cause) {
+    action = Array.isArray(entry.cause) ? entry.cause.join("; ") : String(entry.cause);
+  } else if (!action && entry.sensory) {
+    action = String(entry.sensory);
+  }
+
+  return {
+    ...entry,
+    id: entry.id ? String(entry.id) : fallbackId,
+    action,
+    mutations,
+  };
+}
 
 /**
  * Parses the raw Ledger details content into a structured LedgerData object.
@@ -126,7 +186,17 @@ export const extractDetailsRaw = extractLedgerRaw;
 export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
   let combined: Record<string, unknown> = {};
 
-  // Check for markdown code blocks (```yaml ... ```)
+  const trimmed = (rawLedgerText || "").trim();
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        combined = parsed;
+      }
+    } catch {}
+  }
+
+  // Check for markdown code blocks (```yaml ... ``` or ```json ... ```)
   const codeBlocks: string[] = [];
   let blockMatch: RegExpExecArray | null;
   YAML_BLOCK_RE.lastIndex = 0;
@@ -138,6 +208,18 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
 
   function parseYamlChunkWithRecovery(chunk: string, target: Record<string, unknown>): void {
     if (!chunk.trim()) return;
+    // Check if chunk is raw JSON
+    const tr = chunk.trim();
+    if (tr.startsWith("{") && tr.endsWith("}")) {
+      try {
+        const parsedJson = JSON.parse(tr);
+        if (parsedJson && typeof parsedJson === "object") {
+          Object.assign(target, parsedJson);
+          return;
+        }
+      } catch {}
+    }
+
     // Pre-sanitize known formatting quirks
     let sanitizedChunk = chunk
       .replace(/^(\s*[a-zA-Z0-9_-]+):\s*\([^)]*\)/gm, "$1:") // strip parenthetical annotations
@@ -179,7 +261,7 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
     for (const block of codeBlocks) {
       parseYamlChunkWithRecovery(block, combined);
     }
-  } else {
+  } else if (Object.keys(combined).length === 0) {
     // If no explicit code fence, clean out headers (## ...) and attempt recovery parse
     const stripped = rawLedgerText
       .split(/\r?\n/)
@@ -188,9 +270,11 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
     parseYamlChunkWithRecovery(stripped, combined);
   }
 
-  // Flatten nested "ledger" key if present
-  if (combined.ledger && typeof combined.ledger === "object" && !Array.isArray(combined.ledger)) {
-    combined = { ...(combined.ledger as Record<string, unknown>), ...combined };
+  // Flatten nested root wrapper envelopes if present (ledger, state, turn_state, world_state, data, sim)
+  for (const envKey of ["ledger", "state", "turn_state", "world_state", "data", "sim"]) {
+    if (combined[envKey] && typeof combined[envKey] === "object" && !Array.isArray(combined[envKey])) {
+      combined = { ...(combined[envKey] as Record<string, unknown>), ...combined };
+    }
   }
 
   // Normalize actor dossiers:
@@ -247,7 +331,18 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
     };
   }
 
-  // Normalize 21-Stat Network
+  // Intelligent multi-format normalization:
+  // Support custom characters/npcs/cast root keys
+  const extraActors = (combined.characters || combined.npcs || combined.cast) as Record<string, unknown> | undefined;
+  if (extraActors && typeof extraActors === "object" && !Array.isArray(extraActors)) {
+    for (const [aKey, aVal] of Object.entries(extraActors)) {
+      if (aVal && typeof aVal === "object" && !Array.isArray(aVal)) {
+        actors[aKey] = { id: aKey, ...(aVal as ActorDossier) };
+      }
+    }
+  }
+
+  // Normalize custom stats/attributes into actor stats dictionary
   for (const [key, val] of Object.entries(actors)) {
     const anyVal = val as any;
     if (anyVal["Relationship Network"]?.stats) {
@@ -255,18 +350,25 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
     } else if (anyVal.relationship_network?.stats) {
       anyVal.stats = { ...(anyVal.stats || {}), ...anyVal.relationship_network.stats };
     }
+    // Pull attributes, vitals, parameters, or custom_stats into stats
+    const extraStats = anyVal.attributes || anyVal.vitals || anyVal.parameters || anyVal.custom_stats;
+    if (extraStats && typeof extraStats === "object" && !Array.isArray(extraStats)) {
+      anyVal.stats = { ...(anyVal.stats || {}), ...extraStats };
+    }
   }
 
   const result: Partial<LedgerData> = {
     world: combined.world as Record<string, unknown> | undefined,
-    clock: combined.clock as LedgerData["clock"] | undefined,
+    clock: (combined.clock || (combined.time || combined.location ? { t: String(combined.time || ""), location: String(combined.location || "") } : undefined)) as LedgerData["clock"] | undefined,
     scene: combined.scene as LedgerData["scene"] | undefined,
     places: combined.places as Record<string, PlaceNode> | undefined,
     roster: Array.isArray(combined.roster) ? (combined.roster as LedgerData["roster"]) : undefined,
     actors,
     bplots: Array.isArray(combined.bplots) ? (combined.bplots as BPlot[]) : undefined,
     opportunities: Array.isArray(combined.opportunities) ? (combined.opportunities as Opportunity[]) : undefined,
-    journal: Array.isArray(combined.journal) ? (combined.journal as JournalEntry[]) : undefined,
+    journal: Array.isArray(combined.journal)
+      ? combined.journal.map((e: any, idx: number) => normalizeJournalEntry(e, `EVT-${idx + 1}`))
+      : undefined,
   };
 
   return result;
@@ -313,8 +415,8 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
     journal: [],
   };
 
-  const existingJournal = base.journal || [];
-  const newJournal = delta.journal || [];
+  const existingJournal = (base.journal || []).map((e, idx) => normalizeJournalEntry(e, `EVT-${idx + 1}`));
+  const newJournal = (delta.journal || []).map((e, idx) => normalizeJournalEntry(e, `EVT-${idx + 1}`));
   const journalMap = new Map<string, JournalEntry>();
   existingJournal.forEach(e => journalMap.set(e.id, e));
   newJournal.forEach(e => journalMap.set(e.id, e));

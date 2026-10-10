@@ -786,11 +786,11 @@ function getSpriteTransform(actorId) {
   try {
     const raw = localStorage.getItem(STORAGE_PREFIX + actorId.toLowerCase().trim());
     if (raw) {
-      const parsed = JSON.parse(raw);
+      const parsed2 = JSON.parse(raw);
       return {
-        scale: typeof parsed.scale === "number" ? parsed.scale : 1,
-        offsetX: typeof parsed.offsetX === "number" ? parsed.offsetX : 0,
-        offsetY: typeof parsed.offsetY === "number" ? parsed.offsetY : 0
+        scale: typeof parsed2.scale === "number" ? parsed2.scale : 1,
+        offsetX: typeof parsed2.offsetX === "number" ? parsed2.offsetX : 0,
+        offsetY: typeof parsed2.offsetY === "number" ? parsed2.offsetY : 0
       };
     }
   } catch {}
@@ -4050,7 +4050,10 @@ class StatsTab {
       return;
     }
     if (!actors[this.selectedActorId]) {
-      const withStats = actorIds.find((id) => actors[id]?.stats || actors[id]?.relations && Object.keys(actors[id].relations).length > 0);
+      const withStats = actorIds.find((id) => {
+        const a = actors[id];
+        return a && (a.stats && Object.keys(a.stats).length > 0 || a.relations && Object.keys(a.relations).length > 0);
+      });
       this.selectedActorId = withStats || actorIds[0];
     }
     const header = document.createElement("div");
@@ -4222,6 +4225,133 @@ class StatsTab {
       matrixSection.appendChild(matrixBox);
       this.root.appendChild(matrixSection);
     }
+    const standardKeys = new Set([
+      "T",
+      "A",
+      "R",
+      "F",
+      "Fam",
+      "G",
+      "Integ",
+      "Stress",
+      "CAU",
+      "GRD",
+      "PRD",
+      "EMP",
+      "STB",
+      "BLD",
+      "RX",
+      "RC",
+      "Rig",
+      "Mask",
+      "MIS",
+      "WV",
+      "COMP"
+    ]);
+    let customStatDefs = [];
+    try {
+      const savedDefs = localStorage.getItem("vn_custom_stats_definitions");
+      if (savedDefs)
+        customStatDefs = JSON.parse(savedDefs);
+    } catch {}
+    const customStatKeys = Array.from(new Set([
+      ...Object.keys(statsMatrix).filter((k) => !standardKeys.has(k)),
+      ...customStatDefs.map((d) => d.name)
+    ]));
+    const customSection = document.createElement("div");
+    customSection.className = "vn-section";
+    customSection.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h4 style="margin:0;">\uD83D\uDEE0️ Custom Stats &amp; Extended Attributes (${customStatKeys.length})</h4>
+        <button id="vn-toggle-add-stat-btn" style="background:#1e293b; border:1px solid #38bdf8; color:#38bdf8; font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px; cursor:pointer;">
+          ➕ Add Custom Stat
+        </button>
+      </div>
+      <div id="vn-add-stat-form" style="display:none; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:8px; margin-bottom:8px; gap:6px; flex-wrap:wrap; align-items:center;">
+        <input id="vn-new-stat-name" type="text" placeholder="Stat Name (e.g. Sanity)" style="background:#1e293b; color:#fff; border:1px solid #475569; border-radius:4px; padding:3px 6px; font-size:11px; flex:1; min-width:110px;" />
+        <input id="vn-new-stat-val" type="number" placeholder="Value (e.g. 80)" value="100" style="background:#1e293b; color:#fff; border:1px solid #475569; border-radius:4px; padding:3px 6px; font-size:11px; width:70px;" />
+        <input id="vn-new-stat-max" type="number" placeholder="Max (e.g. 100)" value="100" style="background:#1e293b; color:#fff; border:1px solid #475569; border-radius:4px; padding:3px 6px; font-size:11px; width:70px;" />
+        <button id="vn-confirm-add-stat-btn" style="background:#0284c7; color:#fff; border:none; border-radius:4px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">
+          Add
+        </button>
+      </div>
+    `;
+    const customGrid = document.createElement("div");
+    customGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px;";
+    if (customStatKeys.length === 0) {
+      customGrid.innerHTML = `<span class="vn-muted" style="padding:4px; font-size:11px; grid-column:1/-1;">No custom attributes added yet. Click &quot;Add Custom Stat&quot; to track Sanity, Mana, Corruption, etc.</span>`;
+    } else {
+      for (const k of customStatKeys) {
+        const def = customStatDefs.find((d) => d.name === k);
+        const maxVal = def?.max || 100;
+        const val = statsMatrix[k] !== undefined ? Number(statsMatrix[k]) : def?.defaultValue ?? 100;
+        const pct = Math.max(0, Math.min(100, val / maxVal * 100));
+        const card = document.createElement("div");
+        card.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 6px; padding: 6px 8px; font-size: 11px; position: relative;";
+        card.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+            <span style="color:#38bdf8; font-weight:700;">${k}</span>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <strong style="color:#f8fafc;">${val}</strong>
+              <button class="vn-remove-stat-btn" data-stat="${k}" style="background:transparent; border:none; color:#f87171; cursor:pointer; font-size:10px; padding:0 2px;" title="Remove Stat">\uD83D\uDDD1️</button>
+            </div>
+          </div>
+          <div style="background:#1e293b; border-radius:3px; height:5px; overflow:hidden;">
+            <div style="background:linear-gradient(90deg, #0284c7, #38bdf8); width:${pct}%; height:100%;"></div>
+          </div>
+        `;
+        customGrid.appendChild(card);
+      }
+    }
+    customSection.appendChild(customGrid);
+    this.root.appendChild(customSection);
+    const toggleAddBtn = customSection.querySelector("#vn-toggle-add-stat-btn");
+    const addForm = customSection.querySelector("#vn-add-stat-form");
+    const confirmAddBtn = customSection.querySelector("#vn-confirm-add-stat-btn");
+    const nameInput = customSection.querySelector("#vn-new-stat-name");
+    const valInput = customSection.querySelector("#vn-new-stat-val");
+    const maxInput = customSection.querySelector("#vn-new-stat-max");
+    toggleAddBtn?.addEventListener("click", () => {
+      if (!addForm)
+        return;
+      const isOpen = addForm.style.display === "flex";
+      addForm.style.display = isOpen ? "none" : "flex";
+      if (!isOpen && nameInput)
+        nameInput.focus();
+    });
+    confirmAddBtn?.addEventListener("click", () => {
+      const name = nameInput?.value?.trim();
+      if (!name)
+        return;
+      const val = valInput ? parseInt(valInput.value, 10) || 0 : 100;
+      const maxVal = maxInput ? parseInt(maxInput.value, 10) || 100 : 100;
+      if (!actor.stats)
+        actor.stats = {};
+      actor.stats[name] = val;
+      if (!customStatDefs.some((d) => d.name === name)) {
+        customStatDefs.push({ name, max: maxVal, defaultValue: val });
+        try {
+          localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(customStatDefs));
+        } catch {}
+      }
+      this.render(ledger);
+    });
+    customSection.querySelectorAll(".vn-remove-stat-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const statName = btn.dataset.stat;
+        if (!statName)
+          return;
+        if (actor.stats) {
+          delete actor.stats[statName];
+        }
+        customStatDefs = customStatDefs.filter((d) => d.name !== statName);
+        try {
+          localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(customStatDefs));
+        } catch {}
+        this.render(ledger);
+      });
+    });
     const passionsSection = document.createElement("div");
     passionsSection.className = "vn-section";
     passionsSection.innerHTML = `<h4>\uD83D\uDD25 Current Passions & Affect</h4>`;
@@ -4866,6 +4996,7 @@ class InventoryTab {
     const rawObjects = [
       ...placeData.resources || [],
       ...placeData.affordances || [],
+      ...ledger.scene?.affordances || [],
       ...inv.room || []
     ];
     const seenObjects = new Set;
@@ -6565,15 +6696,35 @@ class JournalTab {
         const timeStr = evt.time ? `<span class="vn-evt-time">[${evt.time}]</span> ` : "";
         const placeStr = evt.place ? `@ ${evt.place} ` : "";
         const outcomeBadge = evt.outcome ? `<span class="vn-outcome-${evt.outcome}">${evt.outcome}</span>` : "";
-        let mutationsHtml = "";
-        if (evt.mutations && evt.mutations.length > 0) {
-          mutationsHtml = `<ul class="vn-mutations-list">${evt.mutations.map((m) => `<li>${m}</li>`).join("")}</ul>`;
+        const allMutations = [];
+        if (Array.isArray(evt.mutations) && evt.mutations.length > 0) {
+          allMutations.push(...evt.mutations);
+        } else if (evt.effects) {
+          if (typeof evt.effects === "object" && !Array.isArray(evt.effects)) {
+            for (const [k, v] of Object.entries(evt.effects)) {
+              if (v) {
+                const aName = k.replace(/^@/, "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                allMutations.push(`${aName}: ${v}`);
+              }
+            }
+          } else if (Array.isArray(evt.effects)) {
+            allMutations.push(...evt.effects.map(String));
+          } else if (typeof evt.effects === "string") {
+            allMutations.push(evt.effects);
+          }
         }
+        let mutationsHtml = "";
+        if (allMutations.length > 0) {
+          mutationsHtml = `<ul class="vn-mutations-list">${allMutations.map((m) => `<li>${m}</li>`).join("")}</ul>`;
+        }
+        const actionText = evt.action || (Array.isArray(evt.cause) ? evt.cause.join("; ") : evt.cause) || "";
+        const sensoryHtml = evt.sensory && evt.sensory !== actionText ? `<div class="vn-evt-sensory" style="font-size: 11px; color: #94a3b8; font-style: italic; margin-top: 2px;">\uD83D\uDC41️ ${evt.sensory}</div>` : "";
         row.innerHTML = `
           <div class="vn-evt-header">
             <strong>${evt.id}</strong> ${timeStr}${placeStr}${outcomeBadge}
           </div>
-          <div class="vn-evt-action">${evt.action || ""}</div>
+          <div class="vn-evt-action">${actionText}</div>
+          ${sensoryHtml}
           ${mutationsHtml}
         `;
         eventsList.appendChild(row);
@@ -10879,8 +11030,6 @@ opportunities:
     due: "expiry condition"
 \`\`\`
 </details>`;
-
-// src/backend/storage.ts
 var DEFAULT_RPG_PROMPT = `RPG & SKILLS RULES DIRECTIVE:
 1. NARRATIVE RESOLUTION: Active skills, cooldowns, and resources are tracked and resolved client-side by the RPG engine. Focus narration on dramatic intent, tactical positioning, and dialogue.
 2. OUTCOMES: Describe consequences, physical reactions, and changes in passions without manual combat math.
@@ -10900,7 +11049,214 @@ SKILL TREES (Editable; parsed into interactive progression nodes):
 - Shadowstep: tier=1 | cost=1 | requires=[] | type=active | cd=1 | cost_res={mp:10} | formula={ATK}*1.4 | desc=Slip behind opponent to strike.
 - Assassinate: tier=2 | cost=2 | requires=[Shadowstep] | type=active | cd=3 | cost_res={mp:30} | formula={ATK}*2.5 | desc=Lethal ambush attack.
 - Haggling: tier=1 | cost=1 | requires=[] | type=passive | desc=Store trading prices discounted by 15%.`;
-var DEFAULT_DIRECTOR_SETTINGS = {
+var DEFAULT_DIRECTOR_SYSTEM_PROMPT = `You are LumiWorld, the private world-state director and senior fiction editor for an interactive Lumiverse simulation. You decide what the living world does behind the next visible reply and set the craft standard it is written to. You never write the reply, never speak for NPCs, and never decide what {{user}} does, thinks, or feels.
+
+INPUTS (use only what is visible; skip anything that depends on a missing field): clock, roster (lod, loc, status), places and routes (privacy, norm, traffic, resources), fronts, bplots (phase, ripple, next.due, carriers with version and cred, chain), opportunities, scene (place, participants, latents, pressures, recent_beats, affordances, stall, streak), world.facts, tone_weights, content_bounds, user state (outfit, hand slots, carried, posture, position), NPC dossiers (want_now, goals, beliefs, memories, secrets, relations, passions, profile dispositions/values/boundaries/red_lines/defense/tells, constraints, outfit, inventory, combat tier), the last reply, your previous note.
+
+WORLD RULES
+1. KNOWLEDGE FIREWALL. An NPC acts only on what they perceived (seen, or heard within earshot), were told, or hold in dossier beliefs. Name every person or thing as that NPC would: an unidentified creature stays 'the panda' to anyone who has not identified it. Never hand an NPC another NPC's secret, an offscreen event, or world truth. A hidden fact advances one exposure stage only when evidence is actually perceived. NPCs may misread, assume, or be wrong.
+2. OWN MOTIVES. Every LOD 3 NPC pursues their own want_now or goal and cooperates only when it pays them. Their goal is never to serve {{user}}. Refusing, stalling, bargaining, deceiving, withholding, retaliating, and ignoring are all valid. Give a tactic and its cost, never words.
+3. CAUSALITY. Every scheduled event needs a cause already on the ledger (due time, eta, routine, want, phase due). Nothing due means no scheduled event, but GROW still runs. No coincidence, no raised stakes, no arrival timed to the mood.
+4. CONTINUITY. Reuse exact names, place keys, numbers, and durations. Use only keys in places; anywhere else is 'elsewhere' with no minutes or traces. Facts about existing places, props, or history enter only through CANON; new people, motives, schedules, and pressures enter through GROW seeds. No new props, furniture, clothing, or rooms, except an ordinary fixture {{user}} touches (see CANON); ambient sound, light, and weather are not props. A new node needs a key and route minutes both ways, at most one per three turns. Roster loc and scene latents are the only source of NPC positions.
+5. PACING. A turn is 1-3 in-world minutes unless {{user}} states a time skip; after a skip, run the catch-up in PRESSURE. Nothing moves faster than route minutes. Anyone about to enter gets a precursor one turn earlier, never before window_opens.
+6. SETTING FIT. Match genre, era, tech, tone_weights, and content_bounds. Keep stakes at the setting's scale. Treat {{user}} as one entity among many, with no narrative privilege, protection, or punishment.
+7. VARIETY. Do not repeat a prop gesture, sensory cue, event vector, or opening verb from your previous note. A prop offered or refused once is retired or changes function. If scene.stall >= 2 or scene.streak >= 3, change the beat type this turn (an NPC pursuing a want, a due event, a seed trace, a physical complication).
+8. BOUNDARIES. No recap. No commands for {{user}}'s actions, feelings, or outcomes; NPCs may attempt, and the command stops at the attempt.
+9. RESPONSE GATE. Anything {{user}} does to, asks of, tells, or offers an NPC (touch, strike, order, question, claim, request, gift, threat, confession, bribe, deal, advance, taking an NPC's item) is an attempt, never an outcome. Resolve it from the dossier before choosing the tactic: (a) relations toward {{user}} (A, T, R, At, F, grudge, Fam, attachment, obligations) and relevant memories; (b) current passions; (c) dispositions, values, boundaries, red_lines, defense, constraints, want_now; (d) context: audience, witnesses, place privacy and norm, power gap as THIS NPC perceives it, physical state; (e) cost to them of complying versus refusing. Rate the act's intrusiveness to THIS NPC: routine (fits their role or norms) gets ordinary cooperation unless the dossier gives a reason against; personal or extreme (intimate, violent, humiliating, dangerous, secret-revealing, against a value) needs standing with {{user}} (trust, affection, fear, authority, obligation, leverage) that matches it, and without it the NPC hesitates, deflects, stalls, refuses, or resists. Questions and claims: the NPC answers, lies, withholds, or tests according to trust, self-interest, secrets, and belief. All outcomes are open, including compliance from fear or duty against their wish, which shows visible duress and a cost. Mood, intoxication, or one trait may shade the outcome, never decide it alone. Fear, awe, or deference may block an act or force it, by that NPC's dispositions. Rank or power {{user}} holds counts only if the NPC knows it (Rule 1). Neither yielding nor refusing is a default. The outcome is final: the reply may not add a softening, yield, or reversal the note did not state.
+10. INPUT FIDELITY. {{user}}'s message is complete and exact: it happened as typed and no more. Add no steps, preparations, transitions, speech, thoughts, gestures, or state changes for {{user}}. Embellish only how the typed action is perceived. Movement, entry, and exit are shown as the stated result, never with unstated prerequisites. A brief input gets a brief {{user}} presence; the world and NPCs carry the rest. Everything not stated carries over unchanged from the last reply and ledger: worn items, hand and carried items, posture, position, injuries, who holds what. State changes only if {{user}} states it, an NPC does it by the Response Gate, or a ledger event causes it. NPCs get the same lock. When {{user}} uses or takes a listed object within reach, it happens as typed; if an NPC owns or holds it, it is an attempt under Rule 9. Damage, consumption, and transfers are recorded by the ledger and are zero-sum.
+
+EDITOR'S CHARTER (what the reply must read like; apply it through CRAFT)
+- Open in motion on the direct consequence of {{user}}'s input; never restate it. Keep the established POV and tense. World detail interrupts after the first beat.
+- Dialogue carries subtext. People answer the question they wish was asked, deflect, interrupt, leave sentences unfinished, and say less than they mean. One idea per line, plain contractions, 'said' or an action beat for tags, no adverb tags, no exposition aimed at the reader, no named emotions.
+- Interiority is shown through observable behavior: a hand, a pause, a changed subject. No head-hopping. Never narrate {{user}}'s thoughts.
+- Narration uses concrete nouns and active verbs, one specific detail over three generic ones, varied sentence length, paragraphs of 2-4 sentences ending on an image or action, not a summary. No stacked similes, no 'a mix of X and Y', no stock phrases (orbs, shivers down the spine, a breath she didn't know she held, unreadable expression).
+- Every speaking NPC sounds like a person with a history, not like the narrator or the assistant. Tone follows tone_weights; comedy comes from character and situation, not from narrator commentary.
+- Momentum: every reply leaves one live thread the player can pull or ignore (an unexplained tell, a closing window, a visible cost). Show consequences of earlier choices. Never hand the player a menu of options.
+
+SLOTS (all required, in this order; sentences start with a command verb except in KNOWS and labeled SEED or PROMOTE lines; whole note 320-460 words)
+FIRST BEAT: Name which NPC responds first to {{user}}'s input, the outcome chosen by the RESPONSE GATE, at least one relations value toward {{user}} and one boundary, value, red_line, or want_now that decided it, and how it shows (accept, reciprocate, hesitate, deflect, answer, lie, refuse, push back, strike, flee, comply under duress, ignore at a cost). If no NPC is the target, name who notices first and how. If the input touches undefined canon, say what that NPC reveals, withholds, or distorts. On turn 1, name the first NPC action implied by the premise.
+LOCK: List as unchanged the user-side and scene state the reply must carry over (worn items, hand and carried items, posture, position, who holds what), taken only from the ledger or last reply; write 'unspecified' for anything not stated there. State that {{user}}'s typed action is complete as written. Skip {{user}}'s concealed facts.
+OPENING: Name the reply's first concrete image or action, taken from the NPC's FIRST BEAT reaction or the immediate sensory consequence of the typed action. It must not restate or paraphrase {{user}}'s input, add a movement for {{user}}, give a header, tagline, mood summary, or scene-setting line, or begin with weather, time, or a room description.
+KNOWS: Only LOD 3 NPCs and any NPC promoted this turn (see MUTATE); never other LOD 1-2 NPCs. For each: 'Name: perceived X; believes Y (conf); misreads Z; lacks W'. Facts only, not motives. 'lacks W' names only what that NPC could plausibly lack in-world; never name {{user}}'s concealed facts, even to cut them. Flag any hidden fact in play with who knows, who suspects, and the exposure stage.
+PRESENT: One entry for EVERY LOD 3 NPC and every NPC promoted this turn, none skipped: a tactic serving their own want_now plus its cost, chosen from what KNOWS says they perceive and believe, shaped by passions, defense, and relations. The cost uses only items already in the ledger or last reply. Each NPC's beat is exactly one gesture or one line; name the single one. Observing at a cost counts. At most one NPC reacts to {{user}}, and that reaction must match FIRST BEAT; the others pursue each other, a task, or the room. No two NPCs chase the same request or prop. Guarded secrets stay at subtle-trace stage.
+MUTATE: For the NPC reacting to {{user}}, and any LOD 3 NPC whose goal, bond, or status is touched: event type, GRV tier, and axes with sign (for example 'T- primary, A- secondary, shame passion'), taken from the stat_rules table; or 'none' when nothing specific happened. Name no numbers. Must match FIRST BEAT. If {{user}} directly engages a LOD 1-2 NPC, or one reacts as a witness, treat them as LOD 3 for this turn and write 'PROMOTE: id' for the ledger.
+WORLD: One believable moment of public clockwork matched to setting, phase, and weather, placed after the first beat. No public event repeats within 15 in-world minutes. A lasting change belongs in GROW (d), not here.
+OFFSCREEN: 1-3 LOD 1-2 NPCs whose errand, shift, or journey advances now, each with actor, activity, place key, minutes remaining, and at most one perceptible trace for the present scene (or none if too far or the place has no key). Positions must match roster loc or scene latents. A LOD 1-2 NPC at the scene's place is a possible witness: say whether they perceive, and promote them if they react. At most one arrival per turn. If nothing is relevant, write 'Leave all on routine.'
+GROW: Each turn advance the living world beyond {{user}} in ONE way, chosen by what the scene most lacks: (a) deepen a LOD 1-2 NPC who has no dossier depth: a want_now, a small errand, one visible mark of personality; (b) introduce a new background NPC, faction, or institution only if its cause is on the ledger (a front, bplot, carrier, routine, or opportunity) and its place key exists: state its want, its constraint, and how it could touch the scene later; (c) compound an existing unresolved front, opportunity, or grudge by one realistic step that did not need {{user}}, since pressure grows when ignored; (d) name one lasting environmental or systemic change (supply, rumor, schedule, price, rule) that makes a convenient outcome harder. Label each addition 'SEED:' with a one-line fact for the ledger. Seeds follow the knowledge firewall and are people, motives, schedules, and pressures, never props or rooms. If the scene is already crowded, write 'Grow: none needed.'
+PRESSURE: Default 'Hold: nothing due' plus the nearest absolute due among fronts, bplots, carriers, opportunities and latents; never invent a time. Act only on an event whose due or eta has been reached; for a bplot also require 15 in-world minutes since the last visible B-plot beat. Then state the event id and its new phase or ripple stage, and command one ordinary trace through a vector not used last time (ripple 1: none; 2: one mundane echo; 3: arrival). Phase and ripple never drop. The actor responds in proportion to what it knows. Show at most one event beat. After a time skip, list up to 3 events whose due passed, in due order, as 'id: phase' for the ledger to journal, and show a trace only for those whose ripple reached the scene. If active events are fewer than 2 (on turn 1 the premise does not count), name the strongest tension pair from the dossiers (high grudge, conflicting goals, leverage, unpaid obligation) for the ledger to seed; that seed counts as this turn's GROW.
+CRAFT: Per speaking NPC, one speech cue drawn from stress, audience, and dossier tells or defense (sentence length, formality, directness, evasiveness, interruption, rhythm), different for every NPC; swearing and catchphrases are not cues. One narration directive from the Editor's Charter that this beat most needs. One callback if the ledger has one: a memory, promise, grudge, or earlier seed whose consequence shows now. Embellish only what {{user}} typed and add nothing for them; never refer to {{user}}'s secrets. 2-3 concrete details from different senses plus one environment change that moves where someone looks or stands, physically consistent, landing mid-reply so it changes someone's behavior. SURFACE: show 1-2 objects in reach and relevant to the beat, as part of the room or in an NPC's use, never as a suggestion or list for {{user}}; rotate which objects appear, and an object an NPC holds stays in their hand until the ledger moves it. Objects come only from places.resources, affordances, user state, dossier outfit or inventory, or the last reply.
+CANON: New facts the reply cannot avoid establishing, one short line for world.facts, consistent with the ledger. Never invent explanations nobody asked for. When {{user}} probes, inspects, or asks, give one concrete, ledger-consistent discovery, partial if an NPC guards it; a withheld answer still leaves a visible tell. If {{user}} touches an ordinary fixture the place's function implies but the ledger does not list (a drawer, shelf, cabinet, switch), it exists: give its mundane contents in one line for places.resources, with nothing valuable or plot-critical unless a ledger cause supports it. Write 'None' otherwise.
+END ON: One unresolved physical or environmental moment where the reply stops, using only existing props and places, that also carries one thread to pull (an unexplained tell, a closing window, a visible cost). Not an NPC question aimed at {{user}}.
+Editor: Rewrite wording so sentences read naturally and plainly; cut melodrama and stacked figures.
+
+OUTPUT: one single-line JSON object inside <details><summary>Director</summary> ... </details>, nothing before or after:
+{"director_note":"FIRST BEAT: ... LOCK: ... OPENING: ... KNOWS: ... PRESENT: ... MUTATE: ... WORLD: ... OFFSCREEN: ... GROW: ... PRESSURE: ... CRAFT: ... CANON: ... END ON: ... Editor: ...","thread_label":"<3-6 words naming the dominant live thread; unchanged until the thread changes>"}
+No double quotes, line breaks, or markdown inside values; write possessives and contractions normally, and use single quotes only for quoted words.
+
+CHECK before output: no recap; no quoted speech; each NPC named as they know it; no secret leaked; no player-side secret named; FIRST BEAT outcome justified by a cited relations value plus a boundary, value, or want_now, never by mood or default compliance; LOCK matches ledger and last reply with nothing invented and no added steps for {{user}}; OPENING is a concrete first action or image; KNOWS and PRESENT cover only LOD 3 NPCs plus promoted ones, one beat each, matching FIRST BEAT; MUTATE matches FIRST BEAT, names tiers only, flags any PROMOTE; GROW is one SEED or 'Grow: none needed' with a ledger cause for any new NPC or faction; objects surfaced are existing and unsuggested; no new props except a mundane fixture touched by {{user}}; only existing place keys; OFFSCREEN positions match roster loc and no NPC is in both PRESENT and OFFSCREEN; PRESSURE is Hold unless due and every time in it exists in the ledger; CANON invents nothing unasked; END ON carries one thread and is not a question to {{user}}; all 13 slots plus Editor; valid one-line JSON.`;
+
+// src/shared/rulebook.ts
+function buildUnifiedRulebook(parts) {
+  const director = (parts?.director !== undefined ? parts.director : DEFAULT_DIRECTOR_SYSTEM_PROMPT).trim();
+  const stats = (parts?.stats !== undefined ? parts.stats : DEFAULT_STAT_RULES).trim();
+  const rpg = (parts?.rpg !== undefined ? parts.rpg : DEFAULT_RPG_PROMPT).trim();
+  const ledger = (parts?.ledger !== undefined ? parts.ledger : DEFAULT_LEDGER_PROMPT).trim();
+  const customStats = parts?.customStats || [];
+  const customStatsBlock = customStats.length > 0 ? `
+
+### \uD83D\uDEE0️ Custom Stats & Vitals
+` + customStats.map((c) => `- ${c.name}: default=${c.defaultValue ?? 100} | max=${c.max ?? 100} | cat=${c.category ?? "custom"}`).join(`
+`) : "";
+  return `# \uD83D\uDCD6 UNIFIED SIMULATION RULEBOOK
+
+## \uD83C\uDFAC 1. Director Directives
+${director}
+
+## \uD83D\uDCCA 2. Stat Rules & Vitals Matrix
+${stats}${customStatsBlock}
+
+## ⚔️ 3. RPG Skills & Progression Rules
+${rpg}
+
+## \uD83D\uDCDC 4. State Ledger Output Schema
+${ledger}
+`;
+}
+var DEFAULT_UNIFIED_RULEBOOK = buildUnifiedRulebook();
+function parseUnifiedRulebook(raw) {
+  const text = (raw || "").trim();
+  if (!text) {
+    return {
+      directorSystem: DEFAULT_DIRECTOR_SETTINGS.systemPrompt,
+      statRules: DEFAULT_STAT_RULES,
+      rpgPrompt: DEFAULT_RPG_PROMPT,
+      ledgerPrompt: DEFAULT_LEDGER_PROMPT,
+      customStats: []
+    };
+  }
+  if (text.startsWith("{") && text.endsWith("}") || text.startsWith("[") && text.endsWith("]")) {
+    try {
+      const obj = JSON.parse(text);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        return {
+          directorSystem: obj.director || obj.directorSystem || obj.systemPrompt || DEFAULT_DIRECTOR_SETTINGS.systemPrompt,
+          statRules: obj.stats || obj.statRules || DEFAULT_STAT_RULES,
+          rpgPrompt: obj.rpg || obj.rpgPrompt || obj.skills || DEFAULT_RPG_PROMPT,
+          ledgerPrompt: obj.ledger || obj.ledgerPrompt || obj.schema || DEFAULT_LEDGER_PROMPT,
+          customStats: Array.isArray(obj.customStats) ? obj.customStats : []
+        };
+      }
+    } catch {}
+  }
+  let directorSystem = "";
+  let statRules = "";
+  let rpgPrompt = "";
+  let ledgerPrompt = "";
+  const customStats = [];
+  const tagDirector = text.match(/\[DIRECTOR\]([\s\S]*?)\[\/DIRECTOR\]/i);
+  if (tagDirector)
+    directorSystem = tagDirector[1].trim();
+  const tagStats = text.match(/\[STATS?\]([\s\S]*?)\[\/STATS?\]/i);
+  if (tagStats)
+    statRules = tagStats[1].trim();
+  const tagRpg = text.match(/\[RPG\]([\s\S]*?)\[\/RPG\]/i);
+  if (tagRpg)
+    rpgPrompt = tagRpg[1].trim();
+  const tagLedger = text.match(/\[LEDGER\]([\s\S]*?)\[\/LEDGER\]/i);
+  if (tagLedger)
+    ledgerPrompt = tagLedger[1].trim();
+  const sectionHeaderRegex = /(?:^|\n)(#{1,3}\s+[^\n]+)/g;
+  const sections = [];
+  let lastIndex = 0;
+  let match;
+  let currentTitle = "Header";
+  while ((match = sectionHeaderRegex.exec(text)) !== null) {
+    const chunk = text.slice(lastIndex, match.index).trim();
+    if (chunk || lastIndex > 0) {
+      sections.push({ title: currentTitle, body: chunk });
+    }
+    currentTitle = match[1].replace(/^#{1,3}\s+/, "").trim();
+    lastIndex = match.index + match[0].length;
+  }
+  const lastChunk = text.slice(lastIndex).trim();
+  if (lastChunk) {
+    sections.push({ title: currentTitle, body: lastChunk });
+  }
+  for (const sec of sections) {
+    const t = sec.title.toLowerCase();
+    if (/director|world\s*rules|directive/i.test(t)) {
+      if (!directorSystem)
+        directorSystem = sec.body;
+    } else if (/stat\s*rule|vitals?\s*matrix|psychological|21-stat/i.test(t)) {
+      if (!statRules)
+        statRules = sec.body;
+    } else if (/rpg|skill|progression|combat\s*rules/i.test(t)) {
+      if (!rpgPrompt)
+        rpgPrompt = sec.body;
+    } else if (/ledger|state\s*output|schema/i.test(t)) {
+      if (!ledgerPrompt)
+        ledgerPrompt = sec.body;
+    } else if (/custom\s*stats?/i.test(t)) {
+      const lines = sec.body.split(`
+`);
+      for (const line of lines) {
+        const m = line.match(/^[-*]?\s*([A-Za-z0-9_]+)\s*[:=]\s*(?:default=)?([0-9]+)?(?:\s*\|\s*max=([0-9]+))?(?:\s*\|\s*cat=([A-Za-z0-9_]+))?/i);
+        if (m) {
+          customStats.push({
+            name: m[1],
+            defaultValue: m[2] ? parseInt(m[2], 10) : 100,
+            max: m[3] ? parseInt(m[3], 10) : 100,
+            category: m[4] || "custom"
+          });
+        }
+      }
+    }
+  }
+  if (!statRules && text.includes("<stat_rules>")) {
+    const sr = text.match(/<stat_rules>[\s\S]*?<\/stat_rules>/i);
+    if (sr)
+      statRules = sr[0];
+  }
+  if (!rpgPrompt && (text.includes("【Tree:") || text.includes("RPG & SKILLS"))) {
+    const rpgMatch = text.match(/(?:RPG & SKILLS[\s\S]*?|【Tree:[\s\S]*)$/i);
+    if (rpgMatch)
+      rpgPrompt = rpgMatch[0];
+  }
+  if (!ledgerPrompt && text.includes("<details><summary>State</summary>")) {
+    const lMatch = text.match(/<details><summary>State<\/summary>[\s\S]*?<\/details>/i);
+    if (lMatch)
+      ledgerPrompt = lMatch[0];
+  }
+  return {
+    directorSystem: directorSystem || DEFAULT_DIRECTOR_SYSTEM_PROMPT,
+    statRules: statRules || DEFAULT_STAT_RULES,
+    rpgPrompt: rpgPrompt || DEFAULT_RPG_PROMPT,
+    ledgerPrompt: ledgerPrompt || DEFAULT_LEDGER_PROMPT,
+    customStats
+  };
+}
+
+// src/backend/storage.ts
+var DEFAULT_RPG_PROMPT2 = `RPG & SKILLS RULES DIRECTIVE:
+1. NARRATIVE RESOLUTION: Active skills, cooldowns, and resources are tracked and resolved client-side by the RPG engine. Focus narration on dramatic intent, tactical positioning, and dialogue.
+2. OUTCOMES: Describe consequences, physical reactions, and changes in passions without manual combat math.
+
+SKILL TREES (Editable; parsed into interactive progression nodes):
+【Tree: Warrior】
+- Strike: tier=1 | cost=1 | requires=[] | type=active | cd=0 | cost_res={mp:0} | formula={ATK}*1.2 | desc=Basic decisive physical blow.
+- Cleave: tier=2 | cost=1 | requires=[Strike] | type=active | cd=2 | cost_res={mp:15} | formula={ATK}*1.8 | desc=Wide sweep dealing damage to targets.
+- Juggernaut: tier=3 | cost=2 | requires=[Cleave] | type=passive | desc=Armor mitigation increased by 20%.
+
+【Tree: Sorcery】
+- Spark: tier=1 | cost=1 | requires=[] | type=active | cd=0 | cost_res={mp:10} | formula={ATK}*1.2 | desc=Crackling bolt of electrical surge.
+- Firebolt: tier=2 | cost=1 | requires=[Spark] | type=active | cd=2 | cost_res={mp:25} | formula={ATK}*2.0+10 | desc=Hurl condensed flame sphere. Burns target.
+- Intense Flames: tier=3 | cost=2 | requires=[Firebolt] | type=passive | desc=Fire damage increased by +25%.
+
+【Tree: Rogue】
+- Shadowstep: tier=1 | cost=1 | requires=[] | type=active | cd=1 | cost_res={mp:10} | formula={ATK}*1.4 | desc=Slip behind opponent to strike.
+- Assassinate: tier=2 | cost=2 | requires=[Shadowstep] | type=active | cd=3 | cost_res={mp:30} | formula={ATK}*2.5 | desc=Lethal ambush attack.
+- Haggling: tier=1 | cost=1 | requires=[] | type=passive | desc=Store trading prices discounted by 15%.`;
+var DEFAULT_DIRECTOR_SETTINGS2 = {
   systemPrompt: `You are LumiWorld, the private world-state director and senior fiction editor for an interactive Lumiverse simulation. You decide what the living world does behind the next visible reply and set the craft standard it is written to. You never write the reply, never speak for NPCs, and never decide what {{user}} does, thinks, or feels.
 
 INPUTS (use only what is visible; skip anything that depends on a missing field): clock, roster (lod, loc, status), places and routes (privacy, norm, traffic, resources), fronts, bplots (phase, ripple, next.due, carriers with version and cred, chain), opportunities, scene (place, participants, latents, pressures, recent_beats, affordances, stall, streak), world.facts, tone_weights, content_bounds, user state (outfit, hand slots, carried, posture, position), NPC dossiers (want_now, goals, beliefs, memories, secrets, relations, passions, profile dispositions/values/boundaries/red_lines/defense/tells, constraints, outfit, inventory, combat tier), the last reply, your previous note.
@@ -11157,7 +11513,7 @@ class RpgTab {
     this.statRulesSettings = settings;
     const promptInput = this.root.querySelector("#vn-rpg-prompt-input");
     if (promptInput) {
-      promptInput.value = settings.rpgPrompt || DEFAULT_RPG_PROMPT;
+      promptInput.value = settings.rpgPrompt || DEFAULT_RPG_PROMPT2;
     }
   }
   render(ledger, manifest) {
@@ -11296,7 +11652,7 @@ class RpgTab {
       this.progression.skillPoints += 3;
       this.render(this.currentLedger, this.currentManifest);
     });
-    const promptText = this.statRulesSettings?.rpgPrompt || DEFAULT_RPG_PROMPT;
+    const promptText = this.statRulesSettings?.rpgPrompt || DEFAULT_RPG_PROMPT2;
     const categories = parseSkillTreesFromPrompt(promptText);
     const allParsedNodes = categories.flatMap((c) => c.nodes);
     const activeUnlockedNodes = allParsedNodes.filter((n) => n.type === "active" && this.progression.unlockedSkills.includes(n.name));
@@ -11536,11 +11892,11 @@ class RpgTab {
     const saveBtn = promptCard.querySelector("#vn-save-rpg-prompt-btn");
     const resetBtn = promptCard.querySelector("#vn-reset-rpg-prompt-btn");
     if (promptInput) {
-      promptInput.value = this.statRulesSettings?.rpgPrompt || DEFAULT_RPG_PROMPT;
+      promptInput.value = this.statRulesSettings?.rpgPrompt || DEFAULT_RPG_PROMPT2;
     }
     resetBtn?.addEventListener("click", () => {
       if (promptInput) {
-        promptInput.value = DEFAULT_RPG_PROMPT;
+        promptInput.value = DEFAULT_RPG_PROMPT2;
       }
     });
     saveBtn?.addEventListener("click", () => {
@@ -11701,7 +12057,7 @@ class DiagnosticsTab {
   activeFilter = "all";
   unsubscribeBus;
   statRulesSettings = null;
-  activeRulebookSubtab = "stats";
+  activeRulebookSubtab = "unified";
   constructor(ctx, audioEngine, menuBar) {
     this.ctx = ctx;
     this.audioEngine = audioEngine;
@@ -11725,7 +12081,7 @@ class DiagnosticsTab {
     if (ledgerInput)
       ledgerInput.value = settings.ledgerPrompt?.trim() ? settings.ledgerPrompt : DEFAULT_LEDGER_PROMPT;
     if (rpgInput)
-      rpgInput.value = settings.rpgPrompt?.trim() ? settings.rpgPrompt : DEFAULT_RPG_PROMPT;
+      rpgInput.value = settings.rpgPrompt?.trim() ? settings.rpgPrompt : DEFAULT_RPG_PROMPT2;
   }
   render(ledger, manifest) {
     this.currentLedger = ledger;
@@ -11905,11 +12261,11 @@ ${note.directorNote}`;
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid #1e293b; padding-bottom: 8px; flex-wrap: wrap; gap: 8px;">
         <div style="display: flex; align-items: center; gap: 6px;">
           <span style="font-size: 16px;">\uD83D\uDCD6</span>
-          <strong style="color: #38bdf8; font-size: 13px;">Unified Simulation Rulebook & Engine Controls</strong>
+          <strong style="color: #38bdf8; font-size: 13px;">Unified Simulation Rulebook &amp; Live Tab Preview</strong>
         </div>
         <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
           <select id="vn-rulebook-preset-select" style="background: #1e293b; color: #fde047; border: 1px solid #eab308; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-weight: 600; cursor: pointer;">
-            <option value="full">\uD83C\uDF1F Preset: Full RPG & Living World</option>
+            <option value="full">\uD83C\uDF1F Preset: Full RPG &amp; Living World</option>
             <option value="economy">⚡ Preset: Economy TOON (~80 tokens)</option>
             <option value="pure_vn">\uD83D\uDE80 Preset: Pure VN (0 Extra Tokens)</option>
           </select>
@@ -11923,40 +12279,84 @@ ${note.directorNote}`;
 
       <!-- Rulebook Sub-tabs Navigation -->
       <div style="display: flex; gap: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 6px; flex-wrap: wrap;">
-        <button class="vn-rb-subtab-btn" data-subtab="stats" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: 700;">\uD83D\uDCCA Stat Rules</button>
+        <button class="vn-rb-subtab-btn" data-subtab="unified" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: 700;">\uD83D\uDCD6 Unified Rulebook</button>
+        <button class="vn-rb-subtab-btn" data-subtab="stats" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">\uD83D\uDCCA Stat Rules</button>
         <button class="vn-rb-subtab-btn" data-subtab="director" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">\uD83C\uDFAC Director</button>
         <button class="vn-rb-subtab-btn" data-subtab="ledger" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">\uD83D\uDCDC Ledger Schema</button>
-        <button class="vn-rb-subtab-btn" data-subtab="rpg" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">⚔️ RPG & Skills</button>
+        <button class="vn-rb-subtab-btn" data-subtab="rpg" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">⚔️ RPG &amp; Skills</button>
+        <button class="vn-rb-subtab-btn" data-subtab="custom_stats" style="background: #1e293b; color: #fbbf24; border: 1px solid #d97706; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">\uD83D\uDEE0️ Custom Stats</button>
         <button class="vn-rb-subtab-btn" data-subtab="preview" style="background: #1e293b; color: #a78bfa; border: 1px solid #7c3aed; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">\uD83D\uDC41️ Live Tab Preview</button>
         <button class="vn-rb-subtab-btn" data-subtab="tabs" style="background: #1e293b; color: #34d399; border: 1px solid #059669; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">\uD83C\uDF9B️ HUD Tab Checkboxes</button>
       </div>
 
       <!-- Domain Panels -->
-      <div id="vn-rb-panel-stats" class="vn-rb-panel" style="display: flex; flex-direction: column; gap: 4px;">
-        <label style="font-size: 10px; color: #94a3b8;">21-Stat Network & Gravity Tiers Rules:</label>
-        <textarea id="vn-stat-rules-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      <div id="vn-rb-panel-unified" class="vn-rb-panel" style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <label style="font-size: 10px; color: #38bdf8; font-weight: 700;">Unified Rulebook (All Directives, Rules, RPG &amp; Ledger Combined):</label>
+          <div style="display: flex; gap: 4px;">
+            <button id="vn-parse-unified-btn" type="button" style="background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; cursor: pointer;">⚡ Parse &amp; Sync Sections</button>
+            <button id="vn-copy-unified-btn" type="button" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; font-size: 10px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">\uD83D\uDCCB Copy Rulebook</button>
+          </div>
+        </div>
+        <textarea id="vn-unified-rulebook-input" style="width: 100%; height: 160px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical; line-height: 1.4;"></textarea>
+      </div>
+
+      <div id="vn-rb-panel-stats" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 4px;">
+        <label style="font-size: 10px; color: #94a3b8;">21-Stat Network &amp; Gravity Tiers Rules:</label>
+        <textarea id="vn-stat-rules-input" style="width: 100%; height: 120px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       </div>
 
       <div id="vn-rb-panel-director" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 6px;">
         <label style="font-size: 10px; color: #94a3b8;">World Director System Directives:</label>
         <textarea id="vn-director-system-input" style="width: 100%; height: 90px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
-        <label style="font-size: 10px; color: #94a3b8;">Turn Notes & Scene Guidance (Macros: {{user}}, {{char}}):</label>
+        <label style="font-size: 10px; color: #94a3b8;">Turn Notes &amp; Scene Guidance (Macros: {{user}}, {{char}}):</label>
         <textarea id="vn-director-notes-input" style="width: 100%; height: 50px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       </div>
 
       <div id="vn-rb-panel-ledger" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 4px;">
-        <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema & Structural Directives:</label>
-        <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+        <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema &amp; Structural Directives:</label>
+        <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 120px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       </div>
 
       <div id="vn-rb-panel-rpg" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 4px;">
-        <label style="font-size: 10px; color: #94a3b8;">RPG & Skills Progression Rules (Tactical Directives & Trees):</label>
-        <textarea id="vn-rpg-rules-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+        <label style="font-size: 10px; color: #94a3b8;">RPG &amp; Skills Progression Rules (Tactical Directives &amp; Trees):</label>
+        <textarea id="vn-rpg-rules-input" style="width: 100%; height: 120px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       </div>
 
+      <div id="vn-rb-panel-custom_stats" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <label style="font-size: 11px; color: #fbbf24; font-weight: 700;">Custom Stats &amp; Attributes Schema:</label>
+          <span style="font-size: 10px; color: #94a3b8;">Add/remove custom attributes for all tabs</span>
+        </div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; background: #020617; border: 1px solid #334155; border-radius: 6px; padding: 8px; align-items: center;">
+          <input id="vn-diag-stat-name" type="text" placeholder="Stat Name (e.g. Sanity)" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 4px 6px; font-size: 11px; flex: 1; min-width: 110px;" />
+          <input id="vn-diag-stat-default" type="number" placeholder="Default" value="100" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 4px 6px; font-size: 11px; width: 65px;" />
+          <input id="vn-diag-stat-max" type="number" placeholder="Max" value="100" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 4px 6px; font-size: 11px; width: 65px;" />
+          <button id="vn-diag-add-stat-btn" type="button" style="background: #0284c7; color: #fff; border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer;">➕ Add Stat</button>
+        </div>
+        <div id="vn-diag-custom-stats-list" style="display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow-y: auto;"></div>
+      </div>
+
+      <!-- Live Tab Preview with dynamic tab picker -->
       <div id="vn-rb-panel-preview" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
-        <div style="font-size: 11px; color: #cbd5e1;">Live breakdown of how the current rulebook translates into tab features:</div>
-        <div id="vn-rb-preview-content" style="max-height: 180px; overflow-y: auto; background: #020617; border: 1px solid #334155; border-radius: 6px; padding: 8px; font-size: 11px;"></div>
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+          <span id="vn-preview-active-badge" style="font-size: 11px; color: #a78bfa; font-weight: 700;">\uD83D\uDFE2 Live Tab Preview (Select a tab below to inspect live rendering):</span>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+            <select id="vn-preview-tab-select" style="background: #1e293b; color: #f8fafc; border: 1px solid #7c3aed; border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: 600; cursor: pointer;">
+              <option value="stats">\uD83D\uDCCA Stats &amp; Vitals Matrix</option>
+              <option value="rpg">⚔️ RPG Skills &amp; Progression</option>
+              <option value="inventory">\uD83C\uDF92 Current Scene &amp; Items</option>
+              <option value="journal">\uD83D\uDCDC Story Journal &amp; Mutations</option>
+              <option value="characters">\uD83D\uDC65 Cast &amp; Living Dossiers</option>
+              <option value="map">\uD83D\uDDFA️ Map &amp; Exploration</option>
+              <option value="wardrobe">\uD83D\uDC57 Wardrobe &amp; Attire</option>
+              <option value="bplots">\uD83D\uDCE1 B-Plots &amp; Rumors</option>
+            </select>
+            <button id="vn-preview-refresh-btn" type="button" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; font-size: 10px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">\uD83D\uDD04 Refresh</button>
+          </div>
+        </div>
+        <div id="vn-rb-preview-viewport" style="background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 12px; max-height: 380px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
+        </div>
       </div>
 
       <div id="vn-rb-panel-tabs" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
@@ -11971,11 +12371,11 @@ ${note.directorNote}`;
         </div>
 
         <div style="border-top: 1px solid #334155; margin-top: 8px; padding-top: 8px;">
-          <div style="font-size: 11px; color: #38bdf8; font-weight: 700; margin-bottom: 6px;">Cinema & Stage Engine Toggles:</div>
+          <div style="font-size: 11px; color: #38bdf8; font-weight: 700; margin-bottom: 6px;">Cinema &amp; Stage Engine Toggles:</div>
           <div style="display: flex; flex-direction: column; gap: 4px;">
             <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
               <input type="checkbox" id="vn-hud-toggle-cinema-anim" checked style="accent-color: #6366f1; cursor: pointer;" />
-              <span>\uD83C\uDFAC Cinema Sprite Movement & Speaking Bob</span>
+              <span>\uD83C\uDFAC Cinema Sprite Movement &amp; Speaking Bob</span>
             </label>
             <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
               <input type="checkbox" id="vn-hud-toggle-card-sprites" checked style="accent-color: #6366f1; cursor: pointer;" />
@@ -11983,11 +12383,11 @@ ${note.directorNote}`;
             </label>
             <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
               <input type="checkbox" id="vn-hud-toggle-bgm" checked style="accent-color: #6366f1; cursor: pointer;" />
-              <span>\uD83C\uDFB5 Ambient BGM & Procedural Chords</span>
+              <span>\uD83C\uDFB5 Ambient BGM &amp; Procedural Chords</span>
             </label>
             <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
               <input type="checkbox" id="vn-hud-toggle-shaders" checked style="accent-color: #6366f1; cursor: pointer;" />
-              <span>\uD83C\uDF27️ Atmospheric Weather & Shaders</span>
+              <span>\uD83C\uDF27️ Atmospheric Weather &amp; Shaders</span>
             </label>
           </div>
         </div>
@@ -11995,25 +12395,90 @@ ${note.directorNote}`;
 
       <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px solid #1e293b; padding-top: 8px; margin-top: 4px;">
         <span style="font-size: 10px; color: #94a3b8;">Edits take effect dynamically in tabs and on next turn.</span>
-        <button id="vn-save-rules-btn" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; border: none; border-radius: 4px; padding: 6px 16px; font-size: 11px; font-weight: 700; cursor: pointer;">\uD83D\uDCBE Save & Apply Rulebook</button>
+        <button id="vn-save-rules-btn" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; border: none; border-radius: 4px; padding: 6px 16px; font-size: 11px; font-weight: 700; cursor: pointer;">\uD83D\uDCBE Save &amp; Apply Rulebook</button>
       </div>
     `;
     this.root.appendChild(rulesCard);
     const modeSelect = rulesCard.querySelector("#vn-mvu-mode-select");
     const presetSelect = rulesCard.querySelector("#vn-rulebook-preset-select");
+    const unifiedInput = rulesCard.querySelector("#vn-unified-rulebook-input");
     const rulesInput = rulesCard.querySelector("#vn-stat-rules-input");
     const ledgerInput = rulesCard.querySelector("#vn-ledger-prompt-input");
     const rpgInput = rulesCard.querySelector("#vn-rpg-rules-input");
     const directorSysInput = rulesCard.querySelector("#vn-director-system-input");
     const directorNotesInput = rulesCard.querySelector("#vn-director-notes-input");
     const saveRulesBtn = rulesCard.querySelector("#vn-save-rules-btn");
-    const previewContent = rulesCard.querySelector("#vn-rb-preview-content");
+    const parseUnifiedBtn = rulesCard.querySelector("#vn-parse-unified-btn");
+    const copyUnifiedBtn = rulesCard.querySelector("#vn-copy-unified-btn");
+    const previewTabSelect = rulesCard.querySelector("#vn-preview-tab-select");
+    const previewRefreshBtn = rulesCard.querySelector("#vn-preview-refresh-btn");
+    const previewViewport = rulesCard.querySelector("#vn-rb-preview-viewport");
+    const previewBadge = rulesCard.querySelector("#vn-preview-active-badge");
+    const customStatsListEl = rulesCard.querySelector("#vn-diag-custom-stats-list");
+    const addStatNameInput = rulesCard.querySelector("#vn-diag-stat-name");
+    const addStatDefaultInput = rulesCard.querySelector("#vn-diag-stat-default");
+    const addStatMaxInput = rulesCard.querySelector("#vn-diag-stat-max");
+    const addStatBtn = rulesCard.querySelector("#vn-diag-add-stat-btn");
+    let activeCustomStats = [];
+    try {
+      const savedDefs = localStorage.getItem("vn_custom_stats_definitions");
+      if (savedDefs)
+        activeCustomStats = JSON.parse(savedDefs);
+    } catch {}
+    const renderCustomStatsList = () => {
+      if (!customStatsListEl)
+        return;
+      if (activeCustomStats.length === 0) {
+        customStatsListEl.innerHTML = `<span style="font-size: 11px; color: #64748b; font-style: italic;">No custom stats defined yet.</span>`;
+        return;
+      }
+      customStatsListEl.innerHTML = activeCustomStats.map((st) => `
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+          <div>
+            <strong style="color: #38bdf8;">${st.name}</strong>
+            <span style="color: #94a3b8; font-size: 10px; margin-left: 6px;">(Default: ${st.defaultValue ?? 100} / Max: ${st.max ?? 100})</span>
+          </div>
+          <button class="vn-diag-del-stat-btn" data-stat="${st.name}" style="background: transparent; border: none; color: #f87171; cursor: pointer; font-size: 11px;">\uD83D\uDDD1️</button>
+        </div>
+      `).join("");
+      customStatsListEl.querySelectorAll(".vn-diag-del-stat-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const sName = btn.dataset.stat;
+          activeCustomStats = activeCustomStats.filter((s) => s.name !== sName);
+          try {
+            localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(activeCustomStats));
+          } catch {}
+          renderCustomStatsList();
+          syncUnifiedFromSections();
+          updateLiveTabPreview();
+        });
+      });
+    };
+    addStatBtn?.addEventListener("click", () => {
+      const name = addStatNameInput?.value?.trim();
+      if (!name)
+        return;
+      const defVal = addStatDefaultInput ? parseInt(addStatDefaultInput.value, 10) || 100 : 100;
+      const maxVal = addStatMaxInput ? parseInt(addStatMaxInput.value, 10) || 100 : 100;
+      if (!activeCustomStats.some((s) => s.name === name)) {
+        activeCustomStats.push({ name, defaultValue: defVal, max: maxVal, category: "custom" });
+        try {
+          localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(activeCustomStats));
+        } catch {}
+        if (addStatNameInput)
+          addStatNameInput.value = "";
+        renderCustomStatsList();
+        syncUnifiedFromSections();
+        updateLiveTabPreview();
+      }
+    });
+    renderCustomStatsList();
     const activeMode = this.statRulesSettings?.mode || "mvu_quiet";
     const activeRules = this.statRulesSettings?.statRules?.trim() || DEFAULT_STAT_RULES;
     const activeLedger = this.statRulesSettings?.ledgerPrompt?.trim() || DEFAULT_LEDGER_PROMPT;
-    const activeRpg = this.statRulesSettings?.rpgPrompt?.trim() || DEFAULT_RPG_PROMPT;
-    const activeDirSys = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
-    const activeDirNotes = DEFAULT_DIRECTOR_SETTINGS.userNotes || "";
+    const activeRpg = this.statRulesSettings?.rpgPrompt?.trim() || DEFAULT_RPG_PROMPT2;
+    const activeDirSys = DEFAULT_DIRECTOR_SETTINGS2.systemPrompt;
+    const activeDirNotes = DEFAULT_DIRECTOR_SETTINGS2.userNotes || "";
     if (modeSelect)
       modeSelect.value = activeMode;
     if (rulesInput)
@@ -12026,33 +12491,143 @@ ${note.directorNote}`;
       directorSysInput.value = activeDirSys;
     if (directorNotesInput)
       directorNotesInput.value = activeDirNotes;
-    const subtabBtns = rulesCard.querySelectorAll(".vn-rb-subtab-btn");
-    const updatePreview = () => {
-      if (!previewContent)
+    const syncUnifiedFromSections = () => {
+      if (!unifiedInput)
         return;
-      const skills = parseSkillTreesFromPrompt(rpgInput?.value || "");
-      previewContent.innerHTML = `
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <div>
-            <strong style="color: #fde047;">⚔️ RPG Skill Trees (${skills.length} categories parsed):</strong>
-            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
-              ${skills.map((cat) => `
-                <div style="background: #1e293b; border: 1px solid #475569; border-radius: 4px; padding: 4px 8px;">
-                  <span style="color: #38bdf8; font-weight: 700;">${cat.name}</span>: 
-                  <span style="color: #cbd5e1;">${cat.nodes.map((n) => n.name).join(", ")}</span>
-                </div>
-              `).join("")}
-            </div>
-          </div>
-          <div>
-            <strong style="color: #34d399;">\uD83D\uDCCA Active Stat Profile:</strong>
-            <div style="color: #94a3b8; font-size: 10px; margin-top: 2px;">
-              Tracks 21-stat network (T, A, R, F, Fam, G, Integ, Stress, CAU, GRD, PRD, EMP, STB, BLD, RX, RC, Rig, Mask, MIS, WV, COMP) with GRV1-GRV5 gravity tiers.
-            </div>
-          </div>
-        </div>
-      `;
+      unifiedInput.value = buildUnifiedRulebook({
+        director: directorSysInput?.value,
+        stats: rulesInput?.value,
+        rpg: rpgInput?.value,
+        ledger: ledgerInput?.value,
+        customStats: activeCustomStats
+      });
     };
+    const applyUnifiedToSections = (rawText) => {
+      const parsed2 = parseUnifiedRulebook(rawText);
+      if (directorSysInput)
+        directorSysInput.value = parsed2.directorSystem;
+      if (rulesInput)
+        rulesInput.value = parsed2.statRules;
+      if (rpgInput)
+        rpgInput.value = parsed2.rpgPrompt;
+      if (ledgerInput)
+        ledgerInput.value = parsed2.ledgerPrompt;
+      if (parsed2.customStats && parsed2.customStats.length > 0) {
+        for (const cs of parsed2.customStats) {
+          if (!activeCustomStats.some((s) => s.name === cs.name)) {
+            activeCustomStats.push(cs);
+          }
+        }
+        try {
+          localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(activeCustomStats));
+        } catch {}
+        renderCustomStatsList();
+      }
+    };
+    syncUnifiedFromSections();
+    parseUnifiedBtn?.addEventListener("click", () => {
+      if (unifiedInput) {
+        applyUnifiedToSections(unifiedInput.value);
+        if (parseUnifiedBtn) {
+          const orig = parseUnifiedBtn.textContent;
+          parseUnifiedBtn.textContent = "✓ Parsed & Synced!";
+          setTimeout(() => parseUnifiedBtn.textContent = orig, 1500);
+        }
+        updateLiveTabPreview();
+      }
+    });
+    copyUnifiedBtn?.addEventListener("click", async () => {
+      if (unifiedInput) {
+        await navigator.clipboard.writeText(unifiedInput.value).catch(() => {
+          return;
+        });
+        if (copyUnifiedBtn) {
+          const orig = copyUnifiedBtn.textContent;
+          copyUnifiedBtn.textContent = "✓ Copied!";
+          setTimeout(() => copyUnifiedBtn.textContent = orig, 1500);
+        }
+      }
+    });
+    let currentPreviewTab = previewTabSelect?.value || "stats";
+    const updateLiveTabPreview = (tabKey = currentPreviewTab) => {
+      currentPreviewTab = tabKey;
+      if (!previewViewport)
+        return;
+      previewViewport.innerHTML = "";
+      if (previewBadge) {
+        const labels = {
+          stats: "Stats & Vitals Matrix",
+          rpg: "RPG Skills & Trees",
+          inventory: "Current Scene & Items",
+          journal: "Story Journal & Mutations",
+          characters: "Cast & Living Dossiers",
+          map: "Map & Exploration",
+          wardrobe: "Wardrobe & Attire",
+          bplots: "B-Plots & Rumors"
+        };
+        previewBadge.textContent = `\uD83D\uDFE2 Live Preview: ${labels[tabKey] || tabKey} (Real-time sync)`;
+      }
+      const previewLedger = JSON.parse(JSON.stringify(this.currentLedger || {}));
+      if (!previewLedger.actors)
+        previewLedger.actors = {};
+      if (!previewLedger.actors["user"]) {
+        previewLedger.actors["user"] = {
+          id: "user",
+          name: "Player",
+          stats: { T: 50, A: 40, R: 60, Integ: 80, Stress: 20 },
+          combat: { tier: 1, lv: 1, hp: "100/100", mp: "50/50", pwr: 14, agi: 12, int: 16 }
+        };
+      }
+      const uActor = previewLedger.actors["user"];
+      if (!uActor.stats)
+        uActor.stats = {};
+      for (const def of activeCustomStats) {
+        if (uActor.stats[def.name] === undefined) {
+          uActor.stats[def.name] = def.defaultValue ?? 100;
+        }
+      }
+      let instance = null;
+      switch (tabKey) {
+        case "stats":
+          instance = new StatsTab;
+          break;
+        case "rpg":
+          instance = new RpgTab(this.ctx);
+          break;
+        case "inventory":
+          instance = new InventoryTab(this.ctx);
+          break;
+        case "journal":
+          instance = new JournalTab;
+          break;
+        case "characters":
+          instance = new CharactersTab(this.ctx);
+          break;
+        case "map":
+          instance = new MapTab(this.ctx);
+          break;
+        case "wardrobe":
+          instance = new WardrobeTab(this.ctx);
+          break;
+        case "bplots":
+          instance = new BPlotsTab;
+          break;
+        default:
+          instance = new StatsTab;
+          break;
+      }
+      if (instance) {
+        instance.render(previewLedger, this.currentManifest);
+        previewViewport.appendChild(instance.root);
+      }
+    };
+    previewTabSelect?.addEventListener("change", () => {
+      updateLiveTabPreview(previewTabSelect.value);
+    });
+    previewRefreshBtn?.addEventListener("click", () => {
+      updateLiveTabPreview(previewTabSelect?.value || currentPreviewTab);
+    });
+    const subtabBtns = rulesCard.querySelectorAll(".vn-rb-subtab-btn");
     subtabBtns.forEach((btn) => {
       btn.addEventListener("click", () => {
         const target = btn.dataset.subtab;
@@ -12074,7 +12649,16 @@ ${note.directorNote}`;
         if (activePanel)
           activePanel.style.display = "flex";
         if (target === "preview")
-          updatePreview();
+          updateLiveTabPreview();
+        if (target === "unified")
+          syncUnifiedFromSections();
+      });
+    });
+    [rulesInput, rpgInput, ledgerInput, directorSysInput].forEach((inp) => {
+      inp?.addEventListener("input", () => {
+        syncUnifiedFromSections();
+        if (this.activeRulebookSubtab === "preview")
+          updateLiveTabPreview();
       });
     });
     presetSelect?.addEventListener("change", () => {
@@ -12103,10 +12687,12 @@ ${note.directorNote}`;
         if (ledgerInput)
           ledgerInput.value = DEFAULT_LEDGER_PROMPT;
         if (rpgInput)
-          rpgInput.value = DEFAULT_RPG_PROMPT;
+          rpgInput.value = DEFAULT_RPG_PROMPT2;
         if (directorSysInput)
-          directorSysInput.value = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
+          directorSysInput.value = DEFAULT_DIRECTOR_SETTINGS2.systemPrompt;
       }
+      syncUnifiedFromSections();
+      updateLiveTabPreview();
     });
     rulesCard.querySelectorAll(".vn-tab-checkbox").forEach((cb) => {
       cb.addEventListener("change", () => {
@@ -12154,11 +12740,22 @@ ${note.directorNote}`;
       this.ctx?.sendToBackend?.({ type: "vn_get_stat_rules_settings" });
     }
     saveRulesBtn?.addEventListener("click", () => {
+      if (this.activeRulebookSubtab === "unified" && unifiedInput) {
+        applyUnifiedToSections(unifiedInput.value);
+      }
       const updated = {
         mode: modeSelect?.value || "mvu_quiet",
         statRules: rulesInput?.value?.trim() || DEFAULT_STAT_RULES,
         ledgerPrompt: ledgerInput?.value?.trim() || DEFAULT_LEDGER_PROMPT,
-        rpgPrompt: rpgInput?.value?.trim() || DEFAULT_RPG_PROMPT,
+        rpgPrompt: rpgInput?.value?.trim() || DEFAULT_RPG_PROMPT2,
+        unifiedRulebook: unifiedInput?.value?.trim() || buildUnifiedRulebook({
+          director: directorSysInput?.value,
+          stats: rulesInput?.value,
+          rpg: rpgInput?.value,
+          ledger: ledgerInput?.value,
+          customStats: activeCustomStats
+        }),
+        customStats: activeCustomStats,
         enabled: presetSelect?.value !== "pure_vn"
       };
       this.statRulesSettings = updated;
@@ -12170,12 +12767,13 @@ ${note.directorNote}`;
         this.ctx?.sendToBackend?.({
           type: "vn_save_director_settings",
           settings: {
-            systemPrompt: directorSysInput.value.trim() || DEFAULT_DIRECTOR_SETTINGS.systemPrompt,
+            systemPrompt: directorSysInput.value.trim() || DEFAULT_DIRECTOR_SETTINGS2.systemPrompt,
             userNotes: directorNotesInput?.value?.trim() || "",
             enabled: presetSelect?.value !== "pure_vn"
           }
         });
       }
+      updateLiveTabPreview();
       if (saveRulesBtn) {
         const orig = saveRulesBtn.textContent;
         saveRulesBtn.textContent = "✓ Rulebook Saved & Applied!";
@@ -15043,14 +15641,25 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
         <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">
           <!-- Sub-tabs bar -->
           <div style="display: flex; gap: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 6px; flex-wrap: wrap;">
-            <button type="button" class="vn-dr-subtab-btn" data-subtab="director" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer; font-weight: 700;">\uD83C\uDFAC Director</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="unified" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer; font-weight: 700;">\uD83D\uDCD6 Rulebook</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="director" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83C\uDFAC Director</button>
             <button type="button" class="vn-dr-subtab-btn" data-subtab="stats" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83D\uDCCA Stat Rules</button>
             <button type="button" class="vn-dr-subtab-btn" data-subtab="ledger" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83D\uDCDC Ledger Schema</button>
             <button type="button" class="vn-dr-subtab-btn" data-subtab="rpg" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">⚔️ RPG Rules</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="custom_stats" style="background: #1e293b; color: #fbbf24; border: 1px solid #d97706; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83D\uDEE0️ Custom Stats</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="preview" style="background: #1e293b; color: #a78bfa; border: 1px solid #7c3aed; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83D\uDC41️ Preview</button>
             <button type="button" class="vn-dr-subtab-btn" data-subtab="tabs" style="background: #1e293b; color: #34d399; border: 1px solid #059669; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83C\uDF9B️ HUD Tabs</button>
           </div>
 
-          <div id="vn-dr-panel-director" class="vn-dr-panel" style="display: flex; flex-direction: column; gap: 8px;">
+          <div id="vn-dr-panel-unified" class="vn-dr-panel" style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label style="font-size: 10px; color: #38bdf8; font-weight: 700;">Combined Simulation Rulebook:</label>
+              <button id="vn-dr-parse-btn" type="button" style="background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; cursor: pointer;">⚡ Parse &amp; Sync</button>
+            </div>
+            <textarea id="vn-drawer-unified-rulebook" rows="8" placeholder="Paste or edit unified rulebook..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 6px; resize: vertical; line-height: 1.4;"></textarea>
+          </div>
+
+          <div id="vn-dr-panel-director" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 8px;">
             <div>
               <label for="vn-director-system" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; display: block; margin-bottom: 4px;">
                 Director System Directives
@@ -15078,6 +15687,33 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
           <div id="vn-dr-panel-rpg" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 4px;">
             <label style="font-size: 10px; color: #94a3b8;">RPG & Skills Progression Directives:</label>
             <textarea id="vn-drawer-rpg-prompt" rows="6" style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 8px; resize: vertical;"></textarea>
+          </div>
+
+          <div id="vn-dr-panel-custom_stats" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 6px;">
+            <label style="font-size: 10px; color: #fbbf24; font-weight: 700;">Custom Stats &amp; Attributes:</label>
+            <div style="display: flex; gap: 4px; align-items: center;">
+              <input id="vn-dr-new-stat-name" type="text" placeholder="Stat Name" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 2px 6px; font-size: 10px; flex: 1;" />
+              <input id="vn-dr-new-stat-val" type="number" placeholder="Val" value="100" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 2px 4px; font-size: 10px; width: 50px;" />
+              <button id="vn-dr-add-stat-btn" type="button" style="background: #0284c7; color: #fff; border: none; border-radius: 4px; padding: 2px 8px; font-size: 10px; font-weight: 700; cursor: pointer;">Add</button>
+            </div>
+            <div id="vn-dr-custom-stats-list" style="display: flex; flex-direction: column; gap: 3px; max-height: 100px; overflow-y: auto;"></div>
+          </div>
+
+          <div id="vn-dr-panel-preview" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <select id="vn-dr-preview-tab-select" style="background: #1e293b; color: #f8fafc; border: 1px solid #7c3aed; border-radius: 4px; padding: 2px 6px; font-size: 10px;">
+                <option value="stats">\uD83D\uDCCA Stats Tab</option>
+                <option value="rpg">⚔️ RPG Tab</option>
+                <option value="inventory">\uD83C\uDF92 Current Scene</option>
+                <option value="journal">\uD83D\uDCDC Journal Tab</option>
+                <option value="characters">\uD83D\uDC65 Cast Tab</option>
+                <option value="map">\uD83D\uDDFA️ Map Tab</option>
+                <option value="wardrobe">\uD83D\uDC57 Wardrobe Tab</option>
+                <option value="bplots">\uD83D\uDCE1 B-Plots Tab</option>
+              </select>
+              <button id="vn-dr-preview-refresh-btn" type="button" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; font-size: 9px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">\uD83D\uDD04 Refresh</button>
+            </div>
+            <div id="vn-dr-preview-viewport" style="background: #020617; border: 1px solid #334155; border-radius: 6px; padding: 8px; max-height: 240px; overflow-y: auto;"></div>
           </div>
 
           <div id="vn-dr-panel-tabs" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 6px;">
@@ -15273,21 +15909,191 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
   };
   tabLogsBtn?.addEventListener("click", () => setConsoleTab("logs"));
   tabDirectorBtn?.addEventListener("click", () => setConsoleTab("director"));
+  const drawerUnified = root.querySelector("#vn-drawer-unified-rulebook");
+  const drParseBtn = root.querySelector("#vn-dr-parse-btn");
   const drawerStatRules = root.querySelector("#vn-drawer-stat-rules");
   const drawerLedgerPrompt = root.querySelector("#vn-drawer-ledger-prompt");
   const drawerRpgPrompt = root.querySelector("#vn-drawer-rpg-prompt");
+  const drPreviewSelect = root.querySelector("#vn-dr-preview-tab-select");
+  const drPreviewRefresh = root.querySelector("#vn-dr-preview-refresh-btn");
+  const drPreviewViewport = root.querySelector("#vn-dr-preview-viewport");
+  const drNewStatName = root.querySelector("#vn-dr-new-stat-name");
+  const drNewStatVal = root.querySelector("#vn-dr-new-stat-val");
+  const drAddStatBtn = root.querySelector("#vn-dr-add-stat-btn");
+  const drCustomStatsList = root.querySelector("#vn-dr-custom-stats-list");
+  let drawerCustomStats = [];
+  try {
+    const s = localStorage.getItem("vn_custom_stats_definitions");
+    if (s)
+      drawerCustomStats = JSON.parse(s);
+  } catch {}
+  const renderDrawerCustomStats = () => {
+    if (!drCustomStatsList)
+      return;
+    if (drawerCustomStats.length === 0) {
+      drCustomStatsList.innerHTML = `<span style="font-size:10px; color:#64748b; font-style:italic;">No custom stats defined.</span>`;
+      return;
+    }
+    drCustomStatsList.innerHTML = drawerCustomStats.map((st) => `
+      <div style="background:#1e293b; border:1px solid #334155; border-radius:3px; padding:2px 6px; display:flex; justify-content:space-between; align-items:center; font-size:10px;">
+        <span><strong style="color:#38bdf8;">${st.name}</strong> <span style="color:#94a3b8;">(${st.defaultValue ?? 100})</span></span>
+        <button class="vn-dr-del-stat-btn" data-stat="${st.name}" style="background:transparent; border:none; color:#f87171; cursor:pointer; font-size:10px;">\uD83D\uDDD1️</button>
+      </div>
+    `).join("");
+    drCustomStatsList.querySelectorAll(".vn-dr-del-stat-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sName = btn.dataset.stat;
+        drawerCustomStats = drawerCustomStats.filter((s) => s.name !== sName);
+        try {
+          localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(drawerCustomStats));
+        } catch {}
+        renderDrawerCustomStats();
+        syncDrawerUnified();
+        updateDrawerPreview();
+      });
+    });
+  };
+  drAddStatBtn?.addEventListener("click", () => {
+    const name = drNewStatName?.value?.trim();
+    if (!name)
+      return;
+    const val = drNewStatVal ? parseInt(drNewStatVal.value, 10) || 100 : 100;
+    if (!drawerCustomStats.some((s) => s.name === name)) {
+      drawerCustomStats.push({ name, defaultValue: val, max: val, category: "custom" });
+      try {
+        localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(drawerCustomStats));
+      } catch {}
+      if (drNewStatName)
+        drNewStatName.value = "";
+      renderDrawerCustomStats();
+      syncDrawerUnified();
+      updateDrawerPreview();
+    }
+  });
+  renderDrawerCustomStats();
+  const syncDrawerUnified = () => {
+    if (!drawerUnified)
+      return;
+    drawerUnified.value = buildUnifiedRulebook({
+      director: systemTextarea?.value,
+      stats: drawerStatRules?.value,
+      rpg: drawerRpgPrompt?.value,
+      ledger: drawerLedgerPrompt?.value,
+      customStats: drawerCustomStats
+    });
+  };
+  const applyDrawerUnified = (rawText) => {
+    const parsed2 = parseUnifiedRulebook(rawText);
+    if (systemTextarea)
+      systemTextarea.value = parsed2.directorSystem;
+    if (drawerStatRules)
+      drawerStatRules.value = parsed2.statRules;
+    if (drawerRpgPrompt)
+      drawerRpgPrompt.value = parsed2.rpgPrompt;
+    if (drawerLedgerPrompt)
+      drawerLedgerPrompt.value = parsed2.ledgerPrompt;
+    if (parsed2.customStats && parsed2.customStats.length > 0) {
+      for (const cs of parsed2.customStats) {
+        if (!drawerCustomStats.some((s) => s.name === cs.name)) {
+          drawerCustomStats.push(cs);
+        }
+      }
+      try {
+        localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(drawerCustomStats));
+      } catch {}
+      renderDrawerCustomStats();
+    }
+  };
+  drParseBtn?.addEventListener("click", () => {
+    if (drawerUnified) {
+      applyDrawerUnified(drawerUnified.value);
+      if (drParseBtn) {
+        const orig = drParseBtn.textContent;
+        drParseBtn.textContent = "✓ Synced!";
+        setTimeout(() => drParseBtn.textContent = orig, 1500);
+      }
+      updateDrawerPreview();
+    }
+  });
   if (drawerStatRules)
     drawerStatRules.value = DEFAULT_STAT_RULES;
   if (drawerLedgerPrompt)
     drawerLedgerPrompt.value = DEFAULT_LEDGER_PROMPT;
   if (drawerRpgPrompt)
-    drawerRpgPrompt.value = DEFAULT_RPG_PROMPT;
+    drawerRpgPrompt.value = DEFAULT_RPG_PROMPT2;
+  syncDrawerUnified();
+  systemTextarea?.addEventListener("input", syncDrawerUnified);
+  drawerStatRules?.addEventListener("input", syncDrawerUnified);
+  drawerLedgerPrompt?.addEventListener("input", syncDrawerUnified);
+  drawerRpgPrompt?.addEventListener("input", syncDrawerUnified);
+  const updateDrawerPreview = (tabKey = drPreviewSelect?.value || "stats") => {
+    if (!drPreviewViewport)
+      return;
+    drPreviewViewport.innerHTML = "";
+    const simLedger = JSON.parse(JSON.stringify(latestLedgerData || {}));
+    if (!simLedger.actors)
+      simLedger.actors = {};
+    if (!simLedger.actors["user"]) {
+      simLedger.actors["user"] = {
+        id: "user",
+        name: "Player",
+        stats: { T: 50, A: 40, R: 60, Stress: 15 },
+        combat: { tier: 1, lv: 1, hp: "100/100", mp: "50/50", pwr: 14, agi: 12 }
+      };
+    }
+    const userActor = simLedger.actors["user"];
+    if (!userActor.stats)
+      userActor.stats = {};
+    for (const def of drawerCustomStats) {
+      if (userActor.stats[def.name] === undefined) {
+        userActor.stats[def.name] = def.defaultValue ?? 100;
+      }
+    }
+    let instance = null;
+    switch (tabKey) {
+      case "stats":
+        instance = new StatsTab;
+        break;
+      case "rpg":
+        instance = new RpgTab(ctx);
+        break;
+      case "inventory":
+        instance = new InventoryTab(ctx);
+        break;
+      case "journal":
+        instance = new JournalTab;
+        break;
+      case "characters":
+        instance = new CharactersTab(ctx);
+        break;
+      case "map":
+        instance = new MapTab(ctx);
+        break;
+      case "wardrobe":
+        instance = new WardrobeTab(ctx);
+        break;
+      case "bplots":
+        instance = new BPlotsTab;
+        break;
+      default:
+        instance = new StatsTab;
+        break;
+    }
+    if (instance) {
+      instance.render(simLedger, latestManifestData);
+      drPreviewViewport.appendChild(instance.root);
+    }
+  };
+  drPreviewSelect?.addEventListener("change", () => updateDrawerPreview());
+  drPreviewRefresh?.addEventListener("click", () => updateDrawerPreview());
+  let activeDrawerSubtab = "unified";
   const drSubtabBtns = root.querySelectorAll(".vn-dr-subtab-btn");
   drSubtabBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
       const target = btn.dataset.subtab;
       if (!target)
         return;
+      activeDrawerSubtab = target;
       drSubtabBtns.forEach((b) => {
         b.style.background = "#1e293b";
         b.style.color = "#94a3b8";
@@ -15302,6 +16108,10 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
       const activePanel = root.querySelector(`#vn-dr-panel-${target}`);
       if (activePanel)
         activePanel.style.display = "flex";
+      if (target === "preview")
+        updateDrawerPreview();
+      if (target === "unified")
+        syncDrawerUnified();
     });
   });
   try {
@@ -15358,6 +16168,9 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
     });
   }
   saveBtn?.addEventListener("click", () => {
+    if (activeDrawerSubtab === "unified" && drawerUnified) {
+      applyDrawerUnified(drawerUnified.value);
+    }
     const settings = {
       systemPrompt: systemTextarea?.value || "",
       userNotes: notesTextarea?.value || "",
@@ -15367,18 +16180,27 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
       type: "vn_save_director_settings",
       settings
     });
-    if (drawerStatRules || drawerLedgerPrompt || drawerRpgPrompt) {
+    if (drawerStatRules || drawerLedgerPrompt || drawerRpgPrompt || drawerUnified) {
       ctx.sendToBackend?.({
         type: "vn_save_stat_rules_settings",
         settings: {
           mode: "mvu_quiet",
           statRules: drawerStatRules?.value?.trim() || DEFAULT_STAT_RULES,
           ledgerPrompt: drawerLedgerPrompt?.value?.trim() || DEFAULT_LEDGER_PROMPT,
-          rpgPrompt: drawerRpgPrompt?.value?.trim() || DEFAULT_RPG_PROMPT,
+          rpgPrompt: drawerRpgPrompt?.value?.trim() || DEFAULT_RPG_PROMPT2,
+          unifiedRulebook: drawerUnified?.value?.trim() || buildUnifiedRulebook({
+            director: systemTextarea?.value,
+            stats: drawerStatRules?.value,
+            rpg: drawerRpgPrompt?.value,
+            ledger: drawerLedgerPrompt?.value,
+            customStats: drawerCustomStats
+          }),
+          customStats: drawerCustomStats,
           enabled: true
         }
       });
     }
+    updateDrawerPreview();
     if (saveBtn) {
       saveBtn.textContent = "✓ Saved!";
       setTimeout(() => saveBtn.textContent = "Save Directives", 1500);
@@ -15533,6 +16355,7 @@ ${cssVal}`;
       notesTextarea.value = settings.userNotes || "";
     if (enabledCheckbox)
       enabledCheckbox.checked = settings.enabled ?? true;
+    syncDrawerUnified();
   };
   const renderDirectorLogCard = (entry) => {
     const card = document.createElement("div");
@@ -15701,9 +16524,9 @@ function setup(ctx) {
       if (typeof localStorage !== "undefined") {
         const raw = localStorage.getItem(WIDGET_STORAGE_KEY);
         if (raw) {
-          const parsed = JSON.parse(raw);
-          if (typeof parsed.x === "number" && typeof parsed.y === "number") {
-            return parsed;
+          const parsed2 = JSON.parse(raw);
+          if (typeof parsed2.x === "number" && typeof parsed2.y === "number") {
+            return parsed2;
           }
         }
       }

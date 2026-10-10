@@ -569,6 +569,7 @@ export class InventoryTab {
     const rawObjects: string[] = [
       ...(placeData.resources || []),
       ...(placeData.affordances || []),
+      ...(ledger.scene?.affordances || []),
       ...(inv.room || []),
     ];
 

@@ -33,10 +33,14 @@ export class StatsTab {
       return;
     }
 
-    // Default to first actor that has stats or relations if user has neither, or keep current
     if (!actors[this.selectedActorId]) {
-      // Find one with stats or relations, otherwise first
-      const withStats = actorIds.find(id => actors[id]?.stats || (actors[id]?.relations && Object.keys(actors[id]!.relations!).length > 0));
+      const withStats = actorIds.find((id) => {
+        const a = actors[id];
+        return a && (
+          (a.stats && Object.keys(a.stats).length > 0) ||
+          (a.relations && Object.keys(a.relations).length > 0)
+        );
+      });
       this.selectedActorId = withStats || actorIds[0]!;
     }
 
@@ -228,6 +232,125 @@ export class StatsTab {
       matrixSection.appendChild(matrixBox);
       this.root.appendChild(matrixSection);
     }
+
+    // 2b. Custom Stats & Dynamic Attributes Section
+    const standardKeys = new Set([
+      "T", "A", "R", "F", "Fam", "G", "Integ", "Stress", "CAU", "GRD", "PRD", "EMP", "STB", "BLD", "RX", "RC", "Rig", "Mask", "MIS", "WV", "COMP"
+    ]);
+
+    let customStatDefs: Array<{ name: string; max?: number; defaultValue?: number }> = [];
+    try {
+      const savedDefs = localStorage.getItem("vn_custom_stats_definitions");
+      if (savedDefs) customStatDefs = JSON.parse(savedDefs);
+    } catch {}
+
+    const customStatKeys = Array.from(new Set([
+      ...Object.keys(statsMatrix).filter((k) => !standardKeys.has(k)),
+      ...customStatDefs.map((d) => d.name),
+    ]));
+
+    const customSection = document.createElement("div");
+    customSection.className = "vn-section";
+    customSection.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h4 style="margin:0;">🛠️ Custom Stats &amp; Extended Attributes (${customStatKeys.length})</h4>
+        <button id="vn-toggle-add-stat-btn" style="background:#1e293b; border:1px solid #38bdf8; color:#38bdf8; font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px; cursor:pointer;">
+          ➕ Add Custom Stat
+        </button>
+      </div>
+      <div id="vn-add-stat-form" style="display:none; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:8px; margin-bottom:8px; gap:6px; flex-wrap:wrap; align-items:center;">
+        <input id="vn-new-stat-name" type="text" placeholder="Stat Name (e.g. Sanity)" style="background:#1e293b; color:#fff; border:1px solid #475569; border-radius:4px; padding:3px 6px; font-size:11px; flex:1; min-width:110px;" />
+        <input id="vn-new-stat-val" type="number" placeholder="Value (e.g. 80)" value="100" style="background:#1e293b; color:#fff; border:1px solid #475569; border-radius:4px; padding:3px 6px; font-size:11px; width:70px;" />
+        <input id="vn-new-stat-max" type="number" placeholder="Max (e.g. 100)" value="100" style="background:#1e293b; color:#fff; border:1px solid #475569; border-radius:4px; padding:3px 6px; font-size:11px; width:70px;" />
+        <button id="vn-confirm-add-stat-btn" style="background:#0284c7; color:#fff; border:none; border-radius:4px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">
+          Add
+        </button>
+      </div>
+    `;
+
+    const customGrid = document.createElement("div");
+    customGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px;";
+
+    if (customStatKeys.length === 0) {
+      customGrid.innerHTML = `<span class="vn-muted" style="padding:4px; font-size:11px; grid-column:1/-1;">No custom attributes added yet. Click &quot;Add Custom Stat&quot; to track Sanity, Mana, Corruption, etc.</span>`;
+    } else {
+      for (const k of customStatKeys) {
+        const def = customStatDefs.find((d) => d.name === k);
+        const maxVal = def?.max || 100;
+        const val = statsMatrix[k] !== undefined ? Number(statsMatrix[k]) : (def?.defaultValue ?? 100);
+        const pct = Math.max(0, Math.min(100, (val / maxVal) * 100));
+
+        const card = document.createElement("div");
+        card.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 6px; padding: 6px 8px; font-size: 11px; position: relative;";
+        card.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+            <span style="color:#38bdf8; font-weight:700;">${k}</span>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <strong style="color:#f8fafc;">${val}</strong>
+              <button class="vn-remove-stat-btn" data-stat="${k}" style="background:transparent; border:none; color:#f87171; cursor:pointer; font-size:10px; padding:0 2px;" title="Remove Stat">🗑️</button>
+            </div>
+          </div>
+          <div style="background:#1e293b; border-radius:3px; height:5px; overflow:hidden;">
+            <div style="background:linear-gradient(90deg, #0284c7, #38bdf8); width:${pct}%; height:100%;"></div>
+          </div>
+        `;
+        customGrid.appendChild(card);
+      }
+    }
+
+    customSection.appendChild(customGrid);
+    this.root.appendChild(customSection);
+
+    const toggleAddBtn = customSection.querySelector("#vn-toggle-add-stat-btn") as HTMLButtonElement | null;
+    const addForm = customSection.querySelector("#vn-add-stat-form") as HTMLElement | null;
+    const confirmAddBtn = customSection.querySelector("#vn-confirm-add-stat-btn") as HTMLButtonElement | null;
+    const nameInput = customSection.querySelector("#vn-new-stat-name") as HTMLInputElement | null;
+    const valInput = customSection.querySelector("#vn-new-stat-val") as HTMLInputElement | null;
+    const maxInput = customSection.querySelector("#vn-new-stat-max") as HTMLInputElement | null;
+
+    toggleAddBtn?.addEventListener("click", () => {
+      if (!addForm) return;
+      const isOpen = addForm.style.display === "flex";
+      addForm.style.display = isOpen ? "none" : "flex";
+      if (!isOpen && nameInput) nameInput.focus();
+    });
+
+    confirmAddBtn?.addEventListener("click", () => {
+      const name = nameInput?.value?.trim();
+      if (!name) return;
+      const val = valInput ? parseInt(valInput.value, 10) || 0 : 100;
+      const maxVal = maxInput ? parseInt(maxInput.value, 10) || 100 : 100;
+
+      if (!actor.stats) actor.stats = {};
+      actor.stats[name] = val;
+
+      if (!customStatDefs.some((d) => d.name === name)) {
+        customStatDefs.push({ name, max: maxVal, defaultValue: val });
+        try {
+          localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(customStatDefs));
+        } catch {}
+      }
+
+      this.render(ledger);
+    });
+
+    customSection.querySelectorAll<HTMLButtonElement>(".vn-remove-stat-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const statName = btn.dataset.stat;
+        if (!statName) return;
+
+        if (actor.stats) {
+          delete actor.stats[statName];
+        }
+        customStatDefs = customStatDefs.filter((d) => d.name !== statName);
+        try {
+          localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(customStatDefs));
+        } catch {}
+
+        this.render(ledger);
+      });
+    });
 
     // 3. Current Passions & Affect
     const passionsSection = document.createElement("div");

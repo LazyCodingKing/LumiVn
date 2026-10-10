@@ -345,9 +345,24 @@ export function computeDirectorImpactDiff(
   // 3. Journal Mutations
   if (nextLedger?.journal && nextLedger.journal.length > 0) {
     const latest = nextLedger.journal[nextLedger.journal.length - 1];
-    if (Array.isArray(latest?.mutations)) {
+    if (Array.isArray(latest?.mutations) && latest.mutations.length > 0) {
       for (const m of latest.mutations) {
         if (m) mutations.push(String(m));
+      }
+    } else if (latest?.effects) {
+      if (typeof latest.effects === "object" && !Array.isArray(latest.effects)) {
+        for (const [k, v] of Object.entries(latest.effects)) {
+          if (v) {
+            const aName = k.replace(/^@/, "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+            mutations.push(`${aName}: ${v}`);
+          }
+        }
+      } else if (Array.isArray(latest.effects)) {
+        for (const m of latest.effects) {
+          if (m) mutations.push(String(m));
+        }
+      } else if (typeof latest.effects === "string") {
+        mutations.push(latest.effects);
       }
     }
   }

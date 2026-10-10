@@ -1,9 +1,18 @@
 import type { SpindleFrontendContext, SpindleDrawerTabHandle } from "lumiverse-spindle-types";
-import type { DiagnosticData, DirectorSettings, DirectorLogEntry } from "../../shared/types.js";
+import type { DiagnosticData, DirectorSettings, DirectorLogEntry, CustomStatDefinition, LedgerData } from "../../shared/types.js";
 import { PROP_TEMPLATES_CATALOG, formatDialogueHtml, TEXT_EFFECTS_CSS } from "../stage/rich-text.js";
 import { DEFAULT_STAT_RULES, DEFAULT_LEDGER_PROMPT } from "../../backend/default-rules.js";
 import { DEFAULT_RPG_PROMPT } from "../../backend/storage.js";
 import { ALL_HUD_TABS } from "../hud/menu-bar.js";
+import { buildUnifiedRulebook, parseUnifiedRulebook } from "../../shared/rulebook.js";
+import { StatsTab } from "../hud/tab-stats.js";
+import { RpgTab } from "../hud/tab-rpg.js";
+import { InventoryTab } from "../hud/tab-inventory.js";
+import { JournalTab } from "../hud/tab-journal.js";
+import { CharactersTab } from "../hud/tab-characters.js";
+import { MapTab } from "../hud/tab-map.js";
+import { WardrobeTab } from "../hud/tab-wardrobe.js";
+import { BPlotsTab } from "../hud/tab-bplots.js";
 
 export interface DiagnosticsDrawerHandle {
   tab: SpindleDrawerTabHandle;
@@ -72,14 +81,25 @@ export function registerDiagnosticsDrawer(
         <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">
           <!-- Sub-tabs bar -->
           <div style="display: flex; gap: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 6px; flex-wrap: wrap;">
-            <button type="button" class="vn-dr-subtab-btn" data-subtab="director" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer; font-weight: 700;">🎬 Director</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="unified" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer; font-weight: 700;">📖 Rulebook</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="director" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">🎬 Director</button>
             <button type="button" class="vn-dr-subtab-btn" data-subtab="stats" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">📊 Stat Rules</button>
             <button type="button" class="vn-dr-subtab-btn" data-subtab="ledger" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">📜 Ledger Schema</button>
             <button type="button" class="vn-dr-subtab-btn" data-subtab="rpg" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">⚔️ RPG Rules</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="custom_stats" style="background: #1e293b; color: #fbbf24; border: 1px solid #d97706; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">🛠️ Custom Stats</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="preview" style="background: #1e293b; color: #a78bfa; border: 1px solid #7c3aed; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">👁️ Preview</button>
             <button type="button" class="vn-dr-subtab-btn" data-subtab="tabs" style="background: #1e293b; color: #34d399; border: 1px solid #059669; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">🎛️ HUD Tabs</button>
           </div>
 
-          <div id="vn-dr-panel-director" class="vn-dr-panel" style="display: flex; flex-direction: column; gap: 8px;">
+          <div id="vn-dr-panel-unified" class="vn-dr-panel" style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label style="font-size: 10px; color: #38bdf8; font-weight: 700;">Combined Simulation Rulebook:</label>
+              <button id="vn-dr-parse-btn" type="button" style="background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; cursor: pointer;">⚡ Parse &amp; Sync</button>
+            </div>
+            <textarea id="vn-drawer-unified-rulebook" rows="8" placeholder="Paste or edit unified rulebook..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 6px; resize: vertical; line-height: 1.4;"></textarea>
+          </div>
+
+          <div id="vn-dr-panel-director" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 8px;">
             <div>
               <label for="vn-director-system" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; display: block; margin-bottom: 4px;">
                 Director System Directives
@@ -107,6 +127,33 @@ export function registerDiagnosticsDrawer(
           <div id="vn-dr-panel-rpg" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 4px;">
             <label style="font-size: 10px; color: #94a3b8;">RPG & Skills Progression Directives:</label>
             <textarea id="vn-drawer-rpg-prompt" rows="6" style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 8px; resize: vertical;"></textarea>
+          </div>
+
+          <div id="vn-dr-panel-custom_stats" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 6px;">
+            <label style="font-size: 10px; color: #fbbf24; font-weight: 700;">Custom Stats &amp; Attributes:</label>
+            <div style="display: flex; gap: 4px; align-items: center;">
+              <input id="vn-dr-new-stat-name" type="text" placeholder="Stat Name" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 2px 6px; font-size: 10px; flex: 1;" />
+              <input id="vn-dr-new-stat-val" type="number" placeholder="Val" value="100" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 2px 4px; font-size: 10px; width: 50px;" />
+              <button id="vn-dr-add-stat-btn" type="button" style="background: #0284c7; color: #fff; border: none; border-radius: 4px; padding: 2px 8px; font-size: 10px; font-weight: 700; cursor: pointer;">Add</button>
+            </div>
+            <div id="vn-dr-custom-stats-list" style="display: flex; flex-direction: column; gap: 3px; max-height: 100px; overflow-y: auto;"></div>
+          </div>
+
+          <div id="vn-dr-panel-preview" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <select id="vn-dr-preview-tab-select" style="background: #1e293b; color: #f8fafc; border: 1px solid #7c3aed; border-radius: 4px; padding: 2px 6px; font-size: 10px;">
+                <option value="stats">📊 Stats Tab</option>
+                <option value="rpg">⚔️ RPG Tab</option>
+                <option value="inventory">🎒 Current Scene</option>
+                <option value="journal">📜 Journal Tab</option>
+                <option value="characters">👥 Cast Tab</option>
+                <option value="map">🗺️ Map Tab</option>
+                <option value="wardrobe">👗 Wardrobe Tab</option>
+                <option value="bplots">📡 B-Plots Tab</option>
+              </select>
+              <button id="vn-dr-preview-refresh-btn" type="button" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; font-size: 9px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">🔄 Refresh</button>
+            </div>
+            <div id="vn-dr-preview-viewport" style="background: #020617; border: 1px solid #334155; border-radius: 6px; padding: 8px; max-height: 240px; overflow-y: auto;"></div>
           </div>
 
           <div id="vn-dr-panel-tabs" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 6px;">
@@ -307,20 +354,189 @@ export function registerDiagnosticsDrawer(
   tabLogsBtn?.addEventListener("click", () => setConsoleTab("logs"));
   tabDirectorBtn?.addEventListener("click", () => setConsoleTab("director"));
 
+  const drawerUnified = root.querySelector("#vn-drawer-unified-rulebook") as HTMLTextAreaElement | null;
+  const drParseBtn = root.querySelector("#vn-dr-parse-btn") as HTMLButtonElement | null;
   const drawerStatRules = root.querySelector("#vn-drawer-stat-rules") as HTMLTextAreaElement | null;
   const drawerLedgerPrompt = root.querySelector("#vn-drawer-ledger-prompt") as HTMLTextAreaElement | null;
   const drawerRpgPrompt = root.querySelector("#vn-drawer-rpg-prompt") as HTMLTextAreaElement | null;
 
+  const drPreviewSelect = root.querySelector("#vn-dr-preview-tab-select") as HTMLSelectElement | null;
+  const drPreviewRefresh = root.querySelector("#vn-dr-preview-refresh-btn") as HTMLButtonElement | null;
+  const drPreviewViewport = root.querySelector("#vn-dr-preview-viewport") as HTMLElement | null;
+
+  const drNewStatName = root.querySelector("#vn-dr-new-stat-name") as HTMLInputElement | null;
+  const drNewStatVal = root.querySelector("#vn-dr-new-stat-val") as HTMLInputElement | null;
+  const drAddStatBtn = root.querySelector("#vn-dr-add-stat-btn") as HTMLButtonElement | null;
+  const drCustomStatsList = root.querySelector("#vn-dr-custom-stats-list") as HTMLElement | null;
+
+  let drawerCustomStats: CustomStatDefinition[] = [];
+  try {
+    const s = localStorage.getItem("vn_custom_stats_definitions");
+    if (s) drawerCustomStats = JSON.parse(s);
+  } catch {}
+
+  const renderDrawerCustomStats = () => {
+    if (!drCustomStatsList) return;
+    if (drawerCustomStats.length === 0) {
+      drCustomStatsList.innerHTML = `<span style="font-size:10px; color:#64748b; font-style:italic;">No custom stats defined.</span>`;
+      return;
+    }
+    drCustomStatsList.innerHTML = drawerCustomStats.map((st) => `
+      <div style="background:#1e293b; border:1px solid #334155; border-radius:3px; padding:2px 6px; display:flex; justify-content:space-between; align-items:center; font-size:10px;">
+        <span><strong style="color:#38bdf8;">${st.name}</strong> <span style="color:#94a3b8;">(${st.defaultValue ?? 100})</span></span>
+        <button class="vn-dr-del-stat-btn" data-stat="${st.name}" style="background:transparent; border:none; color:#f87171; cursor:pointer; font-size:10px;">🗑️</button>
+      </div>
+    `).join("");
+
+    drCustomStatsList.querySelectorAll<HTMLButtonElement>(".vn-dr-del-stat-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sName = btn.dataset.stat;
+        drawerCustomStats = drawerCustomStats.filter((s) => s.name !== sName);
+        try { localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(drawerCustomStats)); } catch {}
+        renderDrawerCustomStats();
+        syncDrawerUnified();
+        updateDrawerPreview();
+      });
+    });
+  };
+
+  drAddStatBtn?.addEventListener("click", () => {
+    const name = drNewStatName?.value?.trim();
+    if (!name) return;
+    const val = drNewStatVal ? parseInt(drNewStatVal.value, 10) || 100 : 100;
+    if (!drawerCustomStats.some((s) => s.name === name)) {
+      drawerCustomStats.push({ name, defaultValue: val, max: val, category: "custom" });
+      try { localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(drawerCustomStats)); } catch {}
+      if (drNewStatName) drNewStatName.value = "";
+      renderDrawerCustomStats();
+      syncDrawerUnified();
+      updateDrawerPreview();
+    }
+  });
+
+  renderDrawerCustomStats();
+
+  const syncDrawerUnified = () => {
+    if (!drawerUnified) return;
+    drawerUnified.value = buildUnifiedRulebook({
+      director: systemTextarea?.value,
+      stats: drawerStatRules?.value,
+      rpg: drawerRpgPrompt?.value,
+      ledger: drawerLedgerPrompt?.value,
+      customStats: drawerCustomStats,
+    });
+  };
+
+  const applyDrawerUnified = (rawText: string) => {
+    const parsed = parseUnifiedRulebook(rawText);
+    if (systemTextarea) systemTextarea.value = parsed.directorSystem;
+    if (drawerStatRules) drawerStatRules.value = parsed.statRules;
+    if (drawerRpgPrompt) drawerRpgPrompt.value = parsed.rpgPrompt;
+    if (drawerLedgerPrompt) drawerLedgerPrompt.value = parsed.ledgerPrompt;
+    if (parsed.customStats && parsed.customStats.length > 0) {
+      for (const cs of parsed.customStats) {
+        if (!drawerCustomStats.some((s) => s.name === cs.name)) {
+          drawerCustomStats.push(cs);
+        }
+      }
+      try { localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(drawerCustomStats)); } catch {}
+      renderDrawerCustomStats();
+    }
+  };
+
+  drParseBtn?.addEventListener("click", () => {
+    if (drawerUnified) {
+      applyDrawerUnified(drawerUnified.value);
+      if (drParseBtn) {
+        const orig = drParseBtn.textContent;
+        drParseBtn.textContent = "✓ Synced!";
+        setTimeout(() => (drParseBtn.textContent = orig), 1500);
+      }
+      updateDrawerPreview();
+    }
+  });
+
   if (drawerStatRules) drawerStatRules.value = DEFAULT_STAT_RULES;
   if (drawerLedgerPrompt) drawerLedgerPrompt.value = DEFAULT_LEDGER_PROMPT;
   if (drawerRpgPrompt) drawerRpgPrompt.value = DEFAULT_RPG_PROMPT;
+  syncDrawerUnified();
+
+  systemTextarea?.addEventListener("input", syncDrawerUnified);
+  drawerStatRules?.addEventListener("input", syncDrawerUnified);
+  drawerLedgerPrompt?.addEventListener("input", syncDrawerUnified);
+  drawerRpgPrompt?.addEventListener("input", syncDrawerUnified);
+
+  // Live Tab Preview for Drawer
+  const updateDrawerPreview = (tabKey: string = drPreviewSelect?.value || "stats") => {
+    if (!drPreviewViewport) return;
+    drPreviewViewport.innerHTML = "";
+
+    const simLedger: LedgerData = JSON.parse(JSON.stringify(latestLedgerData || {}));
+    if (!simLedger.actors) simLedger.actors = {};
+    if (!simLedger.actors["user"]) {
+      simLedger.actors["user"] = {
+        id: "user",
+        name: "Player",
+        stats: { T: 50, A: 40, R: 60, Stress: 15 },
+        combat: { tier: 1, lv: 1, hp: "100/100", mp: "50/50", pwr: 14, agi: 12 },
+      };
+    }
+    const userActor = simLedger.actors["user"]!;
+    if (!userActor.stats) userActor.stats = {};
+    for (const def of drawerCustomStats) {
+      if (userActor.stats[def.name] === undefined) {
+        userActor.stats[def.name] = def.defaultValue ?? 100;
+      }
+    }
+
+    let instance: { root: HTMLElement; render: (l: LedgerData, m?: any) => void } | null = null;
+    switch (tabKey) {
+      case "stats":
+        instance = new StatsTab();
+        break;
+      case "rpg":
+        instance = new RpgTab(ctx);
+        break;
+      case "inventory":
+        instance = new InventoryTab(ctx);
+        break;
+      case "journal":
+        instance = new JournalTab();
+        break;
+      case "characters":
+        instance = new CharactersTab(ctx);
+        break;
+      case "map":
+        instance = new MapTab(ctx);
+        break;
+      case "wardrobe":
+        instance = new WardrobeTab(ctx);
+        break;
+      case "bplots":
+        instance = new BPlotsTab();
+        break;
+      default:
+        instance = new StatsTab();
+        break;
+    }
+
+    if (instance) {
+      instance.render(simLedger, latestManifestData);
+      drPreviewViewport.appendChild(instance.root);
+    }
+  };
+
+  drPreviewSelect?.addEventListener("change", () => updateDrawerPreview());
+  drPreviewRefresh?.addEventListener("click", () => updateDrawerPreview());
 
   // Drawer rulebook subtab switching
+  let activeDrawerSubtab = "unified";
   const drSubtabBtns = root.querySelectorAll<HTMLButtonElement>(".vn-dr-subtab-btn");
   drSubtabBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
       const target = btn.dataset.subtab;
       if (!target) return;
+      activeDrawerSubtab = target;
       drSubtabBtns.forEach((b) => {
         b.style.background = "#1e293b";
         b.style.color = "#94a3b8";
@@ -335,6 +551,8 @@ export function registerDiagnosticsDrawer(
       root.querySelectorAll<HTMLElement>(".vn-dr-panel").forEach((p) => (p.style.display = "none"));
       const activePanel = root.querySelector(`#vn-dr-panel-${target}`) as HTMLElement | null;
       if (activePanel) activePanel.style.display = "flex";
+      if (target === "preview") updateDrawerPreview();
+      if (target === "unified") syncDrawerUnified();
     });
   });
 
@@ -397,6 +615,10 @@ export function registerDiagnosticsDrawer(
   }
 
   saveBtn?.addEventListener("click", () => {
+    if (activeDrawerSubtab === "unified" && drawerUnified) {
+      applyDrawerUnified(drawerUnified.value);
+    }
+
     const settings: DirectorSettings = {
       systemPrompt: systemTextarea?.value || "",
       userNotes: notesTextarea?.value || "",
@@ -407,7 +629,7 @@ export function registerDiagnosticsDrawer(
       settings,
     });
 
-    if (drawerStatRules || drawerLedgerPrompt || drawerRpgPrompt) {
+    if (drawerStatRules || drawerLedgerPrompt || drawerRpgPrompt || drawerUnified) {
       ctx.sendToBackend?.({
         type: "vn_save_stat_rules_settings",
         settings: {
@@ -415,10 +637,20 @@ export function registerDiagnosticsDrawer(
           statRules: drawerStatRules?.value?.trim() || DEFAULT_STAT_RULES,
           ledgerPrompt: drawerLedgerPrompt?.value?.trim() || DEFAULT_LEDGER_PROMPT,
           rpgPrompt: drawerRpgPrompt?.value?.trim() || DEFAULT_RPG_PROMPT,
+          unifiedRulebook: drawerUnified?.value?.trim() || buildUnifiedRulebook({
+            director: systemTextarea?.value,
+            stats: drawerStatRules?.value,
+            rpg: drawerRpgPrompt?.value,
+            ledger: drawerLedgerPrompt?.value,
+            customStats: drawerCustomStats,
+          }),
+          customStats: drawerCustomStats,
           enabled: true,
         },
       });
     }
+
+    updateDrawerPreview();
 
     if (saveBtn) {
       saveBtn.textContent = "✓ Saved!";
@@ -585,6 +817,7 @@ export function registerDiagnosticsDrawer(
     if (systemTextarea) systemTextarea.value = settings.systemPrompt || "";
     if (notesTextarea) notesTextarea.value = settings.userNotes || "";
     if (enabledCheckbox) enabledCheckbox.checked = settings.enabled ?? true;
+    syncDrawerUnified();
   };
 
   const renderDirectorLogCard = (entry: DirectorLogEntry): HTMLElement => {

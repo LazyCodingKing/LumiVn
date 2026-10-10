@@ -1,12 +1,20 @@
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
-import type { LedgerData, AssetManifest, StatRulesSettings } from "../../shared/types.js";
+import type { LedgerData, AssetManifest, StatRulesSettings, CustomStatDefinition } from "../../shared/types.js";
 import { diagBus, type LogEntry } from "../utils/diag-bus.js";
 import { PROP_TEMPLATES_CATALOG, formatDialogueHtml } from "../stage/rich-text.js";
 import { DEFAULT_STAT_RULES, DEFAULT_LEDGER_PROMPT } from "../../backend/default-rules.js";
 import { DEFAULT_RPG_PROMPT, DEFAULT_DIRECTOR_SETTINGS } from "../../backend/storage.js";
+import { buildUnifiedRulebook, parseUnifiedRulebook, DEFAULT_UNIFIED_RULEBOOK } from "../../shared/rulebook.js";
 import type { VnAudioEngine } from "../stage/audio-player.js";
-import { parseSkillTreesFromPrompt } from "./tab-rpg.js";
-import { ALL_HUD_TABS } from "./menu-bar.js";
+import { parseSkillTreesFromPrompt, RpgTab } from "./tab-rpg.js";
+import { ALL_HUD_TABS, type HudTabId } from "./menu-bar.js";
+import { CharactersTab } from "./tab-characters.js";
+import { StatsTab } from "./tab-stats.js";
+import { InventoryTab } from "./tab-inventory.js";
+import { JournalTab } from "./tab-journal.js";
+import { MapTab } from "./tab-map.js";
+import { WardrobeTab } from "./tab-wardrobe.js";
+import { BPlotsTab } from "./tab-bplots.js";
 
 export class DiagnosticsTab {
   public root: HTMLElement;
@@ -18,7 +26,7 @@ export class DiagnosticsTab {
   private activeFilter: "all" | "info" | "warn" | "error" = "all";
   private unsubscribeBus?: () => void;
   private statRulesSettings: StatRulesSettings | null = null;
-  private activeRulebookSubtab: "director" | "stats" | "ledger" | "rpg" | "preview" | "tabs" = "stats";
+  private activeRulebookSubtab: "unified" | "director" | "stats" | "ledger" | "rpg" | "custom_stats" | "preview" | "tabs" = "unified";
 
   constructor(
     ctx?: SpindleFrontendContext,
@@ -237,11 +245,11 @@ export class DiagnosticsTab {
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid #1e293b; padding-bottom: 8px; flex-wrap: wrap; gap: 8px;">
         <div style="display: flex; align-items: center; gap: 6px;">
           <span style="font-size: 16px;">📖</span>
-          <strong style="color: #38bdf8; font-size: 13px;">Unified Simulation Rulebook & Engine Controls</strong>
+          <strong style="color: #38bdf8; font-size: 13px;">Unified Simulation Rulebook &amp; Live Tab Preview</strong>
         </div>
         <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
           <select id="vn-rulebook-preset-select" style="background: #1e293b; color: #fde047; border: 1px solid #eab308; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-weight: 600; cursor: pointer;">
-            <option value="full">🌟 Preset: Full RPG & Living World</option>
+            <option value="full">🌟 Preset: Full RPG &amp; Living World</option>
             <option value="economy">⚡ Preset: Economy TOON (~80 tokens)</option>
             <option value="pure_vn">🚀 Preset: Pure VN (0 Extra Tokens)</option>
           </select>
@@ -255,40 +263,84 @@ export class DiagnosticsTab {
 
       <!-- Rulebook Sub-tabs Navigation -->
       <div style="display: flex; gap: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 6px; flex-wrap: wrap;">
-        <button class="vn-rb-subtab-btn" data-subtab="stats" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: 700;">📊 Stat Rules</button>
+        <button class="vn-rb-subtab-btn" data-subtab="unified" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: 700;">📖 Unified Rulebook</button>
+        <button class="vn-rb-subtab-btn" data-subtab="stats" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">📊 Stat Rules</button>
         <button class="vn-rb-subtab-btn" data-subtab="director" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">🎬 Director</button>
         <button class="vn-rb-subtab-btn" data-subtab="ledger" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">📜 Ledger Schema</button>
-        <button class="vn-rb-subtab-btn" data-subtab="rpg" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">⚔️ RPG & Skills</button>
+        <button class="vn-rb-subtab-btn" data-subtab="rpg" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">⚔️ RPG &amp; Skills</button>
+        <button class="vn-rb-subtab-btn" data-subtab="custom_stats" style="background: #1e293b; color: #fbbf24; border: 1px solid #d97706; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">🛠️ Custom Stats</button>
         <button class="vn-rb-subtab-btn" data-subtab="preview" style="background: #1e293b; color: #a78bfa; border: 1px solid #7c3aed; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">👁️ Live Tab Preview</button>
         <button class="vn-rb-subtab-btn" data-subtab="tabs" style="background: #1e293b; color: #34d399; border: 1px solid #059669; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">🎛️ HUD Tab Checkboxes</button>
       </div>
 
       <!-- Domain Panels -->
-      <div id="vn-rb-panel-stats" class="vn-rb-panel" style="display: flex; flex-direction: column; gap: 4px;">
-        <label style="font-size: 10px; color: #94a3b8;">21-Stat Network & Gravity Tiers Rules:</label>
-        <textarea id="vn-stat-rules-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      <div id="vn-rb-panel-unified" class="vn-rb-panel" style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <label style="font-size: 10px; color: #38bdf8; font-weight: 700;">Unified Rulebook (All Directives, Rules, RPG &amp; Ledger Combined):</label>
+          <div style="display: flex; gap: 4px;">
+            <button id="vn-parse-unified-btn" type="button" style="background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; cursor: pointer;">⚡ Parse &amp; Sync Sections</button>
+            <button id="vn-copy-unified-btn" type="button" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; font-size: 10px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">📋 Copy Rulebook</button>
+          </div>
+        </div>
+        <textarea id="vn-unified-rulebook-input" style="width: 100%; height: 160px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical; line-height: 1.4;"></textarea>
+      </div>
+
+      <div id="vn-rb-panel-stats" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 4px;">
+        <label style="font-size: 10px; color: #94a3b8;">21-Stat Network &amp; Gravity Tiers Rules:</label>
+        <textarea id="vn-stat-rules-input" style="width: 100%; height: 120px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       </div>
 
       <div id="vn-rb-panel-director" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 6px;">
         <label style="font-size: 10px; color: #94a3b8;">World Director System Directives:</label>
         <textarea id="vn-director-system-input" style="width: 100%; height: 90px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
-        <label style="font-size: 10px; color: #94a3b8;">Turn Notes & Scene Guidance (Macros: {{user}}, {{char}}):</label>
+        <label style="font-size: 10px; color: #94a3b8;">Turn Notes &amp; Scene Guidance (Macros: {{user}}, {{char}}):</label>
         <textarea id="vn-director-notes-input" style="width: 100%; height: 50px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       </div>
 
       <div id="vn-rb-panel-ledger" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 4px;">
-        <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema & Structural Directives:</label>
-        <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+        <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema &amp; Structural Directives:</label>
+        <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 120px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       </div>
 
       <div id="vn-rb-panel-rpg" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 4px;">
-        <label style="font-size: 10px; color: #94a3b8;">RPG & Skills Progression Rules (Tactical Directives & Trees):</label>
-        <textarea id="vn-rpg-rules-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+        <label style="font-size: 10px; color: #94a3b8;">RPG &amp; Skills Progression Rules (Tactical Directives &amp; Trees):</label>
+        <textarea id="vn-rpg-rules-input" style="width: 100%; height: 120px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       </div>
 
+      <div id="vn-rb-panel-custom_stats" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <label style="font-size: 11px; color: #fbbf24; font-weight: 700;">Custom Stats &amp; Attributes Schema:</label>
+          <span style="font-size: 10px; color: #94a3b8;">Add/remove custom attributes for all tabs</span>
+        </div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; background: #020617; border: 1px solid #334155; border-radius: 6px; padding: 8px; align-items: center;">
+          <input id="vn-diag-stat-name" type="text" placeholder="Stat Name (e.g. Sanity)" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 4px 6px; font-size: 11px; flex: 1; min-width: 110px;" />
+          <input id="vn-diag-stat-default" type="number" placeholder="Default" value="100" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 4px 6px; font-size: 11px; width: 65px;" />
+          <input id="vn-diag-stat-max" type="number" placeholder="Max" value="100" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 4px 6px; font-size: 11px; width: 65px;" />
+          <button id="vn-diag-add-stat-btn" type="button" style="background: #0284c7; color: #fff; border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer;">➕ Add Stat</button>
+        </div>
+        <div id="vn-diag-custom-stats-list" style="display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow-y: auto;"></div>
+      </div>
+
+      <!-- Live Tab Preview with dynamic tab picker -->
       <div id="vn-rb-panel-preview" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
-        <div style="font-size: 11px; color: #cbd5e1;">Live breakdown of how the current rulebook translates into tab features:</div>
-        <div id="vn-rb-preview-content" style="max-height: 180px; overflow-y: auto; background: #020617; border: 1px solid #334155; border-radius: 6px; padding: 8px; font-size: 11px;"></div>
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+          <span id="vn-preview-active-badge" style="font-size: 11px; color: #a78bfa; font-weight: 700;">🟢 Live Tab Preview (Select a tab below to inspect live rendering):</span>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+            <select id="vn-preview-tab-select" style="background: #1e293b; color: #f8fafc; border: 1px solid #7c3aed; border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: 600; cursor: pointer;">
+              <option value="stats">📊 Stats &amp; Vitals Matrix</option>
+              <option value="rpg">⚔️ RPG Skills &amp; Progression</option>
+              <option value="inventory">🎒 Current Scene &amp; Items</option>
+              <option value="journal">📜 Story Journal &amp; Mutations</option>
+              <option value="characters">👥 Cast &amp; Living Dossiers</option>
+              <option value="map">🗺️ Map &amp; Exploration</option>
+              <option value="wardrobe">👗 Wardrobe &amp; Attire</option>
+              <option value="bplots">📡 B-Plots &amp; Rumors</option>
+            </select>
+            <button id="vn-preview-refresh-btn" type="button" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; font-size: 10px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">🔄 Refresh</button>
+          </div>
+        </div>
+        <div id="vn-rb-preview-viewport" style="background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 12px; max-height: 380px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
+        </div>
       </div>
 
       <div id="vn-rb-panel-tabs" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
@@ -303,11 +355,11 @@ export class DiagnosticsTab {
         </div>
 
         <div style="border-top: 1px solid #334155; margin-top: 8px; padding-top: 8px;">
-          <div style="font-size: 11px; color: #38bdf8; font-weight: 700; margin-bottom: 6px;">Cinema & Stage Engine Toggles:</div>
+          <div style="font-size: 11px; color: #38bdf8; font-weight: 700; margin-bottom: 6px;">Cinema &amp; Stage Engine Toggles:</div>
           <div style="display: flex; flex-direction: column; gap: 4px;">
             <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
               <input type="checkbox" id="vn-hud-toggle-cinema-anim" checked style="accent-color: #6366f1; cursor: pointer;" />
-              <span>🎬 Cinema Sprite Movement & Speaking Bob</span>
+              <span>🎬 Cinema Sprite Movement &amp; Speaking Bob</span>
             </label>
             <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
               <input type="checkbox" id="vn-hud-toggle-card-sprites" checked style="accent-color: #6366f1; cursor: pointer;" />
@@ -315,11 +367,11 @@ export class DiagnosticsTab {
             </label>
             <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
               <input type="checkbox" id="vn-hud-toggle-bgm" checked style="accent-color: #6366f1; cursor: pointer;" />
-              <span>🎵 Ambient BGM & Procedural Chords</span>
+              <span>🎵 Ambient BGM &amp; Procedural Chords</span>
             </label>
             <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
               <input type="checkbox" id="vn-hud-toggle-shaders" checked style="accent-color: #6366f1; cursor: pointer;" />
-              <span>🌧️ Atmospheric Weather & Shaders</span>
+              <span>🌧️ Atmospheric Weather &amp; Shaders</span>
             </label>
           </div>
         </div>
@@ -327,20 +379,89 @@ export class DiagnosticsTab {
 
       <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px solid #1e293b; padding-top: 8px; margin-top: 4px;">
         <span style="font-size: 10px; color: #94a3b8;">Edits take effect dynamically in tabs and on next turn.</span>
-        <button id="vn-save-rules-btn" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; border: none; border-radius: 4px; padding: 6px 16px; font-size: 11px; font-weight: 700; cursor: pointer;">💾 Save & Apply Rulebook</button>
+        <button id="vn-save-rules-btn" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; border: none; border-radius: 4px; padding: 6px 16px; font-size: 11px; font-weight: 700; cursor: pointer;">💾 Save &amp; Apply Rulebook</button>
       </div>
     `;
     this.root.appendChild(rulesCard);
 
     const modeSelect = rulesCard.querySelector("#vn-mvu-mode-select") as HTMLSelectElement | null;
     const presetSelect = rulesCard.querySelector("#vn-rulebook-preset-select") as HTMLSelectElement | null;
+    const unifiedInput = rulesCard.querySelector("#vn-unified-rulebook-input") as HTMLTextAreaElement | null;
     const rulesInput = rulesCard.querySelector("#vn-stat-rules-input") as HTMLTextAreaElement | null;
     const ledgerInput = rulesCard.querySelector("#vn-ledger-prompt-input") as HTMLTextAreaElement | null;
     const rpgInput = rulesCard.querySelector("#vn-rpg-rules-input") as HTMLTextAreaElement | null;
     const directorSysInput = rulesCard.querySelector("#vn-director-system-input") as HTMLTextAreaElement | null;
     const directorNotesInput = rulesCard.querySelector("#vn-director-notes-input") as HTMLTextAreaElement | null;
     const saveRulesBtn = rulesCard.querySelector("#vn-save-rules-btn") as HTMLButtonElement | null;
-    const previewContent = rulesCard.querySelector("#vn-rb-preview-content") as HTMLElement | null;
+    const parseUnifiedBtn = rulesCard.querySelector("#vn-parse-unified-btn") as HTMLButtonElement | null;
+    const copyUnifiedBtn = rulesCard.querySelector("#vn-copy-unified-btn") as HTMLButtonElement | null;
+
+    const previewTabSelect = rulesCard.querySelector("#vn-preview-tab-select") as HTMLSelectElement | null;
+    const previewRefreshBtn = rulesCard.querySelector("#vn-preview-refresh-btn") as HTMLButtonElement | null;
+    const previewViewport = rulesCard.querySelector("#vn-rb-preview-viewport") as HTMLElement | null;
+    const previewBadge = rulesCard.querySelector("#vn-preview-active-badge") as HTMLElement | null;
+
+    const customStatsListEl = rulesCard.querySelector("#vn-diag-custom-stats-list") as HTMLElement | null;
+    const addStatNameInput = rulesCard.querySelector("#vn-diag-stat-name") as HTMLInputElement | null;
+    const addStatDefaultInput = rulesCard.querySelector("#vn-diag-stat-default") as HTMLInputElement | null;
+    const addStatMaxInput = rulesCard.querySelector("#vn-diag-stat-max") as HTMLInputElement | null;
+    const addStatBtn = rulesCard.querySelector("#vn-diag-add-stat-btn") as HTMLButtonElement | null;
+
+    let activeCustomStats: CustomStatDefinition[] = [];
+    try {
+      const savedDefs = localStorage.getItem("vn_custom_stats_definitions");
+      if (savedDefs) activeCustomStats = JSON.parse(savedDefs);
+    } catch {}
+
+    const renderCustomStatsList = () => {
+      if (!customStatsListEl) return;
+      if (activeCustomStats.length === 0) {
+        customStatsListEl.innerHTML = `<span style="font-size: 11px; color: #64748b; font-style: italic;">No custom stats defined yet.</span>`;
+        return;
+      }
+      customStatsListEl.innerHTML = activeCustomStats.map((st) => `
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+          <div>
+            <strong style="color: #38bdf8;">${st.name}</strong>
+            <span style="color: #94a3b8; font-size: 10px; margin-left: 6px;">(Default: ${st.defaultValue ?? 100} / Max: ${st.max ?? 100})</span>
+          </div>
+          <button class="vn-diag-del-stat-btn" data-stat="${st.name}" style="background: transparent; border: none; color: #f87171; cursor: pointer; font-size: 11px;">🗑️</button>
+        </div>
+      `).join("");
+
+      customStatsListEl.querySelectorAll<HTMLButtonElement>(".vn-diag-del-stat-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const sName = btn.dataset.stat;
+          activeCustomStats = activeCustomStats.filter((s) => s.name !== sName);
+          try {
+            localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(activeCustomStats));
+          } catch {}
+          renderCustomStatsList();
+          syncUnifiedFromSections();
+          updateLiveTabPreview();
+        });
+      });
+    };
+
+    addStatBtn?.addEventListener("click", () => {
+      const name = addStatNameInput?.value?.trim();
+      if (!name) return;
+      const defVal = addStatDefaultInput ? parseInt(addStatDefaultInput.value, 10) || 100 : 100;
+      const maxVal = addStatMaxInput ? parseInt(addStatMaxInput.value, 10) || 100 : 100;
+
+      if (!activeCustomStats.some((s) => s.name === name)) {
+        activeCustomStats.push({ name, defaultValue: defVal, max: maxVal, category: "custom" });
+        try {
+          localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(activeCustomStats));
+        } catch {}
+        if (addStatNameInput) addStatNameInput.value = "";
+        renderCustomStatsList();
+        syncUnifiedFromSections();
+        updateLiveTabPreview();
+      }
+    });
+
+    renderCustomStatsList();
 
     const activeMode = this.statRulesSettings?.mode || "mvu_quiet";
     const activeRules = this.statRulesSettings?.statRules?.trim() || DEFAULT_STAT_RULES;
@@ -356,34 +477,148 @@ export class DiagnosticsTab {
     if (directorSysInput) directorSysInput.value = activeDirSys;
     if (directorNotesInput) directorNotesInput.value = activeDirNotes;
 
-    // Subtab switching
-    const subtabBtns = rulesCard.querySelectorAll<HTMLButtonElement>(".vn-rb-subtab-btn");
-    const updatePreview = () => {
-      if (!previewContent) return;
-      const skills = parseSkillTreesFromPrompt(rpgInput?.value || "");
-      previewContent.innerHTML = `
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <div>
-            <strong style="color: #fde047;">⚔️ RPG Skill Trees (${skills.length} categories parsed):</strong>
-            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
-              ${skills.map((cat) => `
-                <div style="background: #1e293b; border: 1px solid #475569; border-radius: 4px; padding: 4px 8px;">
-                  <span style="color: #38bdf8; font-weight: 700;">${cat.name}</span>: 
-                  <span style="color: #cbd5e1;">${cat.nodes.map((n) => n.name).join(", ")}</span>
-                </div>
-              `).join("")}
-            </div>
-          </div>
-          <div>
-            <strong style="color: #34d399;">📊 Active Stat Profile:</strong>
-            <div style="color: #94a3b8; font-size: 10px; margin-top: 2px;">
-              Tracks 21-stat network (T, A, R, F, Fam, G, Integ, Stress, CAU, GRD, PRD, EMP, STB, BLD, RX, RC, Rig, Mask, MIS, WV, COMP) with GRV1-GRV5 gravity tiers.
-            </div>
-          </div>
-        </div>
-      `;
+    const syncUnifiedFromSections = () => {
+      if (!unifiedInput) return;
+      unifiedInput.value = buildUnifiedRulebook({
+        director: directorSysInput?.value,
+        stats: rulesInput?.value,
+        rpg: rpgInput?.value,
+        ledger: ledgerInput?.value,
+        customStats: activeCustomStats,
+      });
     };
 
+    const applyUnifiedToSections = (rawText: string) => {
+      const parsed = parseUnifiedRulebook(rawText);
+      if (directorSysInput) directorSysInput.value = parsed.directorSystem;
+      if (rulesInput) rulesInput.value = parsed.statRules;
+      if (rpgInput) rpgInput.value = parsed.rpgPrompt;
+      if (ledgerInput) ledgerInput.value = parsed.ledgerPrompt;
+      if (parsed.customStats && parsed.customStats.length > 0) {
+        for (const cs of parsed.customStats) {
+          if (!activeCustomStats.some((s) => s.name === cs.name)) {
+            activeCustomStats.push(cs);
+          }
+        }
+        try {
+          localStorage.setItem("vn_custom_stats_definitions", JSON.stringify(activeCustomStats));
+        } catch {}
+        renderCustomStatsList();
+      }
+    };
+
+    syncUnifiedFromSections();
+
+    parseUnifiedBtn?.addEventListener("click", () => {
+      if (unifiedInput) {
+        applyUnifiedToSections(unifiedInput.value);
+        if (parseUnifiedBtn) {
+          const orig = parseUnifiedBtn.textContent;
+          parseUnifiedBtn.textContent = "✓ Parsed & Synced!";
+          setTimeout(() => (parseUnifiedBtn.textContent = orig), 1500);
+        }
+        updateLiveTabPreview();
+      }
+    });
+
+    copyUnifiedBtn?.addEventListener("click", async () => {
+      if (unifiedInput) {
+        await navigator.clipboard.writeText(unifiedInput.value).catch(() => undefined);
+        if (copyUnifiedBtn) {
+          const orig = copyUnifiedBtn.textContent;
+          copyUnifiedBtn.textContent = "✓ Copied!";
+          setTimeout(() => (copyUnifiedBtn.textContent = orig), 1500);
+        }
+      }
+    });
+
+    // ── Live Multi-Tab Preview Engine ──
+    let currentPreviewTab = previewTabSelect?.value || "stats";
+
+    const updateLiveTabPreview = (tabKey: string = currentPreviewTab) => {
+      currentPreviewTab = tabKey;
+      if (!previewViewport) return;
+      previewViewport.innerHTML = "";
+
+      if (previewBadge) {
+        const labels: Record<string, string> = {
+          stats: "Stats & Vitals Matrix",
+          rpg: "RPG Skills & Trees",
+          inventory: "Current Scene & Items",
+          journal: "Story Journal & Mutations",
+          characters: "Cast & Living Dossiers",
+          map: "Map & Exploration",
+          wardrobe: "Wardrobe & Attire",
+          bplots: "B-Plots & Rumors",
+        };
+        previewBadge.textContent = `🟢 Live Preview: ${labels[tabKey] || tabKey} (Real-time sync)`;
+      }
+
+      // Clone current ledger or provide default preview state
+      const previewLedger: LedgerData = JSON.parse(JSON.stringify(this.currentLedger || {}));
+      if (!previewLedger.actors) previewLedger.actors = {};
+      if (!previewLedger.actors["user"]) {
+        previewLedger.actors["user"] = {
+          id: "user",
+          name: "Player",
+          stats: { T: 50, A: 40, R: 60, Integ: 80, Stress: 20 },
+          combat: { tier: 1, lv: 1, hp: "100/100", mp: "50/50", pwr: 14, agi: 12, int: 16 },
+        };
+      }
+      const uActor = previewLedger.actors["user"]!;
+      if (!uActor.stats) uActor.stats = {};
+      for (const def of activeCustomStats) {
+        if (uActor.stats[def.name] === undefined) {
+          uActor.stats[def.name] = def.defaultValue ?? 100;
+        }
+      }
+
+      let instance: { root: HTMLElement; render: (l: LedgerData, m?: any) => void } | null = null;
+      switch (tabKey) {
+        case "stats":
+          instance = new StatsTab();
+          break;
+        case "rpg":
+          instance = new RpgTab(this.ctx);
+          break;
+        case "inventory":
+          instance = new InventoryTab(this.ctx);
+          break;
+        case "journal":
+          instance = new JournalTab();
+          break;
+        case "characters":
+          instance = new CharactersTab(this.ctx);
+          break;
+        case "map":
+          instance = new MapTab(this.ctx);
+          break;
+        case "wardrobe":
+          instance = new WardrobeTab(this.ctx);
+          break;
+        case "bplots":
+          instance = new BPlotsTab();
+          break;
+        default:
+          instance = new StatsTab();
+          break;
+      }
+
+      if (instance) {
+        instance.render(previewLedger, this.currentManifest);
+        previewViewport.appendChild(instance.root);
+      }
+    };
+
+    previewTabSelect?.addEventListener("change", () => {
+      updateLiveTabPreview(previewTabSelect.value);
+    });
+    previewRefreshBtn?.addEventListener("click", () => {
+      updateLiveTabPreview(previewTabSelect?.value || currentPreviewTab);
+    });
+
+    // Subtab switching
+    const subtabBtns = rulesCard.querySelectorAll<HTMLButtonElement>(".vn-rb-subtab-btn");
     subtabBtns.forEach((btn) => {
       btn.addEventListener("click", () => {
         const target = btn.dataset.subtab as any;
@@ -403,7 +638,16 @@ export class DiagnosticsTab {
         rulesCard.querySelectorAll<HTMLElement>(".vn-rb-panel").forEach((p) => (p.style.display = "none"));
         const activePanel = rulesCard.querySelector(`#vn-rb-panel-${target}`) as HTMLElement | null;
         if (activePanel) activePanel.style.display = "flex";
-        if (target === "preview") updatePreview();
+        if (target === "preview") updateLiveTabPreview();
+        if (target === "unified") syncUnifiedFromSections();
+      });
+    });
+
+    // Auto-update live preview on textarea changes
+    [rulesInput, rpgInput, ledgerInput, directorSysInput].forEach((inp) => {
+      inp?.addEventListener("input", () => {
+        syncUnifiedFromSections();
+        if (this.activeRulebookSubtab === "preview") updateLiveTabPreview();
       });
     });
 
@@ -426,6 +670,8 @@ export class DiagnosticsTab {
         if (rpgInput) rpgInput.value = DEFAULT_RPG_PROMPT;
         if (directorSysInput) directorSysInput.value = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
       }
+      syncUnifiedFromSections();
+      updateLiveTabPreview();
     });
 
     // Tab checkboxes handling
@@ -479,11 +725,24 @@ export class DiagnosticsTab {
     }
 
     saveRulesBtn?.addEventListener("click", () => {
+      // If saving from unified input, parse sections first
+      if (this.activeRulebookSubtab === "unified" && unifiedInput) {
+        applyUnifiedToSections(unifiedInput.value);
+      }
+
       const updated: StatRulesSettings = {
         mode: (modeSelect?.value as any) || "mvu_quiet",
         statRules: rulesInput?.value?.trim() || DEFAULT_STAT_RULES,
         ledgerPrompt: ledgerInput?.value?.trim() || DEFAULT_LEDGER_PROMPT,
         rpgPrompt: rpgInput?.value?.trim() || DEFAULT_RPG_PROMPT,
+        unifiedRulebook: unifiedInput?.value?.trim() || buildUnifiedRulebook({
+          director: directorSysInput?.value,
+          stats: rulesInput?.value,
+          rpg: rpgInput?.value,
+          ledger: ledgerInput?.value,
+          customStats: activeCustomStats,
+        }),
+        customStats: activeCustomStats,
         enabled: presetSelect?.value !== "pure_vn",
       };
       this.statRulesSettings = updated;
@@ -502,6 +761,8 @@ export class DiagnosticsTab {
           },
         });
       }
+
+      updateLiveTabPreview();
 
       if (saveRulesBtn) {
         const orig = saveRulesBtn.textContent;

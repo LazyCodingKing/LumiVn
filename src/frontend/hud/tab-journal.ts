@@ -73,18 +73,43 @@ export class JournalTab {
         const placeStr = evt.place ? `@ ${evt.place} ` : "";
         const outcomeBadge = evt.outcome ? `<span class="vn-outcome-${evt.outcome}">${evt.outcome}</span>` : "";
 
+        // Collect mutations, falling back to effects if mutations is empty
+        const allMutations: string[] = [];
+        if (Array.isArray(evt.mutations) && evt.mutations.length > 0) {
+          allMutations.push(...evt.mutations);
+        } else if (evt.effects) {
+          if (typeof evt.effects === "object" && !Array.isArray(evt.effects)) {
+            for (const [k, v] of Object.entries(evt.effects)) {
+              if (v) {
+                const aName = k.replace(/^@/, "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                allMutations.push(`${aName}: ${v}`);
+              }
+            }
+          } else if (Array.isArray(evt.effects)) {
+            allMutations.push(...evt.effects.map(String));
+          } else if (typeof evt.effects === "string") {
+            allMutations.push(evt.effects);
+          }
+        }
+
         let mutationsHtml = "";
-        if (evt.mutations && evt.mutations.length > 0) {
-          mutationsHtml = `<ul class="vn-mutations-list">${evt.mutations
+        if (allMutations.length > 0) {
+          mutationsHtml = `<ul class="vn-mutations-list">${allMutations
             .map((m) => `<li>${m}</li>`)
             .join("")}</ul>`;
         }
+
+        const actionText = evt.action || (Array.isArray(evt.cause) ? evt.cause.join("; ") : evt.cause) || "";
+        const sensoryHtml = evt.sensory && evt.sensory !== actionText
+          ? `<div class="vn-evt-sensory" style="font-size: 11px; color: #94a3b8; font-style: italic; margin-top: 2px;">👁️ ${evt.sensory}</div>`
+          : "";
 
         row.innerHTML = `
           <div class="vn-evt-header">
             <strong>${evt.id}</strong> ${timeStr}${placeStr}${outcomeBadge}
           </div>
-          <div class="vn-evt-action">${evt.action || ""}</div>
+          <div class="vn-evt-action">${actionText}</div>
+          ${sensoryHtml}
           ${mutationsHtml}
         `;
         eventsList.appendChild(row);

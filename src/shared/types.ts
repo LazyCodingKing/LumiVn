@@ -408,12 +408,21 @@ export interface DiagnosticData {
   bgUrl: string;
 }
 
+export interface CustomStatDefinition {
+  name: string;
+  max?: number;
+  defaultValue?: number;
+  category?: string;
+}
+
 export interface StatRulesSettings {
   statRules: string;
   ledgerPrompt: string;
   enabled: boolean;
   mode: "mvu_quiet" | "inline_interceptor" | "passive";
   rpgPrompt?: string;
+  unifiedRulebook?: string;
+  customStats?: CustomStatDefinition[];
 }
 
 export interface StatRulesSettingsPayload {
