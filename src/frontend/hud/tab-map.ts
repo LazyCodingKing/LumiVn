@@ -54,14 +54,7 @@ export function resolveAllLedgerPlaces(ledger: LedgerData): [string, any][] {
 export function extractMapBuildingsFromLedger(ledger: LedgerData, cols: number = 14, rows: number = 10): MapBuilding[] {
   const places = resolveAllLedgerPlaces(ledger);
   if (places.length === 0) {
-    return [
-      { id: "apothecary", name: "Apothecary & Alchemist", x: 2, y: 2, w: 2, h: 2, color: "#065f46", icon: "⚗️", place: "market", desc: "Local herbs, salves, and potions." },
-      { id: "blacksmith", name: "Ironforge Smithy", x: 10, y: 2, w: 2, h: 2, color: "#7c2d12", icon: "⚒️", place: "forge", desc: "Forged blades and armaments." },
-      { id: "tavern", name: "Golden Hearth Tavern", x: 2, y: 6, w: 2, h: 2, color: "#78350f", icon: "🍺", place: "tavern", desc: "Hearty meals and local rumors." },
-      { id: "dojo", name: "Tendo Martial Dojo", x: 10, y: 6, w: 2, h: 2, color: "#831843", icon: "🥋", place: "dojo", desc: "Discipline and martial arts training." },
-      { id: "residence", name: "Town Residence", x: 6, y: 1, w: 2, h: 2, color: "#1e1b4b", icon: "🏠", place: "residence", desc: "Peaceful living quarters." },
-      { id: "plaza", name: "Central Fountain Plaza", x: 5, y: 4, w: 4, h: 2, color: "#0c4a6e", icon: "⛲", place: "district_square", desc: "Central gathering hub." },
-    ];
+    return [];
   }
 
   const slots = [
@@ -115,13 +108,7 @@ export function extractMapBuildingsFromLedger(ledger: LedgerData, cols: number =
 export function extract3DLandmarksFromLedger(ledger: LedgerData): { id: string; name: string; x: number; z: number; color: number }[] {
   const places = resolveAllLedgerPlaces(ledger);
   if (places.length === 0) {
-    return [
-      { id: "apothecary", name: "Apothecary & Alchemist", x: -16, z: -16, color: 0x059669 },
-      { id: "blacksmith", name: "Ironforge Armory", x: 16, z: -16, color: 0xb45309 },
-      { id: "tavern", name: "The Golden Hearth", x: -16, z: 16, color: 0xd97706 },
-      { id: "dojo", name: "Tendo Martial Dojo", x: 16, z: 16, color: 0xdc2626 },
-      { id: "plaza", name: "District Fountain Plaza", x: 0, z: 0, color: 0x0284c7 },
-    ];
+    return [];
   }
 
   const coords = [

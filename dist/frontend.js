@@ -4390,291 +4390,149 @@ class StatsTab {
 }
 
 // src/frontend/hud/tab-inventory.ts
-function parseClockHour(clockT, phase) {
-  if (clockT) {
-    const match = clockT.match(/(\d{1,2}):(\d{2})/);
-    if (match) {
-      const h = parseInt(match[1], 10);
-      const m = parseInt(match[2], 10);
-      return h + m / 60;
-    }
-  }
-  const p = (phase || "").toLowerCase();
-  if (p.includes("dawn") || p.includes("morning"))
-    return 8;
-  if (p.includes("afternoon") || p.includes("noon"))
-    return 14;
-  if (p.includes("dusk") || p.includes("sunset") || p.includes("evening"))
-    return 18;
-  if (p.includes("night") || p.includes("midnight"))
-    return 22;
-  return 12;
-}
-function isShopOpen(shop, hour) {
-  if (shop.openHour <= shop.closeHour) {
-    return hour >= shop.openHour && hour < shop.closeHour;
-  }
-  return hour >= shop.openHour || hour < shop.closeHour;
-}
-var DEFAULT_DISTRICT_SHOPS = [
-  {
-    id: "alchemist",
-    name: "Apothecary & Alchemist's Emporium",
-    icon: "⚗️",
-    placeKey: "market",
-    openHour: 8,
-    closeHour: 20,
-    shopkeeper: "Master Alchemist Lyra",
-    items: [
-      { id: "hp_potion", name: "Health Draught", icon: "\uD83E\uDDEA", type: "consumable", price: 35, stock: 5, maxStock: 10, desc: "Restores 45 HP immediately." },
-      { id: "mp_elixir", name: "Starlight Elixir", icon: "\uD83D\uDCA7", type: "consumable", price: 45, stock: 4, maxStock: 8, desc: "Restores 35 MP/Energy." },
-      { id: "cure_salve", name: "Herbal Ointment", icon: "\uD83C\uDF3F", type: "consumable", price: 25, stock: 6, maxStock: 12, desc: "Soothes status conditions and fatigue." }
-    ]
-  },
-  {
-    id: "blacksmith",
-    name: "Ironforge Armory & Smithy",
-    icon: "⚒️",
-    placeKey: "forge",
-    openHour: 7,
-    closeHour: 18,
-    shopkeeper: "Goran the Smith",
-    items: [
-      { id: "steel_sword", name: "Tempered Steel Blade", icon: "\uD83D\uDDE1️", type: "equipment", price: 120, stock: 2, maxStock: 3, desc: "+15 Physical ATK in combat." },
-      { id: "leather_armor", name: "Reinforced Leather Vest", icon: "\uD83E\uDD4B", type: "equipment", price: 95, stock: 3, maxStock: 4, desc: "+10 Armor & mitigation." },
-      { id: "whetstone", name: "Dwarven Whetstone", icon: "\uD83E\uDEA8", type: "item", price: 20, stock: 8, maxStock: 10, desc: "Maintains weapon sharpness." }
-    ]
-  },
-  {
-    id: "bakery_inn",
-    name: "The Golden Hearth Bakery & Tavern",
-    icon: "\uD83C\uDF5E",
-    placeKey: "tavern",
-    openHour: 6,
-    closeHour: 23,
-    shopkeeper: "Innkeeper Martha",
-    items: [
-      { id: "fresh_loaf", name: "Warm Honey Bread", icon: "\uD83E\uDD50", type: "consumable", price: 10, stock: 12, maxStock: 15, desc: "Delicious wholesome bread. Heals 15 HP." },
-      { id: "spiced_tea", name: "Fragrant Spiced Tea", icon: "☕", type: "consumable", price: 12, stock: 10, maxStock: 15, desc: "Warms the heart, restores 10 MP." },
-      { id: "tavern_ale", name: "Golden Amber Ale", icon: "\uD83C\uDF7A", type: "consumable", price: 15, stock: 10, maxStock: 20, desc: "Boosts courage and morale." }
-    ]
-  },
-  {
-    id: "night_market",
-    name: "Velvet Crescent Night Bazaar",
-    icon: "\uD83C\uDF19",
-    placeKey: "slums",
-    openHour: 20,
-    closeHour: 5,
-    shopkeeper: "Shrouded Dealer Ren",
-    items: [
-      { id: "lockpick_set", name: "Thief's Tension Tools", icon: "\uD83D\uDDDD️", type: "item", price: 75, stock: 3, maxStock: 5, desc: "Opens locked chests and backdoors." },
-      { id: "smoke_bomb", name: "Shadowflash Smoke Powder", icon: "\uD83D\uDCA8", type: "consumable", price: 50, stock: 4, maxStock: 6, desc: "Guarantees escape or surprise attack." },
-      { id: "spell_tome", name: "Tome of Forgotten Arcana", icon: "\uD83D\uDCD6", type: "book", price: 180, stock: 1, maxStock: 1, desc: "Grants skill progression insight." }
-    ]
-  }
-];
 function getItemIcon(itemName) {
   const norm = itemName.toLowerCase();
-  if (norm.includes("sword") || norm.includes("blade") || norm.includes("katana") || norm.includes("knife") || norm.includes("dagger") || norm.includes("weapon") || norm.includes("gun"))
-    return "\uD83D\uDDE1️";
-  if (norm.includes("phone") || norm.includes("smartphone") || norm.includes("device") || norm.includes("terminal"))
+  if (norm.includes("tv") || norm.includes("television") || norm.includes("screen") || norm.includes("monitor") || norm.includes("display"))
+    return "\uD83D\uDCFA";
+  if (norm.includes("phone") || norm.includes("smartphone") || norm.includes("device") || norm.includes("cell"))
     return "\uD83D\uDCF1";
-  if (norm.includes("key") || norm.includes("card") || norm.includes("pass"))
+  if (norm.includes("laptop") || norm.includes("computer") || norm.includes("pc") || norm.includes("terminal"))
+    return "\uD83D\uDCBB";
+  if (norm.includes("radio") || norm.includes("stereo") || norm.includes("speaker") || norm.includes("audio"))
+    return "\uD83D\uDCFB";
+  if (norm.includes("camera"))
+    return "\uD83D\uDCF7";
+  if (norm.includes("bed") || norm.includes("futon") || norm.includes("mattress") || norm.includes("cot"))
+    return "\uD83D\uDECF️";
+  if (norm.includes("sofa") || norm.includes("couch") || norm.includes("chair") || norm.includes("seat") || norm.includes("bench"))
+    return "\uD83D\uDECB️";
+  if (norm.includes("desk") || norm.includes("table") || norm.includes("counter"))
+    return "\uD83E\uDEB5";
+  if (norm.includes("door") || norm.includes("gate") || norm.includes("portal") || norm.includes("exit") || norm.includes("entrance"))
+    return "\uD83D\uDEAA";
+  if (norm.includes("window") || norm.includes("balcony"))
+    return "\uD83E\uDE9F";
+  if (norm.includes("mirror"))
+    return "\uD83E\uDE9E";
+  if (norm.includes("lamp") || norm.includes("lantern") || norm.includes("light") || norm.includes("candle") || norm.includes("torch"))
+    return "\uD83C\uDFEE";
+  if (norm.includes("chest") || norm.includes("safe") || norm.includes("crate") || norm.includes("box") || norm.includes("closet") || norm.includes("wardrobe") || norm.includes("cabinet"))
+    return "\uD83E\uDDF0";
+  if (norm.includes("sword") || norm.includes("blade") || norm.includes("katana") || norm.includes("knife") || norm.includes("dagger") || norm.includes("weapon") || norm.includes("gun") || norm.includes("pistol") || norm.includes("rifle") || norm.includes("spear") || norm.includes("bow"))
+    return "\uD83D\uDDE1️";
+  if (norm.includes("shield") || norm.includes("armor"))
+    return "\uD83D\uDEE1️";
+  if (norm.includes("key") || norm.includes("card") || norm.includes("pass") || norm.includes("keycard") || norm.includes("lockpick"))
     return "\uD83D\uDD11";
-  if (norm.includes("potion") || norm.includes("draught") || norm.includes("elixir") || norm.includes("medicine") || norm.includes("pill") || norm.includes("aid") || norm.includes("bandage") || norm.includes("ointment"))
+  if (norm.includes("tool") || norm.includes("wrench") || norm.includes("hammer"))
+    return "\uD83D\uDD27";
+  if (norm.includes("potion") || norm.includes("draught") || norm.includes("elixir") || norm.includes("medicine") || norm.includes("pill") || norm.includes("aid") || norm.includes("bandage") || norm.includes("salve") || norm.includes("ointment"))
     return "\uD83E\uDDEA";
-  if (norm.includes("book") || norm.includes("letter") || norm.includes("note") || norm.includes("scroll") || norm.includes("diary") || norm.includes("tome"))
-    return "\uD83D\uDCDC";
-  if (norm.includes("food") || norm.includes("apple") || norm.includes("snack") || norm.includes("bento") || norm.includes("bread") || norm.includes("loaf"))
+  if (norm.includes("book") || norm.includes("letter") || norm.includes("note") || norm.includes("scroll") || norm.includes("diary") || norm.includes("journal") || norm.includes("tome") || norm.includes("paper") || norm.includes("document") || norm.includes("file"))
+    return "\uD83D\uDCD6";
+  if (norm.includes("food") || norm.includes("apple") || norm.includes("snack") || norm.includes("bento") || norm.includes("bread") || norm.includes("loaf") || norm.includes("cake") || norm.includes("meal") || norm.includes("dish") || norm.includes("sandwich") || norm.includes("soup") || norm.includes("meat"))
     return "\uD83E\uDD6A";
-  if (norm.includes("drink") || norm.includes("water") || norm.includes("tea") || norm.includes("coffee") || norm.includes("soda") || norm.includes("bottle") || norm.includes("ale"))
+  if (norm.includes("coffee") || norm.includes("tea") || norm.includes("cup") || norm.includes("mug"))
     return "☕";
-  if (norm.includes("ring") || norm.includes("necklace") || norm.includes("amulet") || norm.includes("badge") || norm.includes("ribbon"))
+  if (norm.includes("wine") || norm.includes("beer") || norm.includes("ale") || norm.includes("whiskey") || norm.includes("liquor") || norm.includes("cocktail") || norm.includes("champagne"))
+    return "\uD83C\uDF77";
+  if (norm.includes("water") || norm.includes("drink") || norm.includes("soda") || norm.includes("juice") || norm.includes("bottle"))
+    return "\uD83E\uDD64";
+  if (norm.includes("ring") || norm.includes("necklace") || norm.includes("amulet") || norm.includes("badge") || norm.includes("ribbon") || norm.includes("jewel") || norm.includes("gem"))
     return "\uD83D\uDC8D";
-  if (norm.includes("wallet") || norm.includes("money") || norm.includes("coin") || norm.includes("cash") || norm.includes("gold"))
+  if (norm.includes("cloth") || norm.includes("shirt") || norm.includes("pants") || norm.includes("dress") || norm.includes("jacket") || norm.includes("coat") || norm.includes("suit") || norm.includes("robe") || norm.includes("uniform"))
+    return "\uD83D\uDC57";
+  if (norm.includes("wallet") || norm.includes("money") || norm.includes("coin") || norm.includes("cash") || norm.includes("gold") || norm.includes("currency"))
     return "\uD83D\uDCB0";
-  if (norm.includes("bag") || norm.includes("backpack") || norm.includes("case") || norm.includes("pouch"))
+  if (norm.includes("bag") || norm.includes("backpack") || norm.includes("case") || norm.includes("pouch") || norm.includes("duffel") || norm.includes("suitcase"))
     return "\uD83C\uDF92";
+  if (norm.includes("car") || norm.includes("vehicle") || norm.includes("bike") || norm.includes("motorcycle"))
+    return "\uD83D\uDE97";
+  if (norm.includes("flower") || norm.includes("plant") || norm.includes("rose") || norm.includes("herb"))
+    return "\uD83C\uDF38";
+  if (norm.includes("fire") || norm.includes("hearth") || norm.includes("flame"))
+    return "\uD83D\uDD25";
   return "\uD83D\uDCE6";
 }
-function extractDistrictShops(ledger) {
-  const dynamicShops = [];
-  const places = Object.entries(ledger.places || {});
-  for (const [key, place] of places) {
-    const fn = (place.function || key).toLowerCase();
-    const isCommercial = fn.includes("shop") || fn.includes("market") || fn.includes("store") || fn.includes("tavern") || fn.includes("inn") || fn.includes("forge") || fn.includes("apothecary") || fn.includes("bakery") || fn.includes("merchant") || place.resources && place.resources.length > 0;
-    if (isCommercial) {
-      const cleanKey = key.replace(/^@/, "");
-      const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1] : cleanKey;
-      const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-      let icon = "\uD83C\uDFEA";
-      if (fn.includes("tavern") || fn.includes("inn"))
-        icon = "\uD83C\uDF7A";
-      else if (fn.includes("forge") || fn.includes("smith"))
-        icon = "⚒️";
-      else if (fn.includes("apothecary") || fn.includes("herb"))
-        icon = "⚗️";
-      else if (fn.includes("bakery") || fn.includes("food"))
-        icon = "\uD83C\uDF5E";
-      const items = (place.resources || []).map((res, idx) => ({
-        id: `dyn_item_${cleanKey}_${idx}`,
-        name: String(res).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-        icon: getItemIcon(String(res)),
-        type: "item",
-        price: 20 + idx * 15,
-        stock: 3,
-        maxStock: 5,
-        desc: `Local commodity available at ${displayName}.`
-      }));
-      if (items.length === 0) {
-        items.push({
-          id: `dyn_item_${cleanKey}_staple`,
-          name: `${displayName} Provisions`,
-          icon: "\uD83D\uDCE6",
-          type: "consumable",
-          price: 25,
-          stock: 5,
-          maxStock: 10,
-          desc: `Essential local supplies from ${displayName}.`
-        });
-      }
-      dynamicShops.push({
-        id: cleanKey,
-        name: displayName,
-        icon,
-        placeKey: key,
-        openHour: 7,
-        closeHour: 21,
-        shopkeeper: place.population || place.users || "Local Merchant",
-        items
-      });
-    }
-  }
-  if (dynamicShops.length === 0 && places.length > 0) {
-    for (const [key, place] of places) {
-      const cleanKey = key.replace(/^@/, "");
-      const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1] : cleanKey;
-      const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-      const fn = (place.function || cleanKey).toLowerCase();
-      let icon = "\uD83C\uDFEA";
-      let shopSuffix = "Supply Post";
-      if (fn.includes("tavern") || fn.includes("inn") || fn.includes("bar") || fn.includes("lounge")) {
-        icon = "\uD83C\uDF7A";
-        shopSuffix = "Lounge Bar";
-      } else if (fn.includes("forge") || fn.includes("smith") || fn.includes("armory")) {
-        icon = "⚒️";
-        shopSuffix = "Smithy & Armory";
-      } else if (fn.includes("apothecary") || fn.includes("herb") || fn.includes("clinic") || fn.includes("medic")) {
-        icon = "⚗️";
-        shopSuffix = "Dispensary";
-      } else if (fn.includes("kitchen") || fn.includes("dining") || fn.includes("pantry") || fn.includes("cafe")) {
-        icon = "\uD83C\uDF5E";
-        shopSuffix = "Provisions";
-      } else if (fn.includes("dojo") || fn.includes("gym") || fn.includes("arena")) {
-        icon = "\uD83E\uDD4B";
-        shopSuffix = "Armory & Gear";
-      } else if (fn.includes("school") || fn.includes("academy") || fn.includes("campus") || fn.includes("library")) {
-        icon = "\uD83D\uDCDA";
-        shopSuffix = "Commissary";
-      } else if (fn.includes("residence") || fn.includes("room") || fn.includes("house") || fn.includes("foyer") || fn.includes("mansion")) {
-        icon = "\uD83C\uDFE0";
-        shopSuffix = "Quartermaster";
-      }
-      const items = (place.resources || []).map((res, idx) => ({
-        id: `dyn_item_${cleanKey}_${idx}`,
-        name: String(res).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-        icon: getItemIcon(String(res)),
-        type: "item",
-        price: 20 + idx * 15,
-        stock: 3,
-        maxStock: 5,
-        desc: `Local resource acquired from ${displayName}.`
-      }));
-      if (items.length === 0) {
-        items.push({
-          id: `dyn_item_${cleanKey}_staple`,
-          name: `${displayName} Supplies`,
-          icon: "\uD83D\uDCE6",
-          type: "consumable",
-          price: 25,
-          stock: 5,
-          maxStock: 10,
-          desc: `Local commodity available at ${displayName}.`
-        });
-      }
-      dynamicShops.push({
-        id: cleanKey,
-        name: `${displayName} ${shopSuffix}`,
-        icon,
-        placeKey: key,
-        openHour: 6,
-        closeHour: 23,
-        shopkeeper: place.population || place.users || `${displayName} Merchant`,
-        items
-      });
-    }
-  }
-  if (dynamicShops.length === 0 && (ledger.scene?.place || ledger.clock?.location)) {
-    const activePlace = ledger.scene?.place || ledger.clock?.location || "Local District";
-    const cleanKey = activePlace.replace(/^@/, "");
-    const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1] : cleanKey;
-    const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    dynamicShops.push({
-      id: cleanKey,
-      name: `${displayName} Merchant Post`,
-      icon: "\uD83C\uDFEA",
-      placeKey: activePlace,
-      openHour: 6,
-      closeHour: 23,
-      shopkeeper: "District Merchant",
-      items: [
-        {
-          id: `dyn_item_${cleanKey}_staple`,
-          name: `${displayName} Supplies`,
-          icon: "\uD83D\uDCE6",
-          type: "consumable",
-          price: 25,
-          stock: 5,
-          maxStock: 10,
-          desc: `Local goods from ${displayName}.`
-        }
-      ]
-    });
-  }
-  if (dynamicShops.length > 0) {
-    return [...dynamicShops, ...DEFAULT_DISTRICT_SHOPS];
-  }
-  return DEFAULT_DISTRICT_SHOPS;
+function getCharacterIcon(charName, role, status) {
+  const norm = `${charName} ${role || ""} ${status || ""}`.toLowerCase();
+  if (norm.includes("wizard") || norm.includes("mage") || norm.includes("witch") || norm.includes("sorcer") || norm.includes("alchemist"))
+    return "\uD83E\uDDD9‍♀️";
+  if (norm.includes("knight") || norm.includes("warrior") || norm.includes("guard") || norm.includes("soldier") || norm.includes("blade") || norm.includes("fighter"))
+    return "⚔️";
+  if (norm.includes("queen") || norm.includes("king") || norm.includes("princess") || norm.includes("prince") || norm.includes("noble") || norm.includes("lord") || norm.includes("lady"))
+    return "\uD83D\uDC51";
+  if (norm.includes("doctor") || norm.includes("medic") || norm.includes("nurse") || norm.includes("healer"))
+    return "\uD83E\uDE7A";
+  if (norm.includes("detective") || norm.includes("police") || norm.includes("investigator") || norm.includes("agent") || norm.includes("spy"))
+    return "\uD83D\uDD75️";
+  if (norm.includes("teacher") || norm.includes("professor") || norm.includes("scholar") || norm.includes("student") || norm.includes("sensei"))
+    return "\uD83C\uDF93";
+  if (norm.includes("maid") || norm.includes("servant"))
+    return "\uD83E\uDED6";
+  if (norm.includes("butler") || norm.includes("waiter"))
+    return "\uD83E\uDD35";
+  if (norm.includes("merchant") || norm.includes("shopkeeper") || norm.includes("trader") || norm.includes("vendor"))
+    return "\uD83D\uDCB0";
+  if (norm.includes("singer") || norm.includes("idol") || norm.includes("musician") || norm.includes("bard") || norm.includes("artist"))
+    return "\uD83C\uDFA4";
+  if (norm.includes("ninja") || norm.includes("assassin") || norm.includes("thief") || norm.includes("rogue"))
+    return "\uD83E\uDD77";
+  if (norm.includes("girl") || norm.includes("woman") || norm.includes("sister") || norm.includes("mother") || norm.includes("female") || norm.includes("lady") || norm.includes("jessica") || norm.includes("tessa") || norm.includes("leslie") || norm.includes("akane"))
+    return "\uD83C\uDF38";
+  if (norm.includes("boy") || norm.includes("man") || norm.includes("brother") || norm.includes("father") || norm.includes("male") || norm.includes("guy"))
+    return "\uD83D\uDC68";
+  return "\uD83D\uDC64";
 }
-function getTwineItemActions(itemName, context) {
+function getCharacterMoodBadge(status, passion) {
+  const norm = (status || "").toLowerCase();
+  if (norm.includes("happy") || norm.includes("smile") || norm.includes("joy") || norm.includes("laugh") || norm.includes("tipsy") || norm.includes("warm"))
+    return "\uD83D\uDE0A";
+  if (norm.includes("angry") || norm.includes("rage") || norm.includes("mad") || norm.includes("furious") || norm.includes("hostile"))
+    return "\uD83D\uDCA2";
+  if (norm.includes("sad") || norm.includes("cry") || norm.includes("grief") || norm.includes("tear") || norm.includes("depressed"))
+    return "\uD83D\uDE22";
+  if (norm.includes("blush") || norm.includes("shy") || norm.includes("fluster") || norm.includes("embarrass") || norm.includes("teasing"))
+    return "\uD83D\uDE33";
+  if (norm.includes("fear") || norm.includes("scare") || norm.includes("nervous") || norm.includes("anxious") || norm.includes("panic"))
+    return "\uD83D\uDE28";
+  if (norm.includes("excited") || norm.includes("sparkle") || norm.includes("hyper"))
+    return "✨";
+  if (norm.includes("thinking") || norm.includes("curious") || norm.includes("ponder"))
+    return "\uD83E\uDD14";
+  if (norm.includes("calm") || norm.includes("relax") || norm.includes("sleep") || norm.includes("peace"))
+    return "\uD83D\uDE0C";
+  if (typeof passion === "number" && passion > 60)
+    return "\uD83D\uDC96";
+  return "\uD83D\uDCAC";
+}
+function getTwineCharacterActions(charName, placeName) {
+  return [
+    { label: `Talk with ${charName}`, action: `*Approaches ${charName} to talk*` },
+    { label: `Greet ${charName}`, action: `*Nods and greets ${charName} warmly*` },
+    { label: `Observe ${charName}`, action: `*Observes ${charName}'s expressions and posture*` },
+    { label: `Inquire about ${placeName}`, action: `*Asks ${charName} about what is going on here in ${placeName}*` }
+  ];
+}
+function getTwineItemActions(itemName) {
   const lower = itemName.toLowerCase();
   const actions = [];
-  if (context?.isShop && context.price !== undefined) {
-    actions.push({
-      label: `Buy for ${context.price}g`,
-      action: `[Trade: Purchased 1x ${itemName} from ${context.shopName || "merchant"} for ${context.price} Gold]`
-    }, {
-      label: `Inspect ${itemName}`,
-      action: `*Inspects the ${itemName} carefully on the counter*`
-    }, {
-      label: `Ask merchant about ${itemName}`,
-      action: `*Asks the merchant about where they acquired this ${itemName}*`
-    });
-    return actions;
-  }
   if (lower.includes("tv") || lower.includes("television") || lower.includes("screen") || lower.includes("monitor")) {
     actions.push({ label: "Watch TV broadcast", action: `*Turns on the TV and watches the current broadcast*` }, { label: "Flip channels for news", action: `*Flips through TV channels checking the latest news and weather*` }, { label: "Turn off TV", action: `*Turns off the television*` }, { label: "Inspect TV display", action: `*Inspects the TV display and surroundings*` });
   } else if (lower.includes("radio") || lower.includes("stereo")) {
     actions.push({ label: "Tune radio frequency", action: `*Turns the radio dial to find music and local chatter*` }, { label: "Turn off radio", action: `*Turns off the radio*` });
-  } else if (lower.includes("tea") || lower.includes("coffee") || lower.includes("drink") || lower.includes("draught") || lower.includes("elixir") || lower.includes("potion")) {
+  } else if (lower.includes("tea") || lower.includes("coffee") || lower.includes("drink") || lower.includes("draught") || lower.includes("elixir") || lower.includes("potion") || lower.includes("wine") || lower.includes("water")) {
     actions.push({ label: `Sip ${itemName}`, action: `*Takes a warm, slow sip of ${itemName}*` }, { label: `Smell aroma of ${itemName}`, action: `*Breathes in the aroma of ${itemName}*` }, { label: `Offer ${itemName} to companion`, action: `*Offers a cup of ${itemName} to a companion*` });
-  } else if (lower.includes("food") || lower.includes("meal") || lower.includes("snack") || lower.includes("bread") || lower.includes("cake") || lower.includes("apple")) {
+  } else if (lower.includes("food") || lower.includes("meal") || lower.includes("snack") || lower.includes("bread") || lower.includes("cake") || lower.includes("apple") || lower.includes("sandwich")) {
     actions.push({ label: `Eat ${itemName}`, action: `*Eats the ${itemName} thoughtfully*` }, { label: `Savor a bite of ${itemName}`, action: `*Takes a slow bite of ${itemName}*` }, { label: `Share ${itemName}`, action: `*Shares the ${itemName} with a companion*` });
-  } else if (lower.includes("bed") || lower.includes("sofa") || lower.includes("couch") || lower.includes("futon")) {
+  } else if (lower.includes("bed") || lower.includes("sofa") || lower.includes("couch") || lower.includes("futon") || lower.includes("chair")) {
     actions.push({ label: `Rest on ${itemName}`, action: `*Lies down comfortably on the ${itemName} to rest*` }, { label: `Sit on ${itemName}`, action: `*Sits down on the ${itemName} and relaxes*` }, { label: `Take a brief nap`, action: `*Closes eyes and drifts into a brief nap on the ${itemName}*` });
-  } else if (lower.includes("book") || lower.includes("novel") || lower.includes("scroll") || lower.includes("journal")) {
+  } else if (lower.includes("book") || lower.includes("novel") || lower.includes("scroll") || lower.includes("journal") || lower.includes("note")) {
     actions.push({ label: `Read ${itemName}`, action: `*Opens the ${itemName} and reads through the pages*` }, { label: `Skim ${itemName} for notes`, action: `*Skims through the ${itemName} searching for interesting details*` }, { label: `Close ${itemName}`, action: `*Bookmarks the ${itemName} and sets it down*` });
+  } else if (lower.includes("door") || lower.includes("gate")) {
+    actions.push({ label: `Knock on ${itemName}`, action: `*Knocks firmly on the ${itemName}*` }, { label: `Open ${itemName}`, action: `*Carefully opens the ${itemName} and peers through*` });
+  } else if (lower.includes("mirror")) {
+    actions.push({ label: `Look in mirror`, action: `*Looks into the mirror, checking appearance and expression*` });
   } else {
     actions.push({ label: `Interact with ${itemName}`, action: `*Interacts with the ${itemName}*` }, { label: `Examine ${itemName}`, action: `*Examines the ${itemName} closely*` }, { label: `Pick up ${itemName}`, action: `*Reaches out to pick up the ${itemName}*` });
   }
@@ -4685,8 +4543,6 @@ class InventoryTab {
   root;
   onAction;
   currentView = "inventory";
-  playerGold = 200;
-  shops = JSON.parse(JSON.stringify(DEFAULT_DISTRICT_SHOPS));
   constructor(onAction) {
     this.onAction = onAction;
     this.root = document.createElement("div");
@@ -4694,7 +4550,7 @@ class InventoryTab {
   }
   render(ledger, activeActorId) {
     this.root.innerHTML = "";
-    this.shops = extractDistrictShops(ledger);
+    const isSceneView = this.currentView === "scene" || this.currentView === "marketplace";
     const actorId = activeActorId || (ledger.actors?.["user"] ? "user" : Object.keys(ledger.actors || {})[0] || "user");
     const actor = ledger.actors?.[actorId];
     const inv = actor?.inventory || {
@@ -4703,26 +4559,30 @@ class InventoryTab {
       room: [],
       room_location: ""
     };
-    const currentHour = parseClockHour(ledger.clock?.t, ledger.clock?.phase);
+    const currentPlace = ledger.scene?.place || ledger.clock?.location || "";
+    const cleanPlaceKey = currentPlace.replace(/^@/, "");
+    const placeNamePart = cleanPlaceKey.includes(":") ? cleanPlaceKey.split(":")[1] : cleanPlaceKey;
+    const sceneDisplayName = (placeNamePart || "Current Scene").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
     const header = document.createElement("div");
     header.className = "vn-tab-header";
     header.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
         <div>
           <h3 style="margin: 0; font-size: 15px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
-            <span>\uD83C\uDF92</span> <span>${this.currentView === "inventory" ? `Inventory & Containers — ${actor?.name || actorId}` : "Living District Marketplace & Trading"}</span>
+            <span>${isSceneView ? "\uD83C\uDFAC" : "\uD83C\uDF92"}</span>
+            <span>${!isSceneView ? `Inventory & Containers — ${actor?.name || actorId}` : `Current Scene: ${sceneDisplayName}`}</span>
           </h3>
           <p class="vn-muted" style="margin: 2px 0 0 0; font-size: 11px;">
             <span>⏱️ <strong>${ledger.clock?.t || "D1 12:00"}</strong> (${ledger.clock?.phase || "Day"})</span>
-            <span> • \uD83D\uDCB0 <strong style="color: #ffd700;">${this.playerGold} Gold</strong></span>
+            ${ledger.clock?.location ? `<span> • \uD83D\uDCCD ${ledger.clock.location}</span>` : ""}
           </p>
         </div>
         <div style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 2px; display: flex; gap: 4px;">
-          <button id="vn-inv-tab-btn" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.currentView === "inventory" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+          <button id="vn-inv-tab-btn" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${!isSceneView ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
             \uD83C\uDF92 Backpack
           </button>
-          <button id="vn-market-tab-btn" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.currentView === "marketplace" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
-            \uD83C\uDFEA Marketplace
+          <button id="vn-scene-tab-btn" class="vn-market-tab-btn" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${isSceneView ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+            \uD83C\uDFAC Current Scene
           </button>
         </div>
       </div>
@@ -4732,12 +4592,12 @@ class InventoryTab {
       this.currentView = "inventory";
       this.render(ledger, activeActorId);
     });
-    header.querySelector("#vn-market-tab-btn")?.addEventListener("click", () => {
-      this.currentView = "marketplace";
+    header.querySelector("#vn-scene-tab-btn, .vn-market-tab-btn")?.addEventListener("click", () => {
+      this.currentView = "scene";
       this.render(ledger, activeActorId);
     });
-    if (this.currentView === "marketplace") {
-      this.renderMarketplaceView(ledger, inv, currentHour, activeActorId);
+    if (isSceneView) {
+      this.renderSceneView(ledger, inv, activeActorId);
       return;
     }
     const handsSection = document.createElement("div");
@@ -4837,209 +4697,265 @@ class InventoryTab {
     roomSection.appendChild(roomGrid);
     this.root.appendChild(roomSection);
   }
-  renderMarketplaceView(ledger, inv, currentHour, activeActorId) {
-    const marketWrap = document.createElement("div");
-    marketWrap.style.cssText = "display: flex; flex-direction: column; gap: 14px;";
-    const banner = document.createElement("div");
-    banner.style.cssText = "background: #0f172a; border: 1px solid #3b82f6; border-radius: 8px; padding: 10px 14px; font-size: 11px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;";
-    banner.innerHTML = `
-      <div>
-        <strong style="color: #60a5fa;">Living District Trading Hub:</strong>
-        <span style="color: #cbd5e1;"> Shops follow autonomous diurnal schedules. Visit open stalls to buy equipment or barter surplus carried items.</span>
-      </div>
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <span style="color: #fde047; font-weight: 700;">Wallet: ${this.playerGold}g</span>
-        <button id="vn-market-add-funds" style="background: #1e293b; border: 1px solid #475569; color: #94a3b8; font-size: 10px; border-radius: 4px; padding: 2px 6px; cursor: pointer;">+50g</button>
-      </div>
-    `;
-    marketWrap.appendChild(banner);
-    banner.querySelector("#vn-market-add-funds")?.addEventListener("click", () => {
-      this.playerGold += 50;
-      this.render(ledger, activeActorId);
-    });
+  renderSceneView(ledger, inv, activeActorId) {
+    const sceneWrap = document.createElement("div");
+    sceneWrap.style.cssText = "display: flex; flex-direction: column; gap: 14px;";
     const currentPlace = ledger.scene?.place || ledger.clock?.location || "";
     const placeData = ledger.places?.[currentPlace] || {};
-    const presentResources = [
+    const cleanPlaceKey = currentPlace.replace(/^@/, "");
+    const placeNamePart = cleanPlaceKey.includes(":") ? cleanPlaceKey.split(":")[1] : cleanPlaceKey;
+    const sceneDisplayName = (placeNamePart || "Current Scene").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    const banner = document.createElement("div");
+    banner.style.cssText = "background: #0f172a; border: 1px solid #3b82f6; border-radius: 8px; padding: 10px 14px; font-size: 11px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;";
+    const atmosphereText = ledger.scene?.atmosphere ? ` • ✨ <em>${ledger.scene.atmosphere}</em>` : "";
+    const threadsText = Array.isArray(ledger.scene?.threads) && ledger.scene.threads.length > 0 ? ` • \uD83D\uDCCC Threads: <span style="color: #93c5fd;">${ledger.scene.threads.join(", ")}</span>` : "";
+    banner.innerHTML = `
+      <div>
+        <strong style="color: #60a5fa;">\uD83D\uDCCD ${sceneDisplayName}</strong>
+        <span style="color: #cbd5e1;">(${currentPlace || "Local Scene"})${atmosphereText}${threadsText}</span>
+      </div>
+      <div style="color: #94a3b8; font-size: 10px;">
+        Environment & Characters
+      </div>
+    `;
+    sceneWrap.appendChild(banner);
+    const presentChars = [];
+    const seenCharIds = new Set;
+    const activeUserKey = (activeActorId || "user").toLowerCase();
+    const participants = Array.isArray(ledger.scene?.participants) ? ledger.scene.participants : [];
+    for (const p of participants) {
+      const pKey = String(p).toLowerCase().replace(/^@/, "");
+      if (pKey === activeUserKey || pKey === "user" || pKey === "{{user}}")
+        continue;
+      if (seenCharIds.has(pKey))
+        continue;
+      const actor = ledger.actors?.[pKey] || Object.values(ledger.actors || {}).find((a) => (a.name || "").toLowerCase() === pKey);
+      const rosterEntry = (ledger.roster || []).find((r) => r.id?.toLowerCase() === pKey || r.name?.toLowerCase() === pKey);
+      const name = actor?.name || rosterEntry?.name || pKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      const status = rosterEntry?.status || actor?.status || actor?.activity || (actor?.attire ? `Attire: ${actor.attire}` : "Present in scene");
+      const role = rosterEntry?.role || actor?.role || "";
+      const icon = getCharacterIcon(name, role, status);
+      const moodBadge = getCharacterMoodBadge(status, actor?.stats?.passion);
+      seenCharIds.add(pKey);
+      presentChars.push({
+        id: pKey,
+        name,
+        role,
+        status,
+        icon,
+        avatarUrl: actor?.image_id ? `/api/v1/images/${actor.image_id}` : undefined,
+        moodBadge
+      });
+    }
+    if (Array.isArray(ledger.roster)) {
+      for (const r of ledger.roster) {
+        const rKey = (r.id || r.name || "").toLowerCase();
+        if (rKey === activeUserKey || rKey === "user")
+          continue;
+        if (seenCharIds.has(rKey))
+          continue;
+        if (r.loc && currentPlace && r.loc.toLowerCase() === currentPlace.toLowerCase()) {
+          seenCharIds.add(rKey);
+          const actor = ledger.actors?.[rKey];
+          const name = r.name || rKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+          const status = r.status || actor?.status || "Present in location";
+          const icon = getCharacterIcon(name, r.role, status);
+          const moodBadge = getCharacterMoodBadge(status);
+          presentChars.push({
+            id: rKey,
+            name,
+            role: r.role,
+            status,
+            icon,
+            avatarUrl: actor?.image_id ? `/api/v1/images/${actor.image_id}` : undefined,
+            moodBadge
+          });
+        }
+      }
+    }
+    if (ledger.actors) {
+      for (const [aKey, actor] of Object.entries(ledger.actors)) {
+        const normKey = aKey.toLowerCase();
+        if (normKey === activeUserKey || normKey === "user")
+          continue;
+        if (seenCharIds.has(normKey))
+          continue;
+        const aLoc = (actor.location || actor?.loc || "").toLowerCase();
+        if (aLoc && currentPlace && aLoc === currentPlace.toLowerCase()) {
+          seenCharIds.add(normKey);
+          const name = actor.name || normKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+          const status = actor.status || actor.activity || (actor.attire ? `Attire: ${actor.attire}` : "Present in location");
+          const icon = getCharacterIcon(name, actor?.role, status);
+          const moodBadge = getCharacterMoodBadge(status, actor?.stats?.passion);
+          presentChars.push({
+            id: normKey,
+            name,
+            status,
+            icon,
+            avatarUrl: actor?.image_id ? `/api/v1/images/${actor.image_id}` : undefined,
+            moodBadge
+          });
+        }
+      }
+    }
+    const charsSection = document.createElement("div");
+    charsSection.className = "vn-scene-chars-section";
+    charsSection.style.cssText = "background: #0f172a; border: 1px solid #818cf8; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;";
+    charsSection.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
+        <strong style="color: #a5b4fc; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+          <span>\uD83D\uDC65</span> <span>Characters in Current Scene (${presentChars.length})</span>
+        </strong>
+        <span style="font-size: 10px; color: #94a3b8;">Choose dialogue choices or speak directly</span>
+      </div>
+      ${presentChars.length === 0 ? `
+        <div style="background: #1e293b; border: 1px dashed #334155; border-radius: 8px; padding: 12px; text-align: center; color: #94a3b8; font-size: 11px;">
+          No other characters currently present in ${sceneDisplayName}.
+          <div style="margin-top: 8px;">
+            <button class="vn-twine-action-btn" data-action="*Waits quietly to see if anyone arrives in ${sceneDisplayName}*" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #818cf8; border-radius: 4px; padding: 4px 10px; color: #c7d2fe; font-size: 11px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;">
+              [[ ⏳ Wait quietly ]]
+            </button>
+          </div>
+        </div>
+      ` : `
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px;">
+          ${presentChars.map((char) => {
+      const charActions = getTwineCharacterActions(char.name, sceneDisplayName);
+      return `
+              <div class="vn-scene-char-card" style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  ${char.avatarUrl ? `
+                    <img src="${char.avatarUrl}" alt="${char.name}" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 2px solid #818cf8;" />
+                  ` : `
+                    <div style="width: 36px; height: 36px; border-radius: 50%; background: #312e81; border: 1px solid #6366f1; display: flex; align-items: center; justify-content: center; font-size: 18px;">
+                      ${char.icon}
+                    </div>
+                  `}
+                  <div style="flex: 1; min-width: 0;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      <strong style="color: #f8fafc; font-size: 12px;">${char.name}</strong>
+                      <span style="font-size: 12px;">${char.moodBadge}</span>
+                    </div>
+                    <div style="font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                      ${char.status || "Present"}
+                    </div>
+                  </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #2d3748; padding-top: 6px;">
+                  ${charActions.map((act) => `
+                    <button class="vn-twine-action-btn" data-action="${act.action.replace(/"/g, "&quot;")}" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #818cf8; border-radius: 4px; padding: 4px 8px; color: #c7d2fe; font-size: 11px; text-align: left; cursor: pointer; transition: all 0.15s ease; font-family: ui-monospace, Menlo, monospace;">
+                      [[ ${act.label} ]]
+                    </button>
+                  `).join("")}
+                </div>
+
+                <div class="vn-char-say-row" style="display: flex; gap: 6px; margin-top: 4px; border-top: 1px solid #2d3748; padding-top: 6px;">
+                  <input type="text" class="vn-char-say-input" data-char-name="${char.name}" placeholder="Say something to ${char.name}..." style="flex: 1; background: #0f172a; border: 1px solid #475569; border-radius: 4px; padding: 4px 8px; color: #f8fafc; font-size: 11px; outline: none;" />
+                  <button class="vn-char-say-btn" data-char-name="${char.name}" style="background: #6366f1; border: none; border-radius: 4px; padding: 4px 10px; color: #fff; font-size: 11px; font-weight: 600; cursor: pointer;">
+                    \uD83D\uDCAC Say
+                  </button>
+                </div>
+              </div>
+            `;
+    }).join("")}
+        </div>
+      `}
+    `;
+    sceneWrap.appendChild(charsSection);
+    const rawObjects = [
       ...placeData.resources || [],
       ...placeData.affordances || [],
       ...inv.room || []
     ];
-    const displayObjects = presentResources.length > 0 ? presentResources : ["Television (TV)", "Comfortable Bed", "Coffee Maker", "Tea Set", "Desk & Books"];
+    const seenObjects = new Set;
+    const displayObjects = [];
+    for (const obj of rawObjects) {
+      const clean = String(obj).trim();
+      const lower = clean.toLowerCase();
+      if (clean && !seenObjects.has(lower)) {
+        seenObjects.add(lower);
+        displayObjects.push(clean);
+      }
+    }
     const objectsSection = document.createElement("div");
+    objectsSection.className = "vn-scene-objects-section";
     objectsSection.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;";
     objectsSection.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
         <strong style="color: #38bdf8; font-size: 13px; display: flex; align-items: center; gap: 6px;">
-          <span>\uD83D\uDD0D</span> <span>Discovered & Present Objects in ${currentPlace || "Scene"} (Twine Actions)</span>
+          <span>\uD83D\uDD0D</span> <span>Discovered & Present Objects in ${sceneDisplayName} (${displayObjects.length})</span>
         </strong>
-        <span style="font-size: 10px; color: #94a3b8;">Click hypertext choices to interact directly with the world</span>
+        <span style="font-size: 10px; color: #94a3b8;">Click hypertext choices to interact directly</span>
       </div>
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;">
-        ${displayObjects.map((obj) => {
+      ${displayObjects.length === 0 ? `
+        <div style="background: #1e293b; border: 1px dashed #334155; border-radius: 8px; padding: 12px; text-align: center; color: #94a3b8; font-size: 11px;">
+          No interactable objects currently recorded in ${sceneDisplayName}.
+          <div style="margin-top: 8px; display: flex; justify-content: center; gap: 8px;">
+            <button class="vn-twine-action-btn" data-action="*Examines the surroundings of ${sceneDisplayName} carefully*" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #38bdf8; border-radius: 4px; padding: 4px 10px; color: #7dd3fc; font-size: 11px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;">
+              [[ \uD83D\uDD0D Examine surroundings ]]
+            </button>
+            <button class="vn-twine-action-btn" data-action="*Searches ${sceneDisplayName} for anything useful*" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #38bdf8; border-radius: 4px; padding: 4px 10px; color: #7dd3fc; font-size: 11px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;">
+              [[ \uD83D\uDEAA Search room ]]
+            </button>
+          </div>
+        </div>
+      ` : `
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;">
+          ${displayObjects.map((obj) => {
       const twineActions = getTwineItemActions(obj);
       return `
-            <div class="vn-present-obj-card" style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 18px;">${getItemIcon(obj)}</span>
-                <strong style="color: #f8fafc; font-size: 12px;">${obj}</strong>
+              <div class="vn-present-obj-card" style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 20px;">${getItemIcon(obj)}</span>
+                  <strong style="color: #f8fafc; font-size: 12px;">${obj}</strong>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #2d3748; padding-top: 6px;">
+                  ${twineActions.map((act) => `
+                    <button class="vn-twine-action-btn" data-action="${act.action.replace(/"/g, "&quot;")}" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #38bdf8; border-radius: 4px; padding: 4px 8px; color: #7dd3fc; font-size: 11px; text-align: left; cursor: pointer; transition: all 0.15s ease; font-family: ui-monospace, Menlo, monospace;">
+                      [[ ${act.label} ]]
+                    </button>
+                  `).join("")}
+                </div>
               </div>
-              <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #2d3748; padding-top: 6px;">
-                ${twineActions.map((act) => `
-                  <button class="vn-twine-action-btn" data-action="${act.action.replace(/"/g, "&quot;")}" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #38bdf8; border-radius: 4px; padding: 4px 8px; color: #7dd3fc; font-size: 11px; text-align: left; cursor: pointer; transition: all 0.15s ease; font-family: ui-monospace, Menlo, monospace;">
-                    [[ ${act.label} ]]
-                  </button>
-                `).join("")}
-              </div>
-            </div>
-          `;
+            `;
     }).join("")}
-      </div>
+        </div>
+      `}
     `;
-    marketWrap.appendChild(objectsSection);
-    objectsSection.querySelectorAll(".vn-twine-action-btn").forEach((btn) => {
+    sceneWrap.appendChild(objectsSection);
+    sceneWrap.querySelectorAll(".vn-twine-action-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
         const act = btn.dataset.action;
         if (act)
           this.onAction(act);
       });
     });
-    for (const shop of this.shops) {
-      const open = isShopOpen(shop, currentHour);
-      const shopCard = document.createElement("div");
-      shopCard.style.cssText = `background: #0f172a; border: 1px solid ${open ? "#10b981" : "#334155"}; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; opacity: ${open ? "1" : "0.75"};`;
-      const formatHour = (h) => `${String(Math.floor(h)).padStart(2, "0")}:00`;
-      const hoursText = `${formatHour(shop.openHour)} - ${formatHour(shop.closeHour)}`;
-      shopCard.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 20px;">${shop.icon}</span>
-            <div>
-              <strong style="color: #f8fafc; font-size: 13px;">${shop.name}</strong>
-              <div style="font-size: 10px; color: #94a3b8;">
-                Keeper: ${shop.shopkeeper || "Merchant"} • Location: <span style="color: #38bdf8;">${shop.placeKey}</span>
-              </div>
-            </div>
-          </div>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 10px; color: #94a3b8;">Hours: ${hoursText}</span>
-            <span style="font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; background: ${open ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)"}; border: 1px solid ${open ? "#22c55e" : "#ef4444"}; color: ${open ? "#86efac" : "#fca5a5"};">
-              ${open ? "\uD83D\uDFE2 OPEN" : "\uD83D\uDD34 CLOSED"}
-            </span>
-          </div>
-        </div>
-
-        ${!open ? `
-          <div style="color: #94a3b8; font-size: 11px; font-style: italic; padding: 6px 0;">
-            The shutters are barred. This merchant operates strictly from ${hoursText}.
-          </div>
-        ` : `
-          <!-- Items Stall Grid -->
-          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px;">
-            ${shop.items.map((item) => {
-        const canAfford = this.playerGold >= item.price;
-        const hasStock = item.stock > 0;
-        return `
-                <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between; gap: 6px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                      <span style="font-size: 16px;">${item.icon}</span>
-                      <strong style="color: #f8fafc; font-size: 11px;">${item.name}</strong>
-                    </div>
-                    <span style="color: #ffd700; font-weight: 700; font-size: 11px;">${item.price}g</span>
-                  </div>
-                  <div style="font-size: 10px; color: #cbd5e1; line-height: 1.3;">
-                    ${item.desc || "Standard commodity."}
-                  </div>
-                  <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #2d3748; padding-top: 6px; margin-top: 2px;">
-                    <span style="font-size: 9px; color: #94a3b8;">Stock: ${item.stock}/${item.maxStock}</span>
-                    <button class="vn-buy-item-btn" data-shop-id="${shop.id}" data-item-id="${item.id}" style="background: ${canAfford && hasStock ? "linear-gradient(135deg, #059669, #10b981)" : "#334155"}; border: none; color: ${canAfford && hasStock ? "#fff" : "#94a3b8"}; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 3px 10px; cursor: ${canAfford && hasStock ? "pointer" : "not-allowed"};">
-                      ${!hasStock ? "Out of Stock" : !canAfford ? "Can't Afford" : "Buy"}
-                    </button>
-                  </div>
-                  <div style="display: flex; gap: 4px; margin-top: 4px;">
-                    <button class="vn-twine-link-inspect" data-item-name="${item.name}" style="flex: 1; background: rgba(15, 23, 42, 0.6); border: 1px dashed #38bdf8; color: #7dd3fc; border-radius: 4px; padding: 2px 4px; font-size: 9px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;">
-                      [[ Examine ]]
-                    </button>
-                    <button class="vn-twine-link-inquire" data-item-name="${item.name}" data-shop-name="${shop.name}" style="flex: 1; background: rgba(15, 23, 42, 0.6); border: 1px dashed #818cf8; color: #a5b4fc; border-radius: 4px; padding: 2px 4px; font-size: 9px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;">
-                      [[ Inquire ]]
-                    </button>
-                  </div>
-                </div>
-              `;
-      }).join("")}
-          </div>
-        `}
-      `;
-      marketWrap.appendChild(shopCard);
-    }
-    if (inv.carried && inv.carried.length > 0) {
-      const sellSection = document.createElement("div");
-      sellSection.style.cssText = "background: #0f172a; border: 1px solid #eab308; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;";
-      sellSection.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <strong style="color: #fde047; font-size: 12px; display: flex; align-items: center; gap: 6px;">
-            <span>\uD83E\uDD1D</span> <span>Merchant Barter & Sell Back (Sell for 15g each)</span>
-          </strong>
-          <span style="font-size: 10px; color: #94a3b8;">Turn carried goods into gold coins</span>
-        </div>
-        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-          ${inv.carried.map((cItem, idx) => `
-            <div style="background: #1e293b; border: 1px solid #475569; border-radius: 6px; padding: 4px 10px; display: flex; align-items: center; gap: 8px; font-size: 11px;">
-              <span>${getItemIcon(cItem)} ${cItem}</span>
-              <button class="vn-sell-item-btn" data-item-idx="${idx}" data-item-name="${cItem}" style="background: #eab308; border: none; color: #000; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 2px 6px; cursor: pointer;">
-                Sell (+15g)
-              </button>
-            </div>
-          `).join("")}
-        </div>
-      `;
-      marketWrap.appendChild(sellSection);
-      sellSection.querySelectorAll(".vn-sell-item-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const idx = parseInt(btn.dataset.itemIdx || "-1", 10);
-          const name = btn.dataset.itemName || "";
-          if (idx >= 0 && inv.carried && inv.carried[idx]) {
-            inv.carried.splice(idx, 1);
-            this.playerGold += 15;
-            this.onAction(`[Trade: Sold ${name} to merchant for 15 Gold]`);
-            this.render(ledger, activeActorId);
-          }
-        });
-      });
-    }
-    this.root.appendChild(marketWrap);
-    marketWrap.querySelectorAll(".vn-buy-item-btn").forEach((btn) => {
+    sceneWrap.querySelectorAll(".vn-char-say-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const shopId = btn.dataset.shopId;
-        const itemId = btn.dataset.itemId;
-        const shop = this.shops.find((s) => s.id === shopId);
-        const item = shop?.items.find((i) => i.id === itemId);
-        if (shop && item && item.stock > 0 && this.playerGold >= item.price) {
-          this.playerGold -= item.price;
-          item.stock -= 1;
-          if (!inv.carried)
-            inv.carried = [];
-          inv.carried.push(item.name);
-          this.onAction(`[Trade: Purchased 1x ${item.name} from ${shop.name} for ${item.price} Gold]`);
-          this.render(ledger, activeActorId);
+        const charName = btn.dataset.charName;
+        const row = btn.closest(".vn-char-say-row");
+        const input = row?.querySelector(".vn-char-say-input");
+        if (charName && input && input.value.trim()) {
+          const text = input.value.trim();
+          this.onAction(`*To ${charName}:* "${text}"`);
+          input.value = "";
         }
       });
     });
-    marketWrap.querySelectorAll(".vn-twine-link-inspect").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const name = btn.dataset.itemName;
-        if (name)
-          this.onAction(`*Inspects the ${name} closely on the counter*`);
+    sceneWrap.querySelectorAll(".vn-char-say-input").forEach((inp) => {
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          const charName = inp.dataset.charName;
+          const text = inp.value.trim();
+          if (charName && text) {
+            this.onAction(`*To ${charName}:* "${text}"`);
+            inp.value = "";
+          }
+        }
       });
     });
-    marketWrap.querySelectorAll(".vn-twine-link-inquire").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const name = btn.dataset.itemName;
-        const sname = btn.dataset.shopName || "merchant";
-        if (name)
-          this.onAction(`*Asks the ${sname} shopkeeper about the origins of ${name}*`);
-      });
-    });
+    this.root.appendChild(sceneWrap);
   }
 }
 

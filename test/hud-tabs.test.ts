@@ -802,53 +802,47 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     expect(html).toContain("Skill Trees (Prompt-Driven &amp; Customizable)");
   });
 
-  test("19. Living District Clock Schedule & Marketplace Economy", () => {
+  test("19. Current Scene Navigation, Character Interactions & Environment Objects", () => {
     // 1. Clock parsing
     expect(parseClockHour("D1 16:30", "Afternoon")).toBe(16.5);
     expect(parseClockHour(undefined, "Morning")).toBe(8);
     expect(parseClockHour(undefined, "Night")).toBe(22);
 
-    // 2. Shop open/close check
-    const alchemist = DEFAULT_DISTRICT_SHOPS.find((s) => s.id === "alchemist")!;
-    expect(isShopOpen(alchemist, 12)).toBe(true);
-    expect(isShopOpen(alchemist, 22)).toBe(false);
-
-    // Night market (20 to 5)
-    const nightMarket = DEFAULT_DISTRICT_SHOPS.find((s) => s.id === "night_market")!;
-    expect(isShopOpen(nightMarket, 23)).toBe(true);
-    expect(isShopOpen(nightMarket, 3)).toBe(true);
-    expect(isShopOpen(nightMarket, 14)).toBe(false);
-
-    // 3. InventoryTab Marketplace rendering and trading
-    let tradeAction = "";
+    // 2. InventoryTab Current Scene rendering & character/item interaction
+    let actionTriggered = "";
     const tab = new InventoryTab((act) => {
-      tradeAction = act;
+      actionTriggered = act;
     });
-    tab.playerGold = 100;
 
-    // Switch to marketplace view
-    (tab as any).currentView = "marketplace";
+    // Switch to Current Scene view
+    tab.currentView = "scene";
     tab.render(parsedLedger, "user");
 
     const html = tab.root.innerHTML;
-    expect(html).toContain("Living District Marketplace &amp; Trading");
-    expect(html).toContain("Health Draught");
+    expect(html).toContain("Current Scene: Foyer");
+    expect(html).not.toContain("Apothecary");
+    expect(html).not.toContain("Marketplace");
 
-    // Buy item
-    const buyBtn = tab.root.querySelector('.vn-buy-item-btn[data-item-id="hp_potion"]') as HTMLButtonElement;
-    expect(buyBtn).toBeDefined();
-    buyBtn?.click();
+    // Verify characters present in the scene
+    expect(html).toContain("Characters in Current Scene");
+    expect(html).toContain("Jessica");
+    expect(html).toContain("Tessa");
 
-    expect(tab.playerGold).toBe(65);
-    expect(tradeAction).toContain("Purchased 1x Health Draught");
-    expect(parsedLedger.actors?.user.inventory.carried).toContain("Health Draught");
+    // Trigger Twine interaction on character
+    const talkBtn = tab.root.querySelector('.vn-twine-action-btn[data-action*="Jessica"]') as HTMLButtonElement;
+    expect(talkBtn).toBeDefined();
+    talkBtn?.click();
+    expect(actionTriggered).toContain("Jessica");
 
-    // Sell item
-    const sellBtn = tab.root.querySelector(".vn-sell-item-btn") as HTMLButtonElement;
-    if (sellBtn) {
-      sellBtn.click();
-      expect(tradeAction).toContain("Sold");
-      expect(tab.playerGold).toBe(80);
+    // Test direct dialogue say input
+    const sayInput = tab.root.querySelector('.vn-char-say-input[data-char-name="Jessica"]') as HTMLInputElement;
+    const sayBtn = tab.root.querySelector('.vn-char-say-btn[data-char-name="Jessica"]') as HTMLButtonElement;
+    expect(sayInput).toBeDefined();
+    expect(sayBtn).toBeDefined();
+    if (sayInput && sayBtn) {
+      sayInput.value = "Hey Jessica, nice to see you!";
+      sayBtn.click();
+      expect(actionTriggered).toBe('*To Jessica:* "Hey Jessica, nice to see you!"');
     }
   });
 
