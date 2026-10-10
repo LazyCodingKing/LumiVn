@@ -118,12 +118,12 @@ ENVIRONMENT: STATE -> AFFORDANCE -> ACTOR INTERACTION -> CONSEQUENCE. Props and 
 </population>
 </stat_rules>`;
 var DEFAULT_LEDGER_PROMPT = `LEDGER (after prose; authoritative world state):
-1. TURN 1: emit baseline dossier (appearance, money, combat, life_model, outfit, inventory, profile, relations).
+1. TURN 1: emit baseline dossier (appearance, money, life_model, outfit, inventory, profile, relations).
 2. AFTER TURN 1 = COMPACT DELTA, ZERO STATIC LEAK. The extension permanently stores and merges state; NEVER re-emit unchanged fields.
   * Omit ## World and ## Places unless location or rules shifted (\`clock\` is still always emitted).
-  * \`user\`: delta only; omit unchanged appearance, combat, life_model.
+  * \`user\`: delta only; omit unchanged appearance, life_model.
   * Passions: moved keys only (\`passions: { anger: 20 }\`).
-  * Combat: omit unless HP/MP moved (\`combat: { hp: "80/100" }\`).
+  * Combat: omit; stats and skills are tracked and calculated client-side by the RPG engine.
   * Outfit: changed slot only (\`outfit: { top: "none" }\`); never re-emit unchanged slots.
   * Inventory: only the hand slot or carried prop that moved.
   * Journal: only the new event(s) from THIS reply (\`EVT-n\`); never reprint past records.
@@ -193,19 +193,12 @@ roster:
 
 ## Actor dossiers
 
-COMBAT TABLE (Lv0..10; copy directly):
-T1 HP 100-300 | MP 50-150 | PWR=AGI 15-45 (+20 HP, +10 MP, +3 stats/lv)
-T2 HP 400-1000 | MP 200-500 | PWR=AGI 50-150 (+60 HP, +30 MP, +10 stats/lv)
-T3 HP 1500-4500 | MP 800-2300 | PWR 200-650 | AGI 200-700 (+300 HP, +150 MP, +45 PWR, +50 AGI/lv)
-T4 HP 6000-18000 | MP 3000-9000 | PWR 800-2300 | AGI 800-2600 (+1200 HP, +600 MP, +150 PWR, +180 AGI/lv)
-T5 HP 25000-75000 | MP 15000-45000 | PWR 3000-9000 | AGI 3500-10500 (+5000 HP, +3000 MP, +600 PWR, +700 AGI/lv)
 Rules: underwear: underwear_top, underwear_bottom (or \`none\`).
 
 \`\`\`yaml
 user:
   appearance: { age: 18, traits: "athletic", appeal: 65, style: "casual", condition: "normal" }
   money: { in_hand: 50, in_bank: 500, currency: "$" }
-  combat: { tier: 1, lv: 1, exp: "0/100", hp: "100/100", mp: "50/50", eff_pwr: 15, eff_agi: 15, pwr: 15, agi: 15, int: 10, talent: [] }
   passions: { anger: 0, shame: 0, arousal: 0, fear: 0, stress: 0, pain: 0, exhaustion: 0, suspicion: 0, disgust: 0, sadness: 0, guilt: 0, joy: 10 }
   outfit: { top: "t-shirt", bottom: "jeans", underwear_top: "none", underwear_bottom: "boxers", shoes: "sneakers", accessories: [], state: "clean" }
   inventory: { in_hand: { L: "Empty", R: "Empty" }, carried: [], room: [], room_location: "@user_residence:bedroom" }
@@ -242,7 +235,6 @@ actor_id:
   goal_active: { task: "[obj]", step: "1/3", act: "[action]", preocc: "[concern]", plan: "[next]" }
   need_active: { drive: "Want:[motive]\u2192Plan:[method]\u2192Progress:[status]", conflict: "Opp:[target]|Stakes:[lvl]|Threat:[0\u20135]", instinct: "Core:[archetype]|Trigger:[trigger]|State:[state]", override: 0, impulse: "[urge]" }
   money: { in_hand: 0, in_bank: 0, currency: "$" }
-  combat: { tier: 1-10, lv: 0-10, exp: "0/100", hp: "cur/max", mp: "cur/max", eff_pwr: 15, eff_agi: 15, pwr: 15, agi: 15, int: 10, talent: [] }
   life_model: { orientation: "pansexual", romantic_history: "none", upbringing: "strict", family: [], occupation: "student", residence: "@tendo_residence:room", routines: [["morning", "tea", "@tendo_residence:kitchen", "07:00"]], worldview: "stoic", self_concept: "competent" }
   wounds: { physical: [], psychological: [] }
   passions: { anger: 0, shame: 0, arousal: 0, fear: 0, stress: 10, pain: 0, exhaustion: 0, suspicion: 15, disgust: 0, sadness: 0, guilt: 0, joy: 5 }
@@ -443,11 +435,9 @@ function syncManifestLibrary(manifest) {
   }
   return manifest;
 }
-var DEFAULT_RPG_PROMPT = `RPG & COMBAT RULES DIRECTIVE:
-1. STAT & ATTRIBUTE TESTS: When an action has uncertain success, calculate against the actor's combat tier, aptitudes, and relevant stats.
-2. COMBAT ROUNDS: Tactical resolution respects distance, positioning, weapon range, physical stamina/integrity, and environmental hazards.
-3. DICE & CHANCE: D20 checks respect Natural 20 (Critical Success) and Natural 1 (Critical Fumble). Modifiers apply from attributes and situational advantage.
-4. CONSEQUENCES: Wounds reduce physical integrity, cause fatigue, and alter passions and stance. Record status mutations in ledger journal.
+var DEFAULT_RPG_PROMPT = `RPG & SKILLS RULES DIRECTIVE:
+1. NARRATIVE RESOLUTION: Active skills, cooldowns, and resources are tracked and resolved client-side by the RPG engine. Focus narration on dramatic intent, tactical positioning, and dialogue.
+2. OUTCOMES: Describe consequences, physical reactions, and changes in passions without manual combat math.
 
 SKILL TREES (Editable; parsed into interactive progression nodes):
 \u3010Tree: Warrior\u3011

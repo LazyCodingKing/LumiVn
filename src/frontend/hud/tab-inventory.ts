@@ -98,6 +98,177 @@ function getItemIcon(itemName: string): string {
   return "📦";
 }
 
+export function extractDistrictShops(ledger: LedgerData): DistrictShop[] {
+  const dynamicShops: DistrictShop[] = [];
+  const places = Object.entries(ledger.places || {});
+
+  for (const [key, place] of places) {
+    const fn = (place.function || key).toLowerCase();
+    const isCommercial =
+      fn.includes("shop") ||
+      fn.includes("market") ||
+      fn.includes("store") ||
+      fn.includes("tavern") ||
+      fn.includes("inn") ||
+      fn.includes("forge") ||
+      fn.includes("apothecary") ||
+      fn.includes("bakery") ||
+      fn.includes("merchant") ||
+      (place.resources && place.resources.length > 0);
+
+    if (isCommercial) {
+      const cleanKey = key.replace(/^@/, "");
+      const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1]! : cleanKey;
+      const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+      let icon = "🏪";
+      if (fn.includes("tavern") || fn.includes("inn")) icon = "🍺";
+      else if (fn.includes("forge") || fn.includes("smith")) icon = "⚒️";
+      else if (fn.includes("apothecary") || fn.includes("herb")) icon = "⚗️";
+      else if (fn.includes("bakery") || fn.includes("food")) icon = "🍞";
+
+      const items: DistrictShopItem[] = (place.resources || []).map((res, idx) => ({
+        id: `dyn_item_${cleanKey}_${idx}`,
+        name: String(res).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        icon: getItemIcon(String(res)),
+        type: "item",
+        price: 20 + idx * 15,
+        stock: 3,
+        maxStock: 5,
+        desc: `Local commodity available at ${displayName}.`,
+      }));
+
+      if (items.length === 0) {
+        items.push({
+          id: `dyn_item_${cleanKey}_staple`,
+          name: `${displayName} Provisions`,
+          icon: "📦",
+          type: "consumable",
+          price: 25,
+          stock: 5,
+          maxStock: 10,
+          desc: `Essential local supplies from ${displayName}.`,
+        });
+      }
+
+      dynamicShops.push({
+        id: cleanKey,
+        name: displayName,
+        icon,
+        placeKey: key,
+        openHour: 7,
+        closeHour: 21,
+        shopkeeper: place.population || place.users || "Local Merchant",
+        items,
+      });
+    }
+  }
+
+  // If no explicit commercial places were matched, synthesize shops for the active places
+  if (dynamicShops.length === 0 && places.length > 0) {
+    for (const [key, place] of places) {
+      const cleanKey = key.replace(/^@/, "");
+      const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1]! : cleanKey;
+      const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      const fn = (place.function || cleanKey).toLowerCase();
+
+      let icon = "🏪";
+      let shopSuffix = "Supply Post";
+      if (fn.includes("tavern") || fn.includes("inn") || fn.includes("bar") || fn.includes("lounge")) {
+        icon = "🍺";
+        shopSuffix = "Lounge Bar";
+      } else if (fn.includes("forge") || fn.includes("smith") || fn.includes("armory")) {
+        icon = "⚒️";
+        shopSuffix = "Smithy & Armory";
+      } else if (fn.includes("apothecary") || fn.includes("herb") || fn.includes("clinic") || fn.includes("medic")) {
+        icon = "⚗️";
+        shopSuffix = "Dispensary";
+      } else if (fn.includes("kitchen") || fn.includes("dining") || fn.includes("pantry") || fn.includes("cafe")) {
+        icon = "🍞";
+        shopSuffix = "Provisions";
+      } else if (fn.includes("dojo") || fn.includes("gym") || fn.includes("arena")) {
+        icon = "🥋";
+        shopSuffix = "Armory & Gear";
+      } else if (fn.includes("school") || fn.includes("academy") || fn.includes("campus") || fn.includes("library")) {
+        icon = "📚";
+        shopSuffix = "Commissary";
+      } else if (fn.includes("residence") || fn.includes("room") || fn.includes("house") || fn.includes("foyer") || fn.includes("mansion")) {
+        icon = "🏠";
+        shopSuffix = "Quartermaster";
+      }
+
+      const items: DistrictShopItem[] = (place.resources || []).map((res, idx) => ({
+        id: `dyn_item_${cleanKey}_${idx}`,
+        name: String(res).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        icon: getItemIcon(String(res)),
+        type: "item",
+        price: 20 + idx * 15,
+        stock: 3,
+        maxStock: 5,
+        desc: `Local resource acquired from ${displayName}.`,
+      }));
+
+      if (items.length === 0) {
+        items.push({
+          id: `dyn_item_${cleanKey}_staple`,
+          name: `${displayName} Supplies`,
+          icon: "📦",
+          type: "consumable",
+          price: 25,
+          stock: 5,
+          maxStock: 10,
+          desc: `Local commodity available at ${displayName}.`,
+        });
+      }
+
+      dynamicShops.push({
+        id: cleanKey,
+        name: `${displayName} ${shopSuffix}`,
+        icon,
+        placeKey: key,
+        openHour: 6,
+        closeHour: 23,
+        shopkeeper: place.population || place.users || `${displayName} Merchant`,
+        items,
+      });
+    }
+  }
+
+  // If places was empty, synthesize shop from current scene.place or clock location
+  if (dynamicShops.length === 0 && (ledger.scene?.place || ledger.clock?.location)) {
+    const activePlace = ledger.scene?.place || ledger.clock?.location || "Local District";
+    const cleanKey = activePlace.replace(/^@/, "");
+    const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1]! : cleanKey;
+    const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    dynamicShops.push({
+      id: cleanKey,
+      name: `${displayName} Merchant Post`,
+      icon: "🏪",
+      placeKey: activePlace,
+      openHour: 6,
+      closeHour: 23,
+      shopkeeper: "District Merchant",
+      items: [
+        {
+          id: `dyn_item_${cleanKey}_staple`,
+          name: `${displayName} Supplies`,
+          icon: "📦",
+          type: "consumable",
+          price: 25,
+          stock: 5,
+          maxStock: 10,
+          desc: `Local goods from ${displayName}.`,
+        },
+      ],
+    });
+  }
+
+  if (dynamicShops.length > 0) {
+    return [...dynamicShops, ...DEFAULT_DISTRICT_SHOPS];
+  }
+  return DEFAULT_DISTRICT_SHOPS;
+}
+
 export class InventoryTab {
   public root: HTMLElement;
   private onAction: (actionText: string) => void;
@@ -113,6 +284,7 @@ export class InventoryTab {
 
   public render(ledger: LedgerData, activeActorId?: string): void {
     this.root.innerHTML = "";
+    this.shops = extractDistrictShops(ledger);
 
     const actorId = activeActorId || (ledger.actors?.["user"] ? "user" : Object.keys(ledger.actors || {})[0] || "user");
     const actor = ledger.actors?.[actorId];

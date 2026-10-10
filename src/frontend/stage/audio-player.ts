@@ -128,6 +128,92 @@ export class VnAudioEngine {
     } catch {}
   }
 
+  public playDiceRoll(durationMs: number = 800): void {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+    try {
+      const now = ctx.currentTime;
+      const clicks = 8;
+      for (let i = 0; i < clicks; i++) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        const freq = 260 + Math.random() * 320;
+        const timeOffset = Math.pow(i / clicks, 0.7) * (durationMs / 1000) * 0.9;
+        osc.frequency.setValueAtTime(freq, now + timeOffset);
+        gain.gain.setValueAtTime(0.08 * this.sfxVolume, now + timeOffset);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + timeOffset + 0.05);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + timeOffset);
+        osc.stop(now + timeOffset + 0.05);
+      }
+    } catch {}
+  }
+
+  public playTierResult(tierName: string): void {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+    try {
+      const now = ctx.currentTime;
+      const name = String(tierName || "").toLowerCase();
+      if (name.includes("crit") && name.includes("fail")) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(196, now);
+        osc.frequency.exponentialRampToValueAtTime(98, now + 0.4);
+        gain.gain.setValueAtTime(0.15 * this.sfxVolume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.4);
+      } else if (name.includes("fail")) {
+        [330, 262].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, now + i * 0.12);
+          gain.gain.setValueAtTime(0.12 * this.sfxVolume, now + i * 0.12);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.2);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.12);
+          osc.stop(now + i * 0.12 + 0.2);
+        });
+      } else if (name.includes("crit")) {
+        [523, 659, 784, 1047].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, now + i * 0.08);
+          gain.gain.setValueAtTime(0.12 * this.sfxVolume, now + i * 0.08);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.35);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.08);
+          osc.stop(now + i * 0.08 + 0.35);
+        });
+      } else {
+        [523, 659].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, now + i * 0.1);
+          gain.gain.setValueAtTime(0.12 * this.sfxVolume, now + i * 0.1);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.25);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.1);
+          osc.stop(now + i * 0.1 + 0.25);
+        });
+      }
+    } catch {}
+  }
+
   private currentBgmTrack: string | null = null;
   private customBgmMap: Record<string, string> = {};
 

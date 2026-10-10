@@ -172,7 +172,29 @@ export class RpgTab {
     }
   }
 
+  private snapshots: { progression: PlayerProgression; cooldowns: Record<string, number> }[] = [];
+
+  public captureSnapshot(): void {
+    this.snapshots.push({
+      progression: JSON.parse(JSON.stringify(this.progression)),
+      cooldowns: JSON.parse(JSON.stringify(this.progression.cooldowns)),
+    });
+    if (this.snapshots.length > 10) this.snapshots.shift();
+  }
+
+  public rollbackSnapshot(): boolean {
+    const prev = this.snapshots.pop();
+    if (!prev) return false;
+    this.progression = prev.progression;
+    this.progression.cooldowns = prev.cooldowns;
+    if (this.currentLedger) {
+      this.render(this.currentLedger, this.currentManifest);
+    }
+    return true;
+  }
+
   public triggerSkillAction(skill: SkillTreeNode, currentActor: any): string {
+    this.captureSnapshot();
     if (skill.type !== "active") return "";
     const cd = this.progression.cooldowns[skill.name] || 0;
     if (cd > 0) return "";
@@ -695,6 +717,55 @@ export class RpgTab {
           saveBtn.textContent = orig;
         }, 1500);
       }
+    });
+
+    this.renderActionHotbar(activeUnlockedNodes, currentActor);
+  }
+
+  public renderActionHotbar(activeUnlockedNodes: SkillTreeNode[], currentActor?: any): void {
+    if (typeof document === "undefined") return;
+    let hotbar = document.getElementById("vn-rpg-action-hotbar");
+    if (!hotbar) {
+      hotbar = document.createElement("div");
+      hotbar.id = "vn-rpg-action-hotbar";
+      hotbar.style.cssText =
+        "position: fixed; bottom: 85px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 1000; background: rgba(15,23,42,0.92); backdrop-filter: blur(8px); border: 1px solid rgba(99,102,241,0.5); border-radius: 20px; padding: 4px 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); max-width: 90vw; overflow-x: auto;";
+      document.body.appendChild(hotbar);
+    }
+
+    if (activeUnlockedNodes.length === 0) {
+      hotbar.style.display = "none";
+      return;
+    }
+    hotbar.style.display = "flex";
+    hotbar.innerHTML = "";
+
+    const label = document.createElement("span");
+    label.style.cssText =
+      "font-size: 11px; color: #818cf8; font-weight: 700; display: flex; align-items: center; gap: 4px; padding-right: 4px; border-right: 1px solid #334155;";
+    label.innerHTML = `⚔️ <span>Skills</span>`;
+    hotbar.appendChild(label);
+
+    activeUnlockedNodes.forEach((node) => {
+      const cd = this.progression.cooldowns[node.name] || 0;
+      const isReady = cd === 0;
+      const pill = document.createElement("button");
+      pill.style.cssText = `background: ${isReady ? "rgba(30,41,59,0.9)" : "rgba(15,23,42,0.7)"}; border: 1px solid ${isReady ? "#38bdf8" : "#475569"}; border-radius: 12px; padding: 2px 8px; font-size: 11px; color: ${isReady ? "#f8fafc" : "#94a3b8"}; cursor: pointer; display: flex; align-items: center; gap: 4px; white-space: nowrap; transition: all 0.15s ease;`;
+      pill.innerHTML = `<span>${node.name}</span>${!isReady ? `<span style="color:#f87171; font-weight:700;">(${cd}t)</span>` : ""}`;
+
+      pill.addEventListener("click", () => {
+        const textarea = document.querySelector<HTMLTextAreaElement>(
+          "#send_textarea, textarea[name='text'], #chat_input"
+        );
+        if (textarea) {
+          const prefix = textarea.value.trim() ? `${textarea.value.trim()} ` : "";
+          textarea.value = `${prefix}*Uses ${node.name}* `;
+          textarea.focus();
+        } else {
+          this.triggerSkillAction(node, currentActor);
+        }
+      });
+      hotbar.appendChild(pill);
     });
   }
 

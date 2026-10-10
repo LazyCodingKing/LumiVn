@@ -1,5 +1,155 @@
 import type { LedgerData, PlaceRoute, PlaceNode, AssetManifest, RosterCharacter } from "../../shared/types.js";
 
+export interface MapBuilding {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  icon: string;
+  place: string;
+  desc?: string;
+}
+
+export function resolveAllLedgerPlaces(ledger: LedgerData): [string, any][] {
+  const map = new Map<string, any>();
+  if (ledger.places && typeof ledger.places === "object") {
+    for (const [k, v] of Object.entries(ledger.places)) {
+      if (k && v) map.set(k, v);
+    }
+  }
+
+  // If routes mention connected places not yet mapped, add them
+  if (ledger.places && typeof ledger.places === "object") {
+    for (const [_, v] of Object.entries(ledger.places)) {
+      if (Array.isArray(v?.routes)) {
+        for (const r of v.routes) {
+          const dest = typeof r === "object" && r?.to ? String(r.to) : typeof r === "string" ? r : null;
+          if (dest && !map.has(dest)) {
+            map.set(dest, { function: "Connected Route" });
+          }
+        }
+      }
+    }
+  }
+
+  // Include scene.place if not present
+  if (ledger.scene?.place && !map.has(ledger.scene.place)) {
+    map.set(ledger.scene.place, { function: "Current Active Location" });
+  }
+
+  // Include clock location / region
+  if (ledger.clock?.location && !map.has(ledger.clock.location)) {
+    map.set(ledger.clock.location, { function: "Venue Landmark" });
+  }
+  if (ledger.clock?.region && !map.has(ledger.clock.region)) {
+    map.set(ledger.clock.region, { function: "District Hub" });
+  }
+
+  return Array.from(map.entries());
+}
+
+export function extractMapBuildingsFromLedger(ledger: LedgerData, cols: number = 14, rows: number = 10): MapBuilding[] {
+  const places = resolveAllLedgerPlaces(ledger);
+  if (places.length === 0) {
+    return [
+      { id: "apothecary", name: "Apothecary & Alchemist", x: 2, y: 2, w: 2, h: 2, color: "#065f46", icon: "⚗️", place: "market", desc: "Local herbs, salves, and potions." },
+      { id: "blacksmith", name: "Ironforge Smithy", x: 10, y: 2, w: 2, h: 2, color: "#7c2d12", icon: "⚒️", place: "forge", desc: "Forged blades and armaments." },
+      { id: "tavern", name: "Golden Hearth Tavern", x: 2, y: 6, w: 2, h: 2, color: "#78350f", icon: "🍺", place: "tavern", desc: "Hearty meals and local rumors." },
+      { id: "dojo", name: "Tendo Martial Dojo", x: 10, y: 6, w: 2, h: 2, color: "#831843", icon: "🥋", place: "dojo", desc: "Discipline and martial arts training." },
+      { id: "residence", name: "Town Residence", x: 6, y: 1, w: 2, h: 2, color: "#1e1b4b", icon: "🏠", place: "residence", desc: "Peaceful living quarters." },
+      { id: "plaza", name: "Central Fountain Plaza", x: 5, y: 4, w: 4, h: 2, color: "#0c4a6e", icon: "⛲", place: "district_square", desc: "Central gathering hub." },
+    ];
+  }
+
+  const slots = [
+    { x: 2, y: 1, w: 2, h: 2 },
+    { x: 10, y: 1, w: 2, h: 2 },
+    { x: 2, y: 6, w: 2, h: 2 },
+    { x: 10, y: 6, w: 2, h: 2 },
+    { x: 1, y: 3, w: 2, h: 2 },
+    { x: 11, y: 3, w: 2, h: 2 },
+    { x: 5, y: 4, w: 4, h: 2 },
+    { x: 6, y: 7, w: 2, h: 2 },
+  ];
+
+  const colors = ["#065f46", "#7c2d12", "#78350f", "#831843", "#1e1b4b", "#0c4a6e", "#312e81", "#701a75"];
+
+  return places.slice(0, slots.length).map(([key, node], i) => {
+    const slot = slots[i]!;
+    const cleanKey = key.replace(/^@/, "");
+    const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1]! : cleanKey;
+    const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    const fn = (node.function || cleanKey).toLowerCase();
+
+    let icon = "🏛️";
+    if (fn.includes("shop") || fn.includes("market") || fn.includes("store")) icon = "🏪";
+    else if (fn.includes("tavern") || fn.includes("inn") || fn.includes("bar")) icon = "🍺";
+    else if (fn.includes("forge") || fn.includes("smith")) icon = "⚒️";
+    else if (fn.includes("residence") || fn.includes("house") || fn.includes("home") || fn.includes("room") || fn.includes("bedroom") || fn.includes("living")) icon = "🏠";
+    else if (fn.includes("school") || fn.includes("class") || fn.includes("academy")) icon = "🏫";
+    else if (fn.includes("dojo") || fn.includes("gym") || fn.includes("arena")) icon = "🥋";
+    else if (fn.includes("kitchen") || fn.includes("cafeteria") || fn.includes("bakery")) icon = "🍳";
+    else if (fn.includes("plaza") || fn.includes("square") || fn.includes("park") || fn.includes("fountain")) icon = "⛲";
+    else if (fn.includes("shrine") || fn.includes("temple") || fn.includes("church")) icon = "⛩️";
+    else if (fn.includes("library") || fn.includes("study") || fn.includes("office")) icon = "📚";
+    else if (fn.includes("garden") || fn.includes("yard") || fn.includes("forest")) icon = "🌳";
+
+    return {
+      id: cleanKey,
+      name: displayName,
+      x: slot.x,
+      y: slot.y,
+      w: slot.w,
+      h: slot.h,
+      color: colors[i % colors.length]!,
+      icon,
+      place: key,
+      desc: node.norm || node.function || (node.resources && node.resources.length ? `Items: ${node.resources.join(", ")}` : "A known location in the district."),
+    };
+  });
+}
+
+export function extract3DLandmarksFromLedger(ledger: LedgerData): { id: string; name: string; x: number; z: number; color: number }[] {
+  const places = resolveAllLedgerPlaces(ledger);
+  if (places.length === 0) {
+    return [
+      { id: "apothecary", name: "Apothecary & Alchemist", x: -16, z: -16, color: 0x059669 },
+      { id: "blacksmith", name: "Ironforge Armory", x: 16, z: -16, color: 0xb45309 },
+      { id: "tavern", name: "The Golden Hearth", x: -16, z: 16, color: 0xd97706 },
+      { id: "dojo", name: "Tendo Martial Dojo", x: 16, z: 16, color: 0xdc2626 },
+      { id: "plaza", name: "District Fountain Plaza", x: 0, z: 0, color: 0x0284c7 },
+    ];
+  }
+
+  const coords = [
+    { x: -16, z: -16, color: 0x059669 },
+    { x: 16, z: -16, color: 0xb45309 },
+    { x: -16, z: 16, color: 0xd97706 },
+    { x: 16, z: 16, color: 0xdc2626 },
+    { x: 0, z: 0, color: 0x0284c7 },
+    { x: 0, z: -20, color: 0x4f46e5 },
+    { x: -20, z: 0, color: 0x7c3aed },
+    { x: 20, z: 0, color: 0x0891b2 },
+  ];
+
+  return places.slice(0, coords.length).map(([key, _node], i) => {
+    const coord = coords[i]!;
+    const cleanKey = key.replace(/^@/, "");
+    const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1]! : cleanKey;
+    const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    return {
+      id: cleanKey,
+      name: displayName,
+      x: coord.x,
+      z: coord.z,
+      color: coord.color,
+    };
+  });
+}
+
 export class MapTab {
   public root: HTMLElement;
   private onAction: (actionText: string) => void;
@@ -44,6 +194,8 @@ export class MapTab {
     }
   }
 
+  private lastRenderedPlace: string | null = null;
+
   public render(ledger: LedgerData, manifest?: AssetManifest): void {
     this.cleanupInteractiveModes();
     if (manifest) this.manifest = manifest;
@@ -51,8 +203,9 @@ export class MapTab {
     const currentPlace = (ledger.scene?.place || "default").toLowerCase();
     const isIndoor = currentPlace.includes(":") || currentPlace.includes("residence") || currentPlace.includes("dojo") || currentPlace.includes("room") || currentPlace.includes("foyer");
     
-    // Default to matching mode if not manually changed
-    if (!this.selectedNodeId) {
+    // Default to matching mode if not manually changed or when active place changed
+    if (!this.selectedNodeId || this.lastRenderedPlace !== currentPlace) {
+      this.lastRenderedPlace = currentPlace;
       if (this.viewMode !== "tilemap2d" && this.viewMode !== "world3d") {
         this.viewMode = isIndoor ? "indoor" : "outdoor";
       }
@@ -766,7 +919,7 @@ export class MapTab {
     });
   }
 
-  private renderTilemap2D(viewport: HTMLElement, sidebar: HTMLElement, _ledger: LedgerData, _currentPlace: string): void {
+  private renderTilemap2D(viewport: HTMLElement, sidebar: HTMLElement, ledger: LedgerData, _currentPlace: string): void {
     viewport.innerHTML = "";
     sidebar.innerHTML = "";
 
@@ -789,16 +942,11 @@ export class MapTab {
     const tileW = canvas.width / cols;
     const tileH = canvas.height / rows;
 
-    const buildings = [
-      { id: "apothecary", name: "Apothecary & Alchemist", x: 2, y: 2, w: 2, h: 2, color: "#065f46", icon: "⚗️", place: "market" },
-      { id: "blacksmith", name: "Ironforge Smithy", x: 10, y: 2, w: 2, h: 2, color: "#7c2d12", icon: "⚒️", place: "forge" },
-      { id: "tavern", name: "Golden Hearth Tavern", x: 2, y: 6, w: 2, h: 2, color: "#78350f", icon: "🍺", place: "tavern" },
-      { id: "dojo", name: "Tendo Martial Dojo", x: 10, y: 6, w: 2, h: 2, color: "#831843", icon: "🥋", place: "dojo" },
-      { id: "residence", name: "Town Residence", x: 6, y: 1, w: 2, h: 2, color: "#1e1b4b", icon: "🏠", place: "residence" },
-      { id: "plaza", name: "Central Fountain Plaza", x: 5, y: 4, w: 4, h: 2, color: "#0c4a6e", icon: "⛲", place: "district_square" },
-    ];
-
-    let selectedBuilding: (typeof buildings)[0] | null = null;
+    const buildings = extractMapBuildingsFromLedger(ledger, cols, rows);
+    const matchBuilding = buildings.find(
+      (b) => b.place === _currentPlace || b.id === _currentPlace.replace(/^@/, "").split(":").pop()
+    );
+    let selectedBuilding: MapBuilding | null = matchBuilding || null;
 
     const updateSidebarForBuilding = (b: (typeof buildings)[0] | null) => {
       sidebar.innerHTML = "";
@@ -1048,14 +1196,7 @@ export class MapTab {
       const grid = new THREE.GridHelper(80, 40, 0x6366f1, 0x1e293b);
       grid.position.y = 0.01;
       scene.add(grid);
-
-      const landmarks = [
-        { id: "apothecary", name: "Apothecary & Alchemist", x: -16, z: -16, color: 0x059669 },
-        { id: "blacksmith", name: "Ironforge Armory", x: 16, z: -16, color: 0xb45309 },
-        { id: "tavern", name: "The Golden Hearth", x: -16, z: 16, color: 0xd97706 },
-        { id: "dojo", name: "Tendo Martial Dojo", x: 16, z: 16, color: 0xdc2626 },
-        { id: "plaza", name: "District Fountain Plaza", x: 0, z: 0, color: 0x0284c7 },
-      ];
+      const landmarks = extract3DLandmarksFromLedger(ledger);
 
       for (const lm of landmarks) {
         const boxGeo = new THREE.BoxGeometry(8, 7, 8);

@@ -4468,6 +4468,155 @@ function getItemIcon(itemName) {
     return "\uD83C\uDF92";
   return "\uD83D\uDCE6";
 }
+function extractDistrictShops(ledger) {
+  const dynamicShops = [];
+  const places = Object.entries(ledger.places || {});
+  for (const [key, place] of places) {
+    const fn = (place.function || key).toLowerCase();
+    const isCommercial = fn.includes("shop") || fn.includes("market") || fn.includes("store") || fn.includes("tavern") || fn.includes("inn") || fn.includes("forge") || fn.includes("apothecary") || fn.includes("bakery") || fn.includes("merchant") || place.resources && place.resources.length > 0;
+    if (isCommercial) {
+      const cleanKey = key.replace(/^@/, "");
+      const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1] : cleanKey;
+      const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      let icon = "\uD83C\uDFEA";
+      if (fn.includes("tavern") || fn.includes("inn"))
+        icon = "\uD83C\uDF7A";
+      else if (fn.includes("forge") || fn.includes("smith"))
+        icon = "⚒️";
+      else if (fn.includes("apothecary") || fn.includes("herb"))
+        icon = "⚗️";
+      else if (fn.includes("bakery") || fn.includes("food"))
+        icon = "\uD83C\uDF5E";
+      const items = (place.resources || []).map((res, idx) => ({
+        id: `dyn_item_${cleanKey}_${idx}`,
+        name: String(res).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        icon: getItemIcon(String(res)),
+        type: "item",
+        price: 20 + idx * 15,
+        stock: 3,
+        maxStock: 5,
+        desc: `Local commodity available at ${displayName}.`
+      }));
+      if (items.length === 0) {
+        items.push({
+          id: `dyn_item_${cleanKey}_staple`,
+          name: `${displayName} Provisions`,
+          icon: "\uD83D\uDCE6",
+          type: "consumable",
+          price: 25,
+          stock: 5,
+          maxStock: 10,
+          desc: `Essential local supplies from ${displayName}.`
+        });
+      }
+      dynamicShops.push({
+        id: cleanKey,
+        name: displayName,
+        icon,
+        placeKey: key,
+        openHour: 7,
+        closeHour: 21,
+        shopkeeper: place.population || place.users || "Local Merchant",
+        items
+      });
+    }
+  }
+  if (dynamicShops.length === 0 && places.length > 0) {
+    for (const [key, place] of places) {
+      const cleanKey = key.replace(/^@/, "");
+      const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1] : cleanKey;
+      const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      const fn = (place.function || cleanKey).toLowerCase();
+      let icon = "\uD83C\uDFEA";
+      let shopSuffix = "Supply Post";
+      if (fn.includes("tavern") || fn.includes("inn") || fn.includes("bar") || fn.includes("lounge")) {
+        icon = "\uD83C\uDF7A";
+        shopSuffix = "Lounge Bar";
+      } else if (fn.includes("forge") || fn.includes("smith") || fn.includes("armory")) {
+        icon = "⚒️";
+        shopSuffix = "Smithy & Armory";
+      } else if (fn.includes("apothecary") || fn.includes("herb") || fn.includes("clinic") || fn.includes("medic")) {
+        icon = "⚗️";
+        shopSuffix = "Dispensary";
+      } else if (fn.includes("kitchen") || fn.includes("dining") || fn.includes("pantry") || fn.includes("cafe")) {
+        icon = "\uD83C\uDF5E";
+        shopSuffix = "Provisions";
+      } else if (fn.includes("dojo") || fn.includes("gym") || fn.includes("arena")) {
+        icon = "\uD83E\uDD4B";
+        shopSuffix = "Armory & Gear";
+      } else if (fn.includes("school") || fn.includes("academy") || fn.includes("campus") || fn.includes("library")) {
+        icon = "\uD83D\uDCDA";
+        shopSuffix = "Commissary";
+      } else if (fn.includes("residence") || fn.includes("room") || fn.includes("house") || fn.includes("foyer") || fn.includes("mansion")) {
+        icon = "\uD83C\uDFE0";
+        shopSuffix = "Quartermaster";
+      }
+      const items = (place.resources || []).map((res, idx) => ({
+        id: `dyn_item_${cleanKey}_${idx}`,
+        name: String(res).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        icon: getItemIcon(String(res)),
+        type: "item",
+        price: 20 + idx * 15,
+        stock: 3,
+        maxStock: 5,
+        desc: `Local resource acquired from ${displayName}.`
+      }));
+      if (items.length === 0) {
+        items.push({
+          id: `dyn_item_${cleanKey}_staple`,
+          name: `${displayName} Supplies`,
+          icon: "\uD83D\uDCE6",
+          type: "consumable",
+          price: 25,
+          stock: 5,
+          maxStock: 10,
+          desc: `Local commodity available at ${displayName}.`
+        });
+      }
+      dynamicShops.push({
+        id: cleanKey,
+        name: `${displayName} ${shopSuffix}`,
+        icon,
+        placeKey: key,
+        openHour: 6,
+        closeHour: 23,
+        shopkeeper: place.population || place.users || `${displayName} Merchant`,
+        items
+      });
+    }
+  }
+  if (dynamicShops.length === 0 && (ledger.scene?.place || ledger.clock?.location)) {
+    const activePlace = ledger.scene?.place || ledger.clock?.location || "Local District";
+    const cleanKey = activePlace.replace(/^@/, "");
+    const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1] : cleanKey;
+    const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    dynamicShops.push({
+      id: cleanKey,
+      name: `${displayName} Merchant Post`,
+      icon: "\uD83C\uDFEA",
+      placeKey: activePlace,
+      openHour: 6,
+      closeHour: 23,
+      shopkeeper: "District Merchant",
+      items: [
+        {
+          id: `dyn_item_${cleanKey}_staple`,
+          name: `${displayName} Supplies`,
+          icon: "\uD83D\uDCE6",
+          type: "consumable",
+          price: 25,
+          stock: 5,
+          maxStock: 10,
+          desc: `Local goods from ${displayName}.`
+        }
+      ]
+    });
+  }
+  if (dynamicShops.length > 0) {
+    return [...dynamicShops, ...DEFAULT_DISTRICT_SHOPS];
+  }
+  return DEFAULT_DISTRICT_SHOPS;
+}
 
 class InventoryTab {
   root;
@@ -4482,6 +4631,7 @@ class InventoryTab {
   }
   render(ledger, activeActorId) {
     this.root.innerHTML = "";
+    this.shops = extractDistrictShops(ledger);
     const actorId = activeActorId || (ledger.actors?.["user"] ? "user" : Object.keys(ledger.actors || {})[0] || "user");
     const actor = ledger.actors?.[actorId];
     const inv = actor?.inventory || {
@@ -4762,6 +4912,139 @@ class InventoryTab {
 }
 
 // src/frontend/hud/tab-map.ts
+function resolveAllLedgerPlaces(ledger) {
+  const map = new Map;
+  if (ledger.places && typeof ledger.places === "object") {
+    for (const [k, v] of Object.entries(ledger.places)) {
+      if (k && v)
+        map.set(k, v);
+    }
+  }
+  if (ledger.places && typeof ledger.places === "object") {
+    for (const [_, v] of Object.entries(ledger.places)) {
+      if (Array.isArray(v?.routes)) {
+        for (const r of v.routes) {
+          const dest = typeof r === "object" && r?.to ? String(r.to) : typeof r === "string" ? r : null;
+          if (dest && !map.has(dest)) {
+            map.set(dest, { function: "Connected Route" });
+          }
+        }
+      }
+    }
+  }
+  if (ledger.scene?.place && !map.has(ledger.scene.place)) {
+    map.set(ledger.scene.place, { function: "Current Active Location" });
+  }
+  if (ledger.clock?.location && !map.has(ledger.clock.location)) {
+    map.set(ledger.clock.location, { function: "Venue Landmark" });
+  }
+  if (ledger.clock?.region && !map.has(ledger.clock.region)) {
+    map.set(ledger.clock.region, { function: "District Hub" });
+  }
+  return Array.from(map.entries());
+}
+function extractMapBuildingsFromLedger(ledger, cols = 14, rows = 10) {
+  const places = resolveAllLedgerPlaces(ledger);
+  if (places.length === 0) {
+    return [
+      { id: "apothecary", name: "Apothecary & Alchemist", x: 2, y: 2, w: 2, h: 2, color: "#065f46", icon: "⚗️", place: "market", desc: "Local herbs, salves, and potions." },
+      { id: "blacksmith", name: "Ironforge Smithy", x: 10, y: 2, w: 2, h: 2, color: "#7c2d12", icon: "⚒️", place: "forge", desc: "Forged blades and armaments." },
+      { id: "tavern", name: "Golden Hearth Tavern", x: 2, y: 6, w: 2, h: 2, color: "#78350f", icon: "\uD83C\uDF7A", place: "tavern", desc: "Hearty meals and local rumors." },
+      { id: "dojo", name: "Tendo Martial Dojo", x: 10, y: 6, w: 2, h: 2, color: "#831843", icon: "\uD83E\uDD4B", place: "dojo", desc: "Discipline and martial arts training." },
+      { id: "residence", name: "Town Residence", x: 6, y: 1, w: 2, h: 2, color: "#1e1b4b", icon: "\uD83C\uDFE0", place: "residence", desc: "Peaceful living quarters." },
+      { id: "plaza", name: "Central Fountain Plaza", x: 5, y: 4, w: 4, h: 2, color: "#0c4a6e", icon: "⛲", place: "district_square", desc: "Central gathering hub." }
+    ];
+  }
+  const slots = [
+    { x: 2, y: 1, w: 2, h: 2 },
+    { x: 10, y: 1, w: 2, h: 2 },
+    { x: 2, y: 6, w: 2, h: 2 },
+    { x: 10, y: 6, w: 2, h: 2 },
+    { x: 1, y: 3, w: 2, h: 2 },
+    { x: 11, y: 3, w: 2, h: 2 },
+    { x: 5, y: 4, w: 4, h: 2 },
+    { x: 6, y: 7, w: 2, h: 2 }
+  ];
+  const colors = ["#065f46", "#7c2d12", "#78350f", "#831843", "#1e1b4b", "#0c4a6e", "#312e81", "#701a75"];
+  return places.slice(0, slots.length).map(([key, node], i) => {
+    const slot = slots[i];
+    const cleanKey = key.replace(/^@/, "");
+    const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1] : cleanKey;
+    const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    const fn = (node.function || cleanKey).toLowerCase();
+    let icon = "\uD83C\uDFDB️";
+    if (fn.includes("shop") || fn.includes("market") || fn.includes("store"))
+      icon = "\uD83C\uDFEA";
+    else if (fn.includes("tavern") || fn.includes("inn") || fn.includes("bar"))
+      icon = "\uD83C\uDF7A";
+    else if (fn.includes("forge") || fn.includes("smith"))
+      icon = "⚒️";
+    else if (fn.includes("residence") || fn.includes("house") || fn.includes("home") || fn.includes("room") || fn.includes("bedroom") || fn.includes("living"))
+      icon = "\uD83C\uDFE0";
+    else if (fn.includes("school") || fn.includes("class") || fn.includes("academy"))
+      icon = "\uD83C\uDFEB";
+    else if (fn.includes("dojo") || fn.includes("gym") || fn.includes("arena"))
+      icon = "\uD83E\uDD4B";
+    else if (fn.includes("kitchen") || fn.includes("cafeteria") || fn.includes("bakery"))
+      icon = "\uD83C\uDF73";
+    else if (fn.includes("plaza") || fn.includes("square") || fn.includes("park") || fn.includes("fountain"))
+      icon = "⛲";
+    else if (fn.includes("shrine") || fn.includes("temple") || fn.includes("church"))
+      icon = "⛩️";
+    else if (fn.includes("library") || fn.includes("study") || fn.includes("office"))
+      icon = "\uD83D\uDCDA";
+    else if (fn.includes("garden") || fn.includes("yard") || fn.includes("forest"))
+      icon = "\uD83C\uDF33";
+    return {
+      id: cleanKey,
+      name: displayName,
+      x: slot.x,
+      y: slot.y,
+      w: slot.w,
+      h: slot.h,
+      color: colors[i % colors.length],
+      icon,
+      place: key,
+      desc: node.norm || node.function || (node.resources && node.resources.length ? `Items: ${node.resources.join(", ")}` : "A known location in the district.")
+    };
+  });
+}
+function extract3DLandmarksFromLedger(ledger) {
+  const places = resolveAllLedgerPlaces(ledger);
+  if (places.length === 0) {
+    return [
+      { id: "apothecary", name: "Apothecary & Alchemist", x: -16, z: -16, color: 366185 },
+      { id: "blacksmith", name: "Ironforge Armory", x: 16, z: -16, color: 11817737 },
+      { id: "tavern", name: "The Golden Hearth", x: -16, z: 16, color: 14251782 },
+      { id: "dojo", name: "Tendo Martial Dojo", x: 16, z: 16, color: 14427686 },
+      { id: "plaza", name: "District Fountain Plaza", x: 0, z: 0, color: 165063 }
+    ];
+  }
+  const coords = [
+    { x: -16, z: -16, color: 366185 },
+    { x: 16, z: -16, color: 11817737 },
+    { x: -16, z: 16, color: 14251782 },
+    { x: 16, z: 16, color: 14427686 },
+    { x: 0, z: 0, color: 165063 },
+    { x: 0, z: -20, color: 5195493 },
+    { x: -20, z: 0, color: 8141549 },
+    { x: 20, z: 0, color: 561586 }
+  ];
+  return places.slice(0, coords.length).map(([key, _node], i) => {
+    const coord = coords[i];
+    const cleanKey = key.replace(/^@/, "");
+    const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1] : cleanKey;
+    const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    return {
+      id: cleanKey,
+      name: displayName,
+      x: coord.x,
+      z: coord.z,
+      color: coord.color
+    };
+  });
+}
+
 class MapTab {
   root;
   onAction;
@@ -4799,6 +5082,7 @@ class MapTab {
       this.activeKeydownHandler = null;
     }
   }
+  lastRenderedPlace = null;
   render(ledger, manifest) {
     this.cleanupInteractiveModes();
     if (manifest)
@@ -4806,7 +5090,8 @@ class MapTab {
     this.root.innerHTML = "";
     const currentPlace = (ledger.scene?.place || "default").toLowerCase();
     const isIndoor = currentPlace.includes(":") || currentPlace.includes("residence") || currentPlace.includes("dojo") || currentPlace.includes("room") || currentPlace.includes("foyer");
-    if (!this.selectedNodeId) {
+    if (!this.selectedNodeId || this.lastRenderedPlace !== currentPlace) {
+      this.lastRenderedPlace = currentPlace;
       if (this.viewMode !== "tilemap2d" && this.viewMode !== "world3d") {
         this.viewMode = isIndoor ? "indoor" : "outdoor";
       }
@@ -5409,7 +5694,7 @@ class MapTab {
       });
     });
   }
-  renderTilemap2D(viewport, sidebar, _ledger, _currentPlace) {
+  renderTilemap2D(viewport, sidebar, ledger, _currentPlace) {
     viewport.innerHTML = "";
     sidebar.innerHTML = "";
     const canvas = document.createElement("canvas");
@@ -5426,15 +5711,9 @@ class MapTab {
     const rows = 10;
     const tileW = canvas.width / cols;
     const tileH = canvas.height / rows;
-    const buildings = [
-      { id: "apothecary", name: "Apothecary & Alchemist", x: 2, y: 2, w: 2, h: 2, color: "#065f46", icon: "⚗️", place: "market" },
-      { id: "blacksmith", name: "Ironforge Smithy", x: 10, y: 2, w: 2, h: 2, color: "#7c2d12", icon: "⚒️", place: "forge" },
-      { id: "tavern", name: "Golden Hearth Tavern", x: 2, y: 6, w: 2, h: 2, color: "#78350f", icon: "\uD83C\uDF7A", place: "tavern" },
-      { id: "dojo", name: "Tendo Martial Dojo", x: 10, y: 6, w: 2, h: 2, color: "#831843", icon: "\uD83E\uDD4B", place: "dojo" },
-      { id: "residence", name: "Town Residence", x: 6, y: 1, w: 2, h: 2, color: "#1e1b4b", icon: "\uD83C\uDFE0", place: "residence" },
-      { id: "plaza", name: "Central Fountain Plaza", x: 5, y: 4, w: 4, h: 2, color: "#0c4a6e", icon: "⛲", place: "district_square" }
-    ];
-    let selectedBuilding = null;
+    const buildings = extractMapBuildingsFromLedger(ledger, cols, rows);
+    const matchBuilding = buildings.find((b) => b.place === _currentPlace || b.id === _currentPlace.replace(/^@/, "").split(":").pop());
+    let selectedBuilding = matchBuilding || null;
     const updateSidebarForBuilding = (b) => {
       sidebar.innerHTML = "";
       if (!b) {
@@ -5642,13 +5921,7 @@ class MapTab {
       const grid = new THREE.GridHelper(80, 40, 6514417, 1976635);
       grid.position.y = 0.01;
       scene.add(grid);
-      const landmarks = [
-        { id: "apothecary", name: "Apothecary & Alchemist", x: -16, z: -16, color: 366185 },
-        { id: "blacksmith", name: "Ironforge Armory", x: 16, z: -16, color: 11817737 },
-        { id: "tavern", name: "The Golden Hearth", x: -16, z: 16, color: 14251782 },
-        { id: "dojo", name: "Tendo Martial Dojo", x: 16, z: 16, color: 14427686 },
-        { id: "plaza", name: "District Fountain Plaza", x: 0, z: 0, color: 165063 }
-      ];
+      const landmarks = extract3DLandmarksFromLedger(ledger);
       for (const lm of landmarks) {
         const boxGeo = new THREE.BoxGeometry(8, 7, 8);
         const boxMat = new THREE.MeshStandardMaterial({ color: lm.color, roughness: 0.5 });
@@ -11042,11 +11315,9 @@ ${note.directorNote}`;
 }
 
 // src/backend/storage.ts
-var DEFAULT_RPG_PROMPT = `RPG & COMBAT RULES DIRECTIVE:
-1. STAT & ATTRIBUTE TESTS: When an action has uncertain success, calculate against the actor's combat tier, aptitudes, and relevant stats.
-2. COMBAT ROUNDS: Tactical resolution respects distance, positioning, weapon range, physical stamina/integrity, and environmental hazards.
-3. DICE & CHANCE: D20 checks respect Natural 20 (Critical Success) and Natural 1 (Critical Fumble). Modifiers apply from attributes and situational advantage.
-4. CONSEQUENCES: Wounds reduce physical integrity, cause fatigue, and alter passions and stance. Record status mutations in ledger journal.
+var DEFAULT_RPG_PROMPT = `RPG & SKILLS RULES DIRECTIVE:
+1. NARRATIVE RESOLUTION: Active skills, cooldowns, and resources are tracked and resolved client-side by the RPG engine. Focus narration on dramatic intent, tactical positioning, and dialogue.
+2. OUTCOMES: Describe consequences, physical reactions, and changes in passions without manual combat math.
 
 SKILL TREES (Editable; parsed into interactive progression nodes):
 【Tree: Warrior】
@@ -11216,7 +11487,28 @@ class RpgTab {
       }
     }
   }
+  snapshots = [];
+  captureSnapshot() {
+    this.snapshots.push({
+      progression: JSON.parse(JSON.stringify(this.progression)),
+      cooldowns: JSON.parse(JSON.stringify(this.progression.cooldowns))
+    });
+    if (this.snapshots.length > 10)
+      this.snapshots.shift();
+  }
+  rollbackSnapshot() {
+    const prev = this.snapshots.pop();
+    if (!prev)
+      return false;
+    this.progression = prev.progression;
+    this.progression.cooldowns = prev.cooldowns;
+    if (this.currentLedger) {
+      this.render(this.currentLedger, this.currentManifest);
+    }
+    return true;
+  }
   triggerSkillAction(skill, currentActor) {
+    this.captureSnapshot();
     if (skill.type !== "active")
       return "";
     const cd = this.progression.cooldowns[skill.name] || 0;
@@ -11658,6 +11950,46 @@ class RpgTab {
           saveBtn.textContent = orig;
         }, 1500);
       }
+    });
+    this.renderActionHotbar(activeUnlockedNodes, currentActor);
+  }
+  renderActionHotbar(activeUnlockedNodes, currentActor) {
+    if (typeof document === "undefined")
+      return;
+    let hotbar = document.getElementById("vn-rpg-action-hotbar");
+    if (!hotbar) {
+      hotbar = document.createElement("div");
+      hotbar.id = "vn-rpg-action-hotbar";
+      hotbar.style.cssText = "position: fixed; bottom: 85px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 1000; background: rgba(15,23,42,0.92); backdrop-filter: blur(8px); border: 1px solid rgba(99,102,241,0.5); border-radius: 20px; padding: 4px 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); max-width: 90vw; overflow-x: auto;";
+      document.body.appendChild(hotbar);
+    }
+    if (activeUnlockedNodes.length === 0) {
+      hotbar.style.display = "none";
+      return;
+    }
+    hotbar.style.display = "flex";
+    hotbar.innerHTML = "";
+    const label = document.createElement("span");
+    label.style.cssText = "font-size: 11px; color: #818cf8; font-weight: 700; display: flex; align-items: center; gap: 4px; padding-right: 4px; border-right: 1px solid #334155;";
+    label.innerHTML = `⚔️ <span>Skills</span>`;
+    hotbar.appendChild(label);
+    activeUnlockedNodes.forEach((node) => {
+      const cd = this.progression.cooldowns[node.name] || 0;
+      const isReady = cd === 0;
+      const pill = document.createElement("button");
+      pill.style.cssText = `background: ${isReady ? "rgba(30,41,59,0.9)" : "rgba(15,23,42,0.7)"}; border: 1px solid ${isReady ? "#38bdf8" : "#475569"}; border-radius: 12px; padding: 2px 8px; font-size: 11px; color: ${isReady ? "#f8fafc" : "#94a3b8"}; cursor: pointer; display: flex; align-items: center; gap: 4px; white-space: nowrap; transition: all 0.15s ease;`;
+      pill.innerHTML = `<span>${node.name}</span>${!isReady ? `<span style="color:#f87171; font-weight:700;">(${cd}t)</span>` : ""}`;
+      pill.addEventListener("click", () => {
+        const textarea = document.querySelector("#send_textarea, textarea[name='text'], #chat_input");
+        if (textarea) {
+          const prefix = textarea.value.trim() ? `${textarea.value.trim()} ` : "";
+          textarea.value = `${prefix}*Uses ${node.name}* `;
+          textarea.focus();
+        } else {
+          this.triggerSkillAction(node, currentActor);
+        }
+      });
+      hotbar.appendChild(pill);
     });
   }
   renderAptitudes(actor) {
@@ -12130,6 +12462,94 @@ class VnAudioEngine {
           });
           break;
         }
+      }
+    } catch {}
+  }
+  playDiceRoll(durationMs = 800) {
+    if (this.isMuted)
+      return;
+    const ctx = this.getContext();
+    if (!ctx)
+      return;
+    try {
+      const now = ctx.currentTime;
+      const clicks = 8;
+      for (let i = 0;i < clicks; i++) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        const freq = 260 + Math.random() * 320;
+        const timeOffset = Math.pow(i / clicks, 0.7) * (durationMs / 1000) * 0.9;
+        osc.frequency.setValueAtTime(freq, now + timeOffset);
+        gain.gain.setValueAtTime(0.08 * this.sfxVolume, now + timeOffset);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + timeOffset + 0.05);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + timeOffset);
+        osc.stop(now + timeOffset + 0.05);
+      }
+    } catch {}
+  }
+  playTierResult(tierName) {
+    if (this.isMuted)
+      return;
+    const ctx = this.getContext();
+    if (!ctx)
+      return;
+    try {
+      const now = ctx.currentTime;
+      const name = String(tierName || "").toLowerCase();
+      if (name.includes("crit") && name.includes("fail")) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(196, now);
+        osc.frequency.exponentialRampToValueAtTime(98, now + 0.4);
+        gain.gain.setValueAtTime(0.15 * this.sfxVolume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.4);
+      } else if (name.includes("fail")) {
+        [330, 262].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, now + i * 0.12);
+          gain.gain.setValueAtTime(0.12 * this.sfxVolume, now + i * 0.12);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.2);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.12);
+          osc.stop(now + i * 0.12 + 0.2);
+        });
+      } else if (name.includes("crit")) {
+        [523, 659, 784, 1047].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, now + i * 0.08);
+          gain.gain.setValueAtTime(0.12 * this.sfxVolume, now + i * 0.08);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.35);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.08);
+          osc.stop(now + i * 0.08 + 0.35);
+        });
+      } else {
+        [523, 659].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, now + i * 0.1);
+          gain.gain.setValueAtTime(0.12 * this.sfxVolume, now + i * 0.1);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.25);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.1);
+          osc.stop(now + i * 0.1 + 0.25);
+        });
       }
     } catch {}
   }
