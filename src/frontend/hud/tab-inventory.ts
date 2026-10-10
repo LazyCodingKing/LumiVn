@@ -269,6 +269,78 @@ export function extractDistrictShops(ledger: LedgerData): DistrictShop[] {
   return DEFAULT_DISTRICT_SHOPS;
 }
 
+export function getTwineItemActions(
+  itemName: string,
+  context?: { isShop?: boolean; price?: number; shopName?: string }
+): Array<{ label: string; action: string }> {
+  const lower = itemName.toLowerCase();
+  const actions: Array<{ label: string; action: string }> = [];
+
+  if (context?.isShop && context.price !== undefined) {
+    actions.push(
+      {
+        label: `Buy for ${context.price}g`,
+        action: `[Trade: Purchased 1x ${itemName} from ${context.shopName || "merchant"} for ${context.price} Gold]`,
+      },
+      {
+        label: `Inspect ${itemName}`,
+        action: `*Inspects the ${itemName} carefully on the counter*`,
+      },
+      {
+        label: `Ask merchant about ${itemName}`,
+        action: `*Asks the merchant about where they acquired this ${itemName}*`,
+      }
+    );
+    return actions;
+  }
+
+  if (lower.includes("tv") || lower.includes("television") || lower.includes("screen") || lower.includes("monitor")) {
+    actions.push(
+      { label: "Watch TV broadcast", action: `*Turns on the TV and watches the current broadcast*` },
+      { label: "Flip channels for news", action: `*Flips through TV channels checking the latest news and weather*` },
+      { label: "Turn off TV", action: `*Turns off the television*` },
+      { label: "Inspect TV display", action: `*Inspects the TV display and surroundings*` }
+    );
+  } else if (lower.includes("radio") || lower.includes("stereo")) {
+    actions.push(
+      { label: "Tune radio frequency", action: `*Turns the radio dial to find music and local chatter*` },
+      { label: "Turn off radio", action: `*Turns off the radio*` }
+    );
+  } else if (lower.includes("tea") || lower.includes("coffee") || lower.includes("drink") || lower.includes("draught") || lower.includes("elixir") || lower.includes("potion")) {
+    actions.push(
+      { label: `Sip ${itemName}`, action: `*Takes a warm, slow sip of ${itemName}*` },
+      { label: `Smell aroma of ${itemName}`, action: `*Breathes in the aroma of ${itemName}*` },
+      { label: `Offer ${itemName} to companion`, action: `*Offers a cup of ${itemName} to a companion*` }
+    );
+  } else if (lower.includes("food") || lower.includes("meal") || lower.includes("snack") || lower.includes("bread") || lower.includes("cake") || lower.includes("apple")) {
+    actions.push(
+      { label: `Eat ${itemName}`, action: `*Eats the ${itemName} thoughtfully*` },
+      { label: `Savor a bite of ${itemName}`, action: `*Takes a slow bite of ${itemName}*` },
+      { label: `Share ${itemName}`, action: `*Shares the ${itemName} with a companion*` }
+    );
+  } else if (lower.includes("bed") || lower.includes("sofa") || lower.includes("couch") || lower.includes("futon")) {
+    actions.push(
+      { label: `Rest on ${itemName}`, action: `*Lies down comfortably on the ${itemName} to rest*` },
+      { label: `Sit on ${itemName}`, action: `*Sits down on the ${itemName} and relaxes*` },
+      { label: `Take a brief nap`, action: `*Closes eyes and drifts into a brief nap on the ${itemName}*` }
+    );
+  } else if (lower.includes("book") || lower.includes("novel") || lower.includes("scroll") || lower.includes("journal")) {
+    actions.push(
+      { label: `Read ${itemName}`, action: `*Opens the ${itemName} and reads through the pages*` },
+      { label: `Skim ${itemName} for notes`, action: `*Skims through the ${itemName} searching for interesting details*` },
+      { label: `Close ${itemName}`, action: `*Bookmarks the ${itemName} and sets it down*` }
+    );
+  } else {
+    actions.push(
+      { label: `Interact with ${itemName}`, action: `*Interacts with the ${itemName}*` },
+      { label: `Examine ${itemName}`, action: `*Examines the ${itemName} closely*` },
+      { label: `Pick up ${itemName}`, action: `*Reaches out to pick up the ${itemName}*` }
+    );
+  }
+
+  return actions;
+}
+
 export class InventoryTab {
   public root: HTMLElement;
   private onAction: (actionText: string) => void;
@@ -470,6 +542,57 @@ export class InventoryTab {
       this.render(ledger, activeActorId);
     });
 
+    // 1. Present & Discovered Objects in Location (HTML Twine Choice Interactions)
+    const currentPlace = ledger.scene?.place || ledger.clock?.location || "";
+    const placeData = ledger.places?.[currentPlace] || {};
+    const presentResources: string[] = [
+      ...(placeData.resources || []),
+      ...(placeData.affordances || []),
+      ...(inv.room || []),
+    ];
+    const displayObjects = presentResources.length > 0
+      ? presentResources
+      : ["Television (TV)", "Comfortable Bed", "Coffee Maker", "Tea Set", "Desk & Books"];
+
+    const objectsSection = document.createElement("div");
+    objectsSection.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;";
+    objectsSection.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
+        <strong style="color: #38bdf8; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+          <span>🔍</span> <span>Discovered & Present Objects in ${currentPlace || "Scene"} (Twine Actions)</span>
+        </strong>
+        <span style="font-size: 10px; color: #94a3b8;">Click hypertext choices to interact directly with the world</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;">
+        ${displayObjects.map((obj) => {
+          const twineActions = getTwineItemActions(obj);
+          return `
+            <div class="vn-present-obj-card" style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 18px;">${getItemIcon(obj)}</span>
+                <strong style="color: #f8fafc; font-size: 12px;">${obj}</strong>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #2d3748; padding-top: 6px;">
+                ${twineActions.map((act) => `
+                  <button class="vn-twine-action-btn" data-action="${act.action.replace(/"/g, '&quot;')}" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #38bdf8; border-radius: 4px; padding: 4px 8px; color: #7dd3fc; font-size: 11px; text-align: left; cursor: pointer; transition: all 0.15s ease; font-family: ui-monospace, Menlo, monospace;">
+                    [[ ${act.label} ]]
+                  </button>
+                `).join("")}
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `;
+    marketWrap.appendChild(objectsSection);
+
+    objectsSection.querySelectorAll(".vn-twine-action-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const act = (btn as HTMLElement).dataset.action;
+        if (act) this.onAction(act);
+      });
+    });
+
     // Shops List
     for (const shop of this.shops) {
       const open = isShopOpen(shop, currentHour);
@@ -524,6 +647,14 @@ export class InventoryTab {
                     <span style="font-size: 9px; color: #94a3b8;">Stock: ${item.stock}/${item.maxStock}</span>
                     <button class="vn-buy-item-btn" data-shop-id="${shop.id}" data-item-id="${item.id}" style="background: ${canAfford && hasStock ? "linear-gradient(135deg, #059669, #10b981)" : "#334155"}; border: none; color: ${canAfford && hasStock ? "#fff" : "#94a3b8"}; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 3px 10px; cursor: ${canAfford && hasStock ? "pointer" : "not-allowed"};">
                       ${!hasStock ? "Out of Stock" : !canAfford ? "Can't Afford" : "Buy"}
+                    </button>
+                  </div>
+                  <div style="display: flex; gap: 4px; margin-top: 4px;">
+                    <button class="vn-twine-link-inspect" data-item-name="${item.name}" style="flex: 1; background: rgba(15, 23, 42, 0.6); border: 1px dashed #38bdf8; color: #7dd3fc; border-radius: 4px; padding: 2px 4px; font-size: 9px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;">
+                      [[ Examine ]]
+                    </button>
+                    <button class="vn-twine-link-inquire" data-item-name="${item.name}" data-shop-name="${shop.name}" style="flex: 1; background: rgba(15, 23, 42, 0.6); border: 1px dashed #818cf8; color: #a5b4fc; border-radius: 4px; padding: 2px 4px; font-size: 9px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;">
+                      [[ Inquire ]]
                     </button>
                   </div>
                 </div>
@@ -589,6 +720,21 @@ export class InventoryTab {
           this.onAction(`[Trade: Purchased 1x ${item.name} from ${shop.name} for ${item.price} Gold]`);
           this.render(ledger, activeActorId);
         }
+      });
+    });
+
+    marketWrap.querySelectorAll(".vn-twine-link-inspect").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const name = (btn as HTMLElement).dataset.itemName;
+        if (name) this.onAction(`*Inspects the ${name} closely on the counter*`);
+      });
+    });
+
+    marketWrap.querySelectorAll(".vn-twine-link-inquire").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const name = (btn as HTMLElement).dataset.itemName;
+        const sname = (btn as HTMLElement).dataset.shopName || "merchant";
+        if (name) this.onAction(`*Asks the ${sname} shopkeeper about the origins of ${name}*`);
       });
     });
   }

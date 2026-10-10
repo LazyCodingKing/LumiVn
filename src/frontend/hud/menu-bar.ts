@@ -27,6 +27,20 @@ export type HudTabId =
   | "rpg"
   | "diagnostics";
 
+export const ALL_HUD_TABS: Array<{ id: HudTabId; icon: string; label: string }> = [
+  { id: "characters", icon: "👥", label: "Cast" },
+  { id: "stats", icon: "📊", label: "Stats" },
+  { id: "rpg", icon: "⚔️", label: "RPG / Dice" },
+  { id: "inventory", icon: "🎒", label: "Inventory" },
+  { id: "wardrobe", icon: "👗", label: "Wardrobe" },
+  { id: "map", icon: "🗺️", label: "Map" },
+  { id: "phone", icon: "📱", label: "Phone" },
+  { id: "journal", icon: "📜", label: "Journal" },
+  { id: "scene", icon: "🎬", label: "Scene" },
+  { id: "bplots", icon: "📡", label: "B-Plots" },
+  { id: "diagnostics", icon: "📋", label: "Rulebook / Diag" },
+];
+
 import type { VnAudioEngine } from "../stage/audio-player.js";
 
 export interface MenuBarOptions {
@@ -101,24 +115,10 @@ export class MenuBar {
     this.journalTab = new JournalTab();
     this.sceneTab = new SceneTab(opts.ctx, opts.onTransformChange);
     this.rpgTab = new RpgTab(opts.ctx, opts.onAction);
-    this.diagnosticsTab = new DiagnosticsTab(opts.ctx, opts.audioEngine);
+    this.diagnosticsTab = new DiagnosticsTab(opts.ctx, opts.audioEngine, this);
 
     // Render bar buttons
-    const barItems: Array<{ id: HudTabId; icon: string; label: string }> = [
-      { id: "characters", icon: "👥", label: "Cast" },
-      { id: "stats", icon: "📊", label: "Stats" },
-      { id: "rpg", icon: "⚔️", label: "RPG / Dice" },
-      { id: "inventory", icon: "🎒", label: "Inventory" },
-      { id: "wardrobe", icon: "👗", label: "Wardrobe" },
-      { id: "map", icon: "🗺️", label: "Map" },
-      { id: "phone", icon: "📱", label: "Phone" },
-      { id: "journal", icon: "📜", label: "Journal" },
-      { id: "scene", icon: "🎬", label: "Scene" },
-      { id: "bplots", icon: "📡", label: "B-Plots" },
-      { id: "diagnostics", icon: "📋", label: "Copy / Diag" },
-    ];
-
-    for (const item of barItems) {
+    for (const item of ALL_HUD_TABS) {
       const btn = document.createElement("button");
       btn.className = "vn-hud-btn";
       btn.dataset.tabId = item.id;
@@ -142,6 +142,40 @@ export class MenuBar {
 
       this.root.appendChild(btn);
     }
+
+    this.setVisibleTabs(this.getVisibleTabs());
+  }
+
+  public getVisibleTabs(): string[] {
+    try {
+      if (typeof localStorage !== "undefined") {
+        const raw = localStorage.getItem("vn_hud_enabled_tabs");
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr) && arr.length > 0) return arr;
+        }
+      }
+    } catch {}
+    return ALL_HUD_TABS.map((t) => t.id);
+  }
+
+  public setVisibleTabs(enabledTabIds: string[]): void {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("vn_hud_enabled_tabs", JSON.stringify(enabledTabIds));
+      }
+    } catch {}
+    const buttons = this.root.querySelectorAll(".vn-hud-btn");
+    buttons.forEach((node) => {
+      const btn = node as HTMLElement;
+      const tid = btn.dataset.tabId;
+      if (!tid) return;
+      if (tid === "diagnostics") {
+        btn.style.display = "flex";
+        return;
+      }
+      btn.style.display = enabledTabIds.includes(tid) ? "flex" : "none";
+    });
   }
 
   public getOverlay(): HTMLElement {

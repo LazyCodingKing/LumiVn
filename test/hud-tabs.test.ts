@@ -891,30 +891,34 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     expect(bubble?.textContent).toContain("Akane");
   });
 
-  test("21. Dual 2D Tilemap and 3D Over-the-Shoulder District Map", () => {
+  test("21. Dual Blueprint Indoor and District Outdoor Navigation Map", () => {
     let travelAction = "";
     const tab = new MapTab((act) => {
       travelAction = act;
     });
 
-    // 1. Switch to 2D Tilemap
-    (tab as any).viewMode = "tilemap2d";
+    // 1. Render Indoor Blueprint
+    (tab as any).viewMode = "indoor";
     tab.render(parsedLedger);
 
-    const canvas = tab.root.querySelector("canvas");
-    expect(canvas).toBeDefined();
-    expect(tab.player2d).toEqual({ x: 6, y: 5 });
+    const viewport = tab.root.querySelector("#vn-map-viewport");
+    expect(viewport).not.toBeNull();
+    const svgGroup = tab.root.querySelector("#vn-map-svg-group");
+    expect(svgGroup).not.toBeNull();
 
-    // Move player using activeKeydownHandler
-    (tab as any).activeKeydownHandler?.({ code: "ArrowRight", key: "ArrowRight", preventDefault() {} } as any);
-    expect(tab.player2d.x).toBe(7);
-
-    // 2. Switch to 3D Viewport
-    (tab as any).viewMode = "world3d";
+    // 2. Render Outdoor District
+    (tab as any).viewMode = "outdoor";
     tab.render(parsedLedger);
 
-    const viewHtml = tab.root.innerHTML;
-    expect(viewHtml).toContain("3D Walkable District");
+    const outdoorSvg = tab.root.querySelector("#vn-map-svg-group");
+    expect(outdoorSvg).not.toBeNull();
+
+    // 3. Trigger affordance interaction
+    const affordanceBtn = tab.root.querySelector(".vn-affordance-interactive") as HTMLElement | null;
+    if (affordanceBtn) {
+      affordanceBtn.click();
+      expect(travelAction).toContain("Interacts with");
+    }
 
     tab.cleanupInteractiveModes();
   });

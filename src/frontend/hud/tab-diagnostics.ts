@@ -3,22 +3,31 @@ import type { LedgerData, AssetManifest, StatRulesSettings } from "../../shared/
 import { diagBus, type LogEntry } from "../utils/diag-bus.js";
 import { PROP_TEMPLATES_CATALOG, formatDialogueHtml } from "../stage/rich-text.js";
 import { DEFAULT_STAT_RULES, DEFAULT_LEDGER_PROMPT } from "../../backend/default-rules.js";
-import { DEFAULT_RPG_PROMPT } from "../../backend/storage.js";
+import { DEFAULT_RPG_PROMPT, DEFAULT_DIRECTOR_SETTINGS } from "../../backend/storage.js";
 import type { VnAudioEngine } from "../stage/audio-player.js";
+import { parseSkillTreesFromPrompt } from "./tab-rpg.js";
+import { ALL_HUD_TABS } from "./menu-bar.js";
 
 export class DiagnosticsTab {
   public root: HTMLElement;
   private ctx?: SpindleFrontendContext;
   private audioEngine?: VnAudioEngine;
+  private menuBar?: { setVisibleTabs: (tabs: string[]) => void; getVisibleTabs: () => string[] };
   private currentLedger: LedgerData = {};
   private currentManifest?: AssetManifest;
   private activeFilter: "all" | "info" | "warn" | "error" = "all";
   private unsubscribeBus?: () => void;
   private statRulesSettings: StatRulesSettings | null = null;
+  private activeRulebookSubtab: "director" | "stats" | "ledger" | "rpg" | "preview" | "tabs" = "stats";
 
-  constructor(ctx?: SpindleFrontendContext, audioEngine?: VnAudioEngine) {
+  constructor(
+    ctx?: SpindleFrontendContext,
+    audioEngine?: VnAudioEngine,
+    menuBar?: { setVisibleTabs: (tabs: string[]) => void; getVisibleTabs: () => string[] }
+  ) {
     this.ctx = ctx;
     this.audioEngine = audioEngine;
+    this.menuBar = menuBar;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-diagnostics";
   }
@@ -218,45 +227,194 @@ export class DiagnosticsTab {
     `;
     this.root.appendChild(directorCard);
 
-    // Dedicated Stat Rules & MVU Ledger Configuration Card
+    // Consolidated World & Simulation Rulebook Card
     const rulesCard = document.createElement("div");
-    rulesCard.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;";
+    rulesCard.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;";
+    
+    const visibleTabs = this.menuBar?.getVisibleTabs?.() || ALL_HUD_TABS.map((t) => t.id);
+
     rulesCard.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <strong style="color: #38bdf8; font-size: 13px;">⚖️ Stat Rules & MVU Ledger Config</strong>
-        <select id="vn-mvu-mode-select" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 2px 6px; font-size: 11px;">
-          <option value="mvu_quiet">MVU Mode (Quiet LLM Evaluator)</option>
-          <option value="inline_interceptor">Inline Mode (Prompt Injection)</option>
-          <option value="passive">Passive Mode (Parse only)</option>
-        </select>
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid #1e293b; padding-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 16px;">📖</span>
+          <strong style="color: #38bdf8; font-size: 13px;">Unified Simulation Rulebook & Engine Controls</strong>
+        </div>
+        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+          <select id="vn-rulebook-preset-select" style="background: #1e293b; color: #fde047; border: 1px solid #eab308; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-weight: 600; cursor: pointer;">
+            <option value="full">🌟 Preset: Full RPG & Living World</option>
+            <option value="economy">⚡ Preset: Economy TOON (~80 tokens)</option>
+            <option value="pure_vn">🚀 Preset: Pure VN (0 Extra Tokens)</option>
+          </select>
+          <select id="vn-mvu-mode-select" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 2px 6px; font-size: 11px;">
+            <option value="mvu_quiet">MVU Mode (Quiet LLM Evaluator)</option>
+            <option value="inline_interceptor">Inline Mode (Prompt Injection)</option>
+            <option value="passive">Passive Mode (Parse only)</option>
+          </select>
+        </div>
       </div>
-      <label style="font-size: 10px; color: #94a3b8;">Stat Rules Formulation:</label>
-      <textarea id="vn-stat-rules-input" style="width: 100%; height: 95px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
-      <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema:</label>
-      <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 95px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
-      <label style="font-size: 10px; color: #94a3b8;">RPG & Combat Rules Prompt (Tactical Directives):</label>
-      <textarea id="vn-rpg-rules-input" style="width: 100%; height: 85px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
-      <div style="display:flex; justify-content:flex-end;">
-        <button id="vn-save-rules-btn" style="background: #0284c7; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; font-size: 11px; font-weight: 700; cursor: pointer;">💾 Save & Update Rules</button>
+
+      <!-- Rulebook Sub-tabs Navigation -->
+      <div style="display: flex; gap: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 6px; flex-wrap: wrap;">
+        <button class="vn-rb-subtab-btn" data-subtab="stats" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: 700;">📊 Stat Rules</button>
+        <button class="vn-rb-subtab-btn" data-subtab="director" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">🎬 Director</button>
+        <button class="vn-rb-subtab-btn" data-subtab="ledger" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">📜 Ledger Schema</button>
+        <button class="vn-rb-subtab-btn" data-subtab="rpg" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">⚔️ RPG & Skills</button>
+        <button class="vn-rb-subtab-btn" data-subtab="preview" style="background: #1e293b; color: #a78bfa; border: 1px solid #7c3aed; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">👁️ Live Tab Preview</button>
+        <button class="vn-rb-subtab-btn" data-subtab="tabs" style="background: #1e293b; color: #34d399; border: 1px solid #059669; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">🎛️ HUD Tab Checkboxes</button>
+      </div>
+
+      <!-- Domain Panels -->
+      <div id="vn-rb-panel-stats" class="vn-rb-panel" style="display: flex; flex-direction: column; gap: 4px;">
+        <label style="font-size: 10px; color: #94a3b8;">21-Stat Network & Gravity Tiers Rules:</label>
+        <textarea id="vn-stat-rules-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      </div>
+
+      <div id="vn-rb-panel-director" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 6px;">
+        <label style="font-size: 10px; color: #94a3b8;">World Director System Directives:</label>
+        <textarea id="vn-director-system-input" style="width: 100%; height: 90px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+        <label style="font-size: 10px; color: #94a3b8;">Turn Notes & Scene Guidance (Macros: {{user}}, {{char}}):</label>
+        <textarea id="vn-director-notes-input" style="width: 100%; height: 50px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      </div>
+
+      <div id="vn-rb-panel-ledger" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 4px;">
+        <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema & Structural Directives:</label>
+        <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      </div>
+
+      <div id="vn-rb-panel-rpg" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 4px;">
+        <label style="font-size: 10px; color: #94a3b8;">RPG & Skills Progression Rules (Tactical Directives & Trees):</label>
+        <textarea id="vn-rpg-rules-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      </div>
+
+      <div id="vn-rb-panel-preview" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
+        <div style="font-size: 11px; color: #cbd5e1;">Live breakdown of how the current rulebook translates into tab features:</div>
+        <div id="vn-rb-preview-content" style="max-height: 180px; overflow-y: auto; background: #020617; border: 1px solid #334155; border-radius: 6px; padding: 8px; font-size: 11px;"></div>
+      </div>
+
+      <div id="vn-rb-panel-tabs" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
+        <div style="font-size: 11px; color: #cbd5e1;">Toggle which tabs appear on the bottom Game HUD Menu Bar:</div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px;">
+          ${ALL_HUD_TABS.filter((t) => t.id !== "diagnostics").map((tabItem) => `
+            <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
+              <input type="checkbox" class="vn-tab-checkbox" data-tab-id="${tabItem.id}" ${visibleTabs.includes(tabItem.id) ? "checked" : ""} style="accent-color: #10b981; cursor: pointer;" />
+              <span>${tabItem.icon}</span> <span>${tabItem.label}</span>
+            </label>
+          `).join("")}
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px solid #1e293b; padding-top: 8px; margin-top: 4px;">
+        <span style="font-size: 10px; color: #94a3b8;">Edits take effect dynamically in tabs and on next turn.</span>
+        <button id="vn-save-rules-btn" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; border: none; border-radius: 4px; padding: 6px 16px; font-size: 11px; font-weight: 700; cursor: pointer;">💾 Save & Apply Rulebook</button>
       </div>
     `;
     this.root.appendChild(rulesCard);
 
     const modeSelect = rulesCard.querySelector("#vn-mvu-mode-select") as HTMLSelectElement | null;
+    const presetSelect = rulesCard.querySelector("#vn-rulebook-preset-select") as HTMLSelectElement | null;
     const rulesInput = rulesCard.querySelector("#vn-stat-rules-input") as HTMLTextAreaElement | null;
     const ledgerInput = rulesCard.querySelector("#vn-ledger-prompt-input") as HTMLTextAreaElement | null;
     const rpgInput = rulesCard.querySelector("#vn-rpg-rules-input") as HTMLTextAreaElement | null;
+    const directorSysInput = rulesCard.querySelector("#vn-director-system-input") as HTMLTextAreaElement | null;
+    const directorNotesInput = rulesCard.querySelector("#vn-director-notes-input") as HTMLTextAreaElement | null;
     const saveRulesBtn = rulesCard.querySelector("#vn-save-rules-btn") as HTMLButtonElement | null;
+    const previewContent = rulesCard.querySelector("#vn-rb-preview-content") as HTMLElement | null;
 
     const activeMode = this.statRulesSettings?.mode || "mvu_quiet";
     const activeRules = this.statRulesSettings?.statRules?.trim() || DEFAULT_STAT_RULES;
     const activeLedger = this.statRulesSettings?.ledgerPrompt?.trim() || DEFAULT_LEDGER_PROMPT;
     const activeRpg = this.statRulesSettings?.rpgPrompt?.trim() || DEFAULT_RPG_PROMPT;
+    const activeDirSys = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
+    const activeDirNotes = DEFAULT_DIRECTOR_SETTINGS.userNotes || "";
 
     if (modeSelect) modeSelect.value = activeMode;
     if (rulesInput) rulesInput.value = activeRules;
     if (ledgerInput) ledgerInput.value = activeLedger;
     if (rpgInput) rpgInput.value = activeRpg;
+    if (directorSysInput) directorSysInput.value = activeDirSys;
+    if (directorNotesInput) directorNotesInput.value = activeDirNotes;
+
+    // Subtab switching
+    const subtabBtns = rulesCard.querySelectorAll<HTMLButtonElement>(".vn-rb-subtab-btn");
+    const updatePreview = () => {
+      if (!previewContent) return;
+      const skills = parseSkillTreesFromPrompt(rpgInput?.value || "");
+      previewContent.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div>
+            <strong style="color: #fde047;">⚔️ RPG Skill Trees (${skills.length} categories parsed):</strong>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
+              ${skills.map((cat) => `
+                <div style="background: #1e293b; border: 1px solid #475569; border-radius: 4px; padding: 4px 8px;">
+                  <span style="color: #38bdf8; font-weight: 700;">${cat.name}</span>: 
+                  <span style="color: #cbd5e1;">${cat.nodes.map((n) => n.name).join(", ")}</span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+          <div>
+            <strong style="color: #34d399;">📊 Active Stat Profile:</strong>
+            <div style="color: #94a3b8; font-size: 10px; margin-top: 2px;">
+              Tracks 21-stat network (T, A, R, F, Fam, G, Integ, Stress, CAU, GRD, PRD, EMP, STB, BLD, RX, RC, Rig, Mask, MIS, WV, COMP) with GRV1-GRV5 gravity tiers.
+            </div>
+          </div>
+        </div>
+      `;
+    };
+
+    subtabBtns.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const target = btn.dataset.subtab as any;
+        if (!target) return;
+        this.activeRulebookSubtab = target;
+        subtabBtns.forEach((b) => {
+          b.style.background = "#1e293b";
+          b.style.color = "#94a3b8";
+          b.style.fontWeight = "normal";
+          b.style.borderColor = "#334155";
+        });
+        btn.style.background = "#0284c7";
+        btn.style.color = "#fff";
+        btn.style.fontWeight = "700";
+        btn.style.borderColor = "#38bdf8";
+
+        rulesCard.querySelectorAll<HTMLElement>(".vn-rb-panel").forEach((p) => (p.style.display = "none"));
+        const activePanel = rulesCard.querySelector(`#vn-rb-panel-${target}`) as HTMLElement | null;
+        if (activePanel) activePanel.style.display = "flex";
+        if (target === "preview") updatePreview();
+      });
+    });
+
+    // Preset selector handling
+    presetSelect?.addEventListener("change", () => {
+      const p = presetSelect.value;
+      if (p === "pure_vn") {
+        if (modeSelect) modeSelect.value = "passive";
+        if (rulesInput) rulesInput.value = "";
+        if (ledgerInput) ledgerInput.value = "";
+        if (directorSysInput) directorSysInput.value = "";
+      } else if (p === "economy") {
+        if (modeSelect) modeSelect.value = "passive";
+        if (rulesInput) rulesInput.value = DEFAULT_STAT_RULES.slice(0, 400);
+        if (ledgerInput) ledgerInput.value = "LEDGER: emit compact delta only.";
+      } else {
+        if (modeSelect) modeSelect.value = "mvu_quiet";
+        if (rulesInput) rulesInput.value = DEFAULT_STAT_RULES;
+        if (ledgerInput) ledgerInput.value = DEFAULT_LEDGER_PROMPT;
+        if (rpgInput) rpgInput.value = DEFAULT_RPG_PROMPT;
+        if (directorSysInput) directorSysInput.value = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
+      }
+    });
+
+    // Tab checkboxes handling
+    rulesCard.querySelectorAll<HTMLInputElement>(".vn-tab-checkbox").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const checkedList = Array.from(rulesCard.querySelectorAll<HTMLInputElement>(".vn-tab-checkbox:checked")).map(
+          (c) => c.dataset.tabId || ""
+        ).filter(Boolean);
+        this.menuBar?.setVisibleTabs?.(checkedList);
+      });
+    });
 
     if (!this.statRulesSettings) {
       this.ctx?.sendToBackend?.({ type: "vn_get_stat_rules_settings" });
@@ -268,16 +426,28 @@ export class DiagnosticsTab {
         statRules: rulesInput?.value?.trim() || DEFAULT_STAT_RULES,
         ledgerPrompt: ledgerInput?.value?.trim() || DEFAULT_LEDGER_PROMPT,
         rpgPrompt: rpgInput?.value?.trim() || DEFAULT_RPG_PROMPT,
-        enabled: true,
+        enabled: presetSelect?.value !== "pure_vn",
       };
       this.statRulesSettings = updated;
       this.ctx?.sendToBackend?.({
         type: "vn_save_stat_rules_settings",
         settings: updated,
       });
+
+      if (directorSysInput) {
+        this.ctx?.sendToBackend?.({
+          type: "vn_save_director_settings",
+          settings: {
+            systemPrompt: directorSysInput.value.trim() || DEFAULT_DIRECTOR_SETTINGS.systemPrompt,
+            userNotes: directorNotesInput?.value?.trim() || "",
+            enabled: presetSelect?.value !== "pure_vn",
+          },
+        });
+      }
+
       if (saveRulesBtn) {
         const orig = saveRulesBtn.textContent;
-        saveRulesBtn.textContent = "✓ Saved!";
+        saveRulesBtn.textContent = "✓ Rulebook Saved & Applied!";
         setTimeout(() => {
           saveRulesBtn.textContent = orig;
         }, 1500);

@@ -4637,6 +4637,39 @@ function extractDistrictShops(ledger) {
   }
   return DEFAULT_DISTRICT_SHOPS;
 }
+function getTwineItemActions(itemName, context) {
+  const lower = itemName.toLowerCase();
+  const actions = [];
+  if (context?.isShop && context.price !== undefined) {
+    actions.push({
+      label: `Buy for ${context.price}g`,
+      action: `[Trade: Purchased 1x ${itemName} from ${context.shopName || "merchant"} for ${context.price} Gold]`
+    }, {
+      label: `Inspect ${itemName}`,
+      action: `*Inspects the ${itemName} carefully on the counter*`
+    }, {
+      label: `Ask merchant about ${itemName}`,
+      action: `*Asks the merchant about where they acquired this ${itemName}*`
+    });
+    return actions;
+  }
+  if (lower.includes("tv") || lower.includes("television") || lower.includes("screen") || lower.includes("monitor")) {
+    actions.push({ label: "Watch TV broadcast", action: `*Turns on the TV and watches the current broadcast*` }, { label: "Flip channels for news", action: `*Flips through TV channels checking the latest news and weather*` }, { label: "Turn off TV", action: `*Turns off the television*` }, { label: "Inspect TV display", action: `*Inspects the TV display and surroundings*` });
+  } else if (lower.includes("radio") || lower.includes("stereo")) {
+    actions.push({ label: "Tune radio frequency", action: `*Turns the radio dial to find music and local chatter*` }, { label: "Turn off radio", action: `*Turns off the radio*` });
+  } else if (lower.includes("tea") || lower.includes("coffee") || lower.includes("drink") || lower.includes("draught") || lower.includes("elixir") || lower.includes("potion")) {
+    actions.push({ label: `Sip ${itemName}`, action: `*Takes a warm, slow sip of ${itemName}*` }, { label: `Smell aroma of ${itemName}`, action: `*Breathes in the aroma of ${itemName}*` }, { label: `Offer ${itemName} to companion`, action: `*Offers a cup of ${itemName} to a companion*` });
+  } else if (lower.includes("food") || lower.includes("meal") || lower.includes("snack") || lower.includes("bread") || lower.includes("cake") || lower.includes("apple")) {
+    actions.push({ label: `Eat ${itemName}`, action: `*Eats the ${itemName} thoughtfully*` }, { label: `Savor a bite of ${itemName}`, action: `*Takes a slow bite of ${itemName}*` }, { label: `Share ${itemName}`, action: `*Shares the ${itemName} with a companion*` });
+  } else if (lower.includes("bed") || lower.includes("sofa") || lower.includes("couch") || lower.includes("futon")) {
+    actions.push({ label: `Rest on ${itemName}`, action: `*Lies down comfortably on the ${itemName} to rest*` }, { label: `Sit on ${itemName}`, action: `*Sits down on the ${itemName} and relaxes*` }, { label: `Take a brief nap`, action: `*Closes eyes and drifts into a brief nap on the ${itemName}*` });
+  } else if (lower.includes("book") || lower.includes("novel") || lower.includes("scroll") || lower.includes("journal")) {
+    actions.push({ label: `Read ${itemName}`, action: `*Opens the ${itemName} and reads through the pages*` }, { label: `Skim ${itemName} for notes`, action: `*Skims through the ${itemName} searching for interesting details*` }, { label: `Close ${itemName}`, action: `*Bookmarks the ${itemName} and sets it down*` });
+  } else {
+    actions.push({ label: `Interact with ${itemName}`, action: `*Interacts with the ${itemName}*` }, { label: `Examine ${itemName}`, action: `*Examines the ${itemName} closely*` }, { label: `Pick up ${itemName}`, action: `*Reaches out to pick up the ${itemName}*` });
+  }
+  return actions;
+}
 
 class InventoryTab {
   root;
@@ -4814,6 +4847,52 @@ class InventoryTab {
       this.playerGold += 50;
       this.render(ledger, activeActorId);
     });
+    const currentPlace = ledger.scene?.place || ledger.clock?.location || "";
+    const placeData = ledger.places?.[currentPlace] || {};
+    const presentResources = [
+      ...placeData.resources || [],
+      ...placeData.affordances || [],
+      ...inv.room || []
+    ];
+    const displayObjects = presentResources.length > 0 ? presentResources : ["Television (TV)", "Comfortable Bed", "Coffee Maker", "Tea Set", "Desk & Books"];
+    const objectsSection = document.createElement("div");
+    objectsSection.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;";
+    objectsSection.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
+        <strong style="color: #38bdf8; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+          <span>\uD83D\uDD0D</span> <span>Discovered & Present Objects in ${currentPlace || "Scene"} (Twine Actions)</span>
+        </strong>
+        <span style="font-size: 10px; color: #94a3b8;">Click hypertext choices to interact directly with the world</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;">
+        ${displayObjects.map((obj) => {
+      const twineActions = getTwineItemActions(obj);
+      return `
+            <div class="vn-present-obj-card" style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 18px;">${getItemIcon(obj)}</span>
+                <strong style="color: #f8fafc; font-size: 12px;">${obj}</strong>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #2d3748; padding-top: 6px;">
+                ${twineActions.map((act) => `
+                  <button class="vn-twine-action-btn" data-action="${act.action.replace(/"/g, "&quot;")}" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #38bdf8; border-radius: 4px; padding: 4px 8px; color: #7dd3fc; font-size: 11px; text-align: left; cursor: pointer; transition: all 0.15s ease; font-family: ui-monospace, Menlo, monospace;">
+                    [[ ${act.label} ]]
+                  </button>
+                `).join("")}
+              </div>
+            </div>
+          `;
+    }).join("")}
+      </div>
+    `;
+    marketWrap.appendChild(objectsSection);
+    objectsSection.querySelectorAll(".vn-twine-action-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const act = btn.dataset.action;
+        if (act)
+          this.onAction(act);
+      });
+    });
     for (const shop of this.shops) {
       const open = isShopOpen(shop, currentHour);
       const shopCard = document.createElement("div");
@@ -4865,6 +4944,14 @@ class InventoryTab {
                     <span style="font-size: 9px; color: #94a3b8;">Stock: ${item.stock}/${item.maxStock}</span>
                     <button class="vn-buy-item-btn" data-shop-id="${shop.id}" data-item-id="${item.id}" style="background: ${canAfford && hasStock ? "linear-gradient(135deg, #059669, #10b981)" : "#334155"}; border: none; color: ${canAfford && hasStock ? "#fff" : "#94a3b8"}; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 3px 10px; cursor: ${canAfford && hasStock ? "pointer" : "not-allowed"};">
                       ${!hasStock ? "Out of Stock" : !canAfford ? "Can't Afford" : "Buy"}
+                    </button>
+                  </div>
+                  <div style="display: flex; gap: 4px; margin-top: 4px;">
+                    <button class="vn-twine-link-inspect" data-item-name="${item.name}" style="flex: 1; background: rgba(15, 23, 42, 0.6); border: 1px dashed #38bdf8; color: #7dd3fc; border-radius: 4px; padding: 2px 4px; font-size: 9px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;">
+                      [[ Examine ]]
+                    </button>
+                    <button class="vn-twine-link-inquire" data-item-name="${item.name}" data-shop-name="${shop.name}" style="flex: 1; background: rgba(15, 23, 42, 0.6); border: 1px dashed #818cf8; color: #a5b4fc; border-radius: 4px; padding: 2px 4px; font-size: 9px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;">
+                      [[ Inquire ]]
                     </button>
                   </div>
                 </div>
@@ -4928,143 +5015,25 @@ class InventoryTab {
         }
       });
     });
+    marketWrap.querySelectorAll(".vn-twine-link-inspect").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const name = btn.dataset.itemName;
+        if (name)
+          this.onAction(`*Inspects the ${name} closely on the counter*`);
+      });
+    });
+    marketWrap.querySelectorAll(".vn-twine-link-inquire").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const name = btn.dataset.itemName;
+        const sname = btn.dataset.shopName || "merchant";
+        if (name)
+          this.onAction(`*Asks the ${sname} shopkeeper about the origins of ${name}*`);
+      });
+    });
   }
 }
 
 // src/frontend/hud/tab-map.ts
-function resolveAllLedgerPlaces(ledger) {
-  const map = new Map;
-  if (ledger.places && typeof ledger.places === "object") {
-    for (const [k, v] of Object.entries(ledger.places)) {
-      if (k && v)
-        map.set(k, v);
-    }
-  }
-  if (ledger.places && typeof ledger.places === "object") {
-    for (const [_, v] of Object.entries(ledger.places)) {
-      if (Array.isArray(v?.routes)) {
-        for (const r of v.routes) {
-          const dest = typeof r === "object" && r?.to ? String(r.to) : typeof r === "string" ? r : null;
-          if (dest && !map.has(dest)) {
-            map.set(dest, { function: "Connected Route" });
-          }
-        }
-      }
-    }
-  }
-  if (ledger.scene?.place && !map.has(ledger.scene.place)) {
-    map.set(ledger.scene.place, { function: "Current Active Location" });
-  }
-  if (ledger.clock?.location && !map.has(ledger.clock.location)) {
-    map.set(ledger.clock.location, { function: "Venue Landmark" });
-  }
-  if (ledger.clock?.region && !map.has(ledger.clock.region)) {
-    map.set(ledger.clock.region, { function: "District Hub" });
-  }
-  return Array.from(map.entries());
-}
-function extractMapBuildingsFromLedger(ledger, cols = 14, rows = 10) {
-  const places = resolveAllLedgerPlaces(ledger);
-  if (places.length === 0) {
-    return [
-      { id: "apothecary", name: "Apothecary & Alchemist", x: 2, y: 2, w: 2, h: 2, color: "#065f46", icon: "⚗️", place: "market", desc: "Local herbs, salves, and potions." },
-      { id: "blacksmith", name: "Ironforge Smithy", x: 10, y: 2, w: 2, h: 2, color: "#7c2d12", icon: "⚒️", place: "forge", desc: "Forged blades and armaments." },
-      { id: "tavern", name: "Golden Hearth Tavern", x: 2, y: 6, w: 2, h: 2, color: "#78350f", icon: "\uD83C\uDF7A", place: "tavern", desc: "Hearty meals and local rumors." },
-      { id: "dojo", name: "Tendo Martial Dojo", x: 10, y: 6, w: 2, h: 2, color: "#831843", icon: "\uD83E\uDD4B", place: "dojo", desc: "Discipline and martial arts training." },
-      { id: "residence", name: "Town Residence", x: 6, y: 1, w: 2, h: 2, color: "#1e1b4b", icon: "\uD83C\uDFE0", place: "residence", desc: "Peaceful living quarters." },
-      { id: "plaza", name: "Central Fountain Plaza", x: 5, y: 4, w: 4, h: 2, color: "#0c4a6e", icon: "⛲", place: "district_square", desc: "Central gathering hub." }
-    ];
-  }
-  const slots = [
-    { x: 2, y: 1, w: 2, h: 2 },
-    { x: 10, y: 1, w: 2, h: 2 },
-    { x: 2, y: 6, w: 2, h: 2 },
-    { x: 10, y: 6, w: 2, h: 2 },
-    { x: 1, y: 3, w: 2, h: 2 },
-    { x: 11, y: 3, w: 2, h: 2 },
-    { x: 5, y: 4, w: 4, h: 2 },
-    { x: 6, y: 7, w: 2, h: 2 }
-  ];
-  const colors = ["#065f46", "#7c2d12", "#78350f", "#831843", "#1e1b4b", "#0c4a6e", "#312e81", "#701a75"];
-  return places.slice(0, slots.length).map(([key, node], i) => {
-    const slot = slots[i];
-    const cleanKey = key.replace(/^@/, "");
-    const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1] : cleanKey;
-    const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    const fn = (node.function || cleanKey).toLowerCase();
-    let icon = "\uD83C\uDFDB️";
-    if (fn.includes("shop") || fn.includes("market") || fn.includes("store"))
-      icon = "\uD83C\uDFEA";
-    else if (fn.includes("tavern") || fn.includes("inn") || fn.includes("bar"))
-      icon = "\uD83C\uDF7A";
-    else if (fn.includes("forge") || fn.includes("smith"))
-      icon = "⚒️";
-    else if (fn.includes("residence") || fn.includes("house") || fn.includes("home") || fn.includes("room") || fn.includes("bedroom") || fn.includes("living"))
-      icon = "\uD83C\uDFE0";
-    else if (fn.includes("school") || fn.includes("class") || fn.includes("academy"))
-      icon = "\uD83C\uDFEB";
-    else if (fn.includes("dojo") || fn.includes("gym") || fn.includes("arena"))
-      icon = "\uD83E\uDD4B";
-    else if (fn.includes("kitchen") || fn.includes("cafeteria") || fn.includes("bakery"))
-      icon = "\uD83C\uDF73";
-    else if (fn.includes("plaza") || fn.includes("square") || fn.includes("park") || fn.includes("fountain"))
-      icon = "⛲";
-    else if (fn.includes("shrine") || fn.includes("temple") || fn.includes("church"))
-      icon = "⛩️";
-    else if (fn.includes("library") || fn.includes("study") || fn.includes("office"))
-      icon = "\uD83D\uDCDA";
-    else if (fn.includes("garden") || fn.includes("yard") || fn.includes("forest"))
-      icon = "\uD83C\uDF33";
-    return {
-      id: cleanKey,
-      name: displayName,
-      x: slot.x,
-      y: slot.y,
-      w: slot.w,
-      h: slot.h,
-      color: colors[i % colors.length],
-      icon,
-      place: key,
-      desc: node.norm || node.function || (node.resources && node.resources.length ? `Items: ${node.resources.join(", ")}` : "A known location in the district.")
-    };
-  });
-}
-function extract3DLandmarksFromLedger(ledger) {
-  const places = resolveAllLedgerPlaces(ledger);
-  if (places.length === 0) {
-    return [
-      { id: "apothecary", name: "Apothecary & Alchemist", x: -16, z: -16, color: 366185 },
-      { id: "blacksmith", name: "Ironforge Armory", x: 16, z: -16, color: 11817737 },
-      { id: "tavern", name: "The Golden Hearth", x: -16, z: 16, color: 14251782 },
-      { id: "dojo", name: "Tendo Martial Dojo", x: 16, z: 16, color: 14427686 },
-      { id: "plaza", name: "District Fountain Plaza", x: 0, z: 0, color: 165063 }
-    ];
-  }
-  const coords = [
-    { x: -16, z: -16, color: 366185 },
-    { x: 16, z: -16, color: 11817737 },
-    { x: -16, z: 16, color: 14251782 },
-    { x: 16, z: 16, color: 14427686 },
-    { x: 0, z: 0, color: 165063 },
-    { x: 0, z: -20, color: 5195493 },
-    { x: -20, z: 0, color: 8141549 },
-    { x: 20, z: 0, color: 561586 }
-  ];
-  return places.slice(0, coords.length).map(([key, _node], i) => {
-    const coord = coords[i];
-    const cleanKey = key.replace(/^@/, "");
-    const namePart = cleanKey.includes(":") ? cleanKey.split(":")[1] : cleanKey;
-    const displayName = namePart.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    return {
-      id: cleanKey,
-      name: displayName,
-      x: coord.x,
-      z: coord.z,
-      color: coord.color
-    };
-  });
-}
-
 class MapTab {
   root;
   onAction;
@@ -5112,9 +5081,7 @@ class MapTab {
     const isIndoor = currentPlace.includes(":") || currentPlace.includes("residence") || currentPlace.includes("dojo") || currentPlace.includes("room") || currentPlace.includes("foyer");
     if (!this.selectedNodeId || this.lastRenderedPlace !== currentPlace) {
       this.lastRenderedPlace = currentPlace;
-      if (this.viewMode !== "tilemap2d" && this.viewMode !== "world3d") {
-        this.viewMode = isIndoor ? "indoor" : "outdoor";
-      }
+      this.viewMode = isIndoor ? "indoor" : "outdoor";
       this.selectedNodeId = currentPlace;
     }
     const header = document.createElement("div");
@@ -5139,12 +5106,6 @@ class MapTab {
             <button id="vn-map-outdoor-btn" class="vn-btn vn-btn-sm" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.viewMode === "outdoor" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
               \uD83C\uDF10 District
             </button>
-            <button id="vn-map-2d-btn" class="vn-btn vn-btn-sm" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.viewMode === "tilemap2d" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
-              \uD83D\uDD79️ 2D Tilemap
-            </button>
-            <button id="vn-map-3d-btn" class="vn-btn vn-btn-sm" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.viewMode === "world3d" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
-              \uD83C\uDFAE 3D View
-            </button>
           </div>
           <div style="display: flex; gap: 3px;">
             <button id="vn-map-zoom-in" title="Zoom In" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 4px; width: 28px; height: 28px; font-weight: bold; cursor: pointer;">+</button>
@@ -5165,14 +5126,6 @@ class MapTab {
       this.resetView();
       this.render(ledger);
     });
-    header.querySelector("#vn-map-2d-btn")?.addEventListener("click", () => {
-      this.viewMode = "tilemap2d";
-      this.render(ledger);
-    });
-    header.querySelector("#vn-map-3d-btn")?.addEventListener("click", () => {
-      this.viewMode = "world3d";
-      this.render(ledger);
-    });
     header.querySelector("#vn-map-zoom-in")?.addEventListener("click", () => this.adjustZoom(1.25));
     header.querySelector("#vn-map-zoom-out")?.addEventListener("click", () => this.adjustZoom(0.8));
     header.querySelector("#vn-map-zoom-reset")?.addEventListener("click", () => {
@@ -5190,16 +5143,10 @@ class MapTab {
     mainLayout.appendChild(viewportWrap);
     mainLayout.appendChild(sidebar);
     this.root.appendChild(mainLayout);
-    if (this.viewMode === "tilemap2d") {
-      this.renderTilemap2D(viewportWrap, sidebar, ledger, currentPlace);
-    } else if (this.viewMode === "world3d") {
-      this.renderWorld3D(viewportWrap, sidebar, ledger, currentPlace);
-    } else {
-      viewportWrap.style.cursor = "grab";
-      this.renderGraph(viewportWrap, ledger, currentPlace);
-      this.renderSidebar(sidebar, ledger, currentPlace);
-      this.setupPanZoom(viewportWrap);
-    }
+    viewportWrap.style.cursor = "grab";
+    this.renderGraph(viewportWrap, ledger, currentPlace);
+    this.renderSidebar(sidebar, ledger, currentPlace);
+    this.setupPanZoom(viewportWrap);
   }
   resetView() {
     this.zoom = 1;
@@ -5713,329 +5660,6 @@ class MapTab {
           this.onAction(`*Interacts with the ${aff.toLowerCase()} in the ${cleanName.replace(/_/g, " ")}*`);
       });
     });
-  }
-  renderTilemap2D(viewport, sidebar, ledger, _currentPlace) {
-    viewport.innerHTML = "";
-    sidebar.innerHTML = "";
-    const canvas = document.createElement("canvas");
-    canvas.width = 560;
-    canvas.height = 400;
-    canvas.style.cssText = "width: 100%; height: 100%; display: block; background: #070d19; cursor: crosshair;";
-    viewport.appendChild(canvas);
-    const banner = document.createElement("div");
-    banner.style.cssText = "position: absolute; top: 10px; left: 10px; background: rgba(15,23,42,0.85); backdrop-filter: blur(8px); border: 1px solid rgba(99,102,241,0.4); padding: 5px 10px; border-radius: 6px; font-size: 11px; color: #cbd5e1; z-index: 5; pointer-events: none;";
-    banner.innerHTML = `\uD83C\uDFAE <strong>WASD / Arrow keys</strong> or click grid to walk • Enter buildings to travel`;
-    viewport.appendChild(banner);
-    const ctx = canvas.getContext("2d");
-    const cols = 14;
-    const rows = 10;
-    const tileW = canvas.width / cols;
-    const tileH = canvas.height / rows;
-    const buildings = extractMapBuildingsFromLedger(ledger, cols, rows);
-    const matchBuilding = buildings.find((b) => b.place === _currentPlace || b.id === _currentPlace.replace(/^@/, "").split(":").pop());
-    let selectedBuilding = matchBuilding || null;
-    const updateSidebarForBuilding = (b) => {
-      sidebar.innerHTML = "";
-      if (!b) {
-        sidebar.innerHTML = `
-          <div style="color: #94a3b8; font-size: 12px; font-style: italic; padding: 20px 10px; text-align: center;">
-            Walk your avatar onto a building doorway or click any structure on the map to inspect.
-          </div>
-        `;
-        return;
-      }
-      sidebar.innerHTML = `
-        <div style="border-bottom: 1px solid #334155; padding-bottom: 8px;">
-          <h4 style="margin: 0; font-size: 14px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
-            <span>${b.icon}</span> <span>${b.name}</span>
-          </h4>
-          <span style="font-size: 11px; color: #38bdf8;">Zone: ${b.place}</span>
-        </div>
-        <div style="font-size: 11px; color: #cbd5e1; line-height: 1.4;">
-          A bustling district landmark. Step through the entrance to explore inside and engage with characters.
-        </div>
-        <div style="margin-top: auto; padding-top: 10px; border-top: 1px solid #1e293b;">
-          <button id="vn-tilemap-enter-btn" style="width: 100%; background: linear-gradient(135deg, #4f46e5, #6366f1); border: none; color: #fff; font-size: 12px; font-weight: 700; padding: 8px; border-radius: 6px; cursor: pointer;">
-            \uD83D\uDEAA Travel / Enter ${b.name}
-          </button>
-        </div>
-      `;
-      sidebar.querySelector("#vn-tilemap-enter-btn")?.addEventListener("click", () => {
-        this.onAction(`*Travels to ${b.name}*`);
-      });
-    };
-    const draw = () => {
-      if (!ctx)
-        return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (let c = 0;c < cols; c++) {
-        for (let r = 0;r < rows; r++) {
-          const isRoad = c === 6 || c === 7 || r === 4 || r === 5 || c >= 2 && c <= 4 && (r === 4 || r === 5) || c >= 9 && c <= 11 && (r === 4 || r === 5);
-          if (isRoad) {
-            ctx.fillStyle = "#1e293b";
-            ctx.fillRect(c * tileW, r * tileH, tileW, tileH);
-            ctx.strokeStyle = "#334155";
-            ctx.lineWidth = 0.5;
-            ctx.strokeRect(c * tileW, r * tileH, tileW, tileH);
-          } else {
-            ctx.fillStyle = "#064e3b";
-            ctx.fillRect(c * tileW, r * tileH, tileW, tileH);
-            ctx.strokeStyle = "#047857";
-            ctx.lineWidth = 0.5;
-            ctx.strokeRect(c * tileW, r * tileH, tileW, tileH);
-          }
-        }
-      }
-      for (const b of buildings) {
-        const bx = b.x * tileW;
-        const by = b.y * tileH;
-        const bw = b.w * tileW;
-        const bh = b.h * tileH;
-        ctx.fillStyle = b.color;
-        ctx.fillRect(bx, by, bw, bh);
-        ctx.strokeStyle = b === selectedBuilding ? "#38bdf8" : "rgba(255,255,255,0.2)";
-        ctx.lineWidth = b === selectedBuilding ? 2 : 1;
-        ctx.strokeRect(bx, by, bw, bh);
-        ctx.font = "16px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(b.icon, bx + bw / 2, by + bh / 2 - 2);
-        ctx.font = "9px system-ui";
-        ctx.fillStyle = "#f8fafc";
-        ctx.fillText(b.name.split(" ")[0] || "", bx + bw / 2, by + bh / 2 + 12);
-      }
-      const px = this.player2d.x * tileW + tileW / 2;
-      const py = this.player2d.y * tileH + tileH / 2;
-      const grad = ctx.createRadialGradient(px, py, 2, px, py, 16);
-      grad.addColorStop(0, "rgba(56, 189, 248, 0.8)");
-      grad.addColorStop(1, "rgba(56, 189, 248, 0)");
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(px, py, 16, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#38bdf8";
-      ctx.beginPath();
-      ctx.arc(px, py, 8, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.font = "9px system-ui";
-      ctx.fillStyle = "#ffffff";
-      ctx.textAlign = "center";
-      ctx.fillText("You", px, py - 12);
-    };
-    draw();
-    updateSidebarForBuilding(selectedBuilding);
-    const movePlayer = (dx, dy) => {
-      this.player2d.x = Math.max(0, Math.min(cols - 1, this.player2d.x + dx));
-      this.player2d.y = Math.max(0, Math.min(rows - 1, this.player2d.y + dy));
-      const hit = buildings.find((b) => this.player2d.x >= b.x && this.player2d.x < b.x + b.w && this.player2d.y >= b.y && this.player2d.y < b.y + b.h);
-      if (hit) {
-        selectedBuilding = hit;
-        updateSidebarForBuilding(hit);
-      }
-      draw();
-    };
-    this.activeKeydownHandler = (e) => {
-      if (["ArrowUp", "KeyW", "w", "W"].includes(e.code) || ["ArrowUp", "w", "W"].includes(e.key)) {
-        e.preventDefault();
-        movePlayer(0, -1);
-      } else if (["ArrowDown", "KeyS", "s", "S"].includes(e.code) || ["ArrowDown", "s", "S"].includes(e.key)) {
-        e.preventDefault();
-        movePlayer(0, 1);
-      } else if (["ArrowLeft", "KeyA", "a", "A"].includes(e.code) || ["ArrowLeft", "a", "A"].includes(e.key)) {
-        e.preventDefault();
-        movePlayer(-1, 0);
-      } else if (["ArrowRight", "KeyD", "d", "D"].includes(e.code) || ["ArrowRight", "d", "D"].includes(e.key)) {
-        e.preventDefault();
-        movePlayer(1, 0);
-      }
-    };
-    window.addEventListener("keydown", this.activeKeydownHandler);
-    canvas.addEventListener("click", (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const clickX = Math.floor((e.clientX - rect.left) / rect.width * cols);
-      const clickY = Math.floor((e.clientY - rect.top) / rect.height * rows);
-      const hit = buildings.find((b) => clickX >= b.x && clickX < b.x + b.w && clickY >= b.y && clickY < b.y + b.h);
-      if (hit) {
-        selectedBuilding = hit;
-        updateSidebarForBuilding(hit);
-      }
-      this.player2d.x = Math.max(0, Math.min(cols - 1, clickX));
-      this.player2d.y = Math.max(0, Math.min(rows - 1, clickY));
-      draw();
-    });
-  }
-  renderWorld3D(viewport, sidebar, ledger, _currentPlace) {
-    viewport.innerHTML = "";
-    sidebar.innerHTML = "";
-    const container = document.createElement("div");
-    container.style.cssText = "width: 100%; height: 100%; position: relative; overflow: hidden; background: #070d19;";
-    viewport.appendChild(container);
-    const banner = document.createElement("div");
-    banner.style.cssText = "position: absolute; top: 10px; left: 10px; background: rgba(15,23,42,0.85); backdrop-filter: blur(8px); border: 1px solid rgba(99,102,241,0.4); padding: 5px 10px; border-radius: 6px; font-size: 11px; color: #cbd5e1; z-index: 5; pointer-events: none;";
-    banner.innerHTML = `\uD83C\uDFAE <strong>Over-the-Shoulder 3D District</strong> • WASD to move • Q/E to turn camera`;
-    container.appendChild(banner);
-    const proxPrompt = document.createElement("div");
-    proxPrompt.style.cssText = "position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); background: rgba(15,23,42,0.95); border: 1px solid #38bdf8; border-radius: 8px; padding: 6px 16px; font-size: 12px; font-weight: 700; color: #38bdf8; z-index: 5; display: none; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.5);";
-    container.appendChild(proxPrompt);
-    sidebar.innerHTML = `
-      <div style="border-bottom: 1px solid #334155; padding-bottom: 8px;">
-        <h4 style="margin: 0; font-size: 14px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
-          <span>\uD83C\uDFAE</span> <span>3D Walkable District</span>
-        </h4>
-        <span style="font-size: 11px; color: #38bdf8;">Diurnal Diode Lighting: ${ledger.clock?.phase || "Day"}</span>
-      </div>
-      <div style="font-size: 11px; color: #cbd5e1; line-height: 1.4;">
-        Explore the district from a third-person over-the-shoulder perspective. Turn the camera using Q and E, walk with WASD, and step up to buildings to enter.
-      </div>
-      <div id="vn-3d-sidebar-target" style="margin-top: 10px;"></div>
-    `;
-    const THREE = window.THREE;
-    if (!THREE) {
-      const loaderDiv = document.createElement("div");
-      loaderDiv.style.cssText = "display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px; color: #94a3b8; font-size: 12px;";
-      loaderDiv.innerHTML = `
-        <div style="font-size: 24px;">\uD83C\uDFAE</div>
-        <div>Three.js District 3D Viewport</div>
-        <button id="vn-load-three-btn" style="background: #4f46e5; border: none; color: #fff; font-size: 11px; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer;">
-          Launch 3D Engine
-        </button>
-      `;
-      container.appendChild(loaderDiv);
-      const loadScript = () => {
-        loaderDiv.innerHTML = `<div>Loading 3D renderer...</div>`;
-        const script = document.createElement("script");
-        script.src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js";
-        script.onload = () => {
-          this.renderWorld3D(viewport, sidebar, ledger, _currentPlace);
-        };
-        script.onerror = () => {
-          loaderDiv.innerHTML = `<div style="color: #f87171;">WebGL/Three.js failed to load. Use 2D Tilemap for full district exploration.</div>`;
-        };
-        document.head.appendChild(script);
-      };
-      container.querySelector("#vn-load-three-btn")?.addEventListener("click", loadScript);
-      return;
-    }
-    try {
-      const width = viewport.clientWidth || 560;
-      const height = viewport.clientHeight || 400;
-      const scene = new THREE.Scene;
-      const phase = (ledger.clock?.phase || "day").toLowerCase();
-      const isNight = phase.includes("night") || phase.includes("midnight");
-      const isSunset = phase.includes("sunset") || phase.includes("dusk") || phase.includes("evening");
-      scene.background = new THREE.Color(isNight ? 132631 : isSunset ? 4850766 : 988970);
-      const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-      renderer.setSize(width, height);
-      this.threeRenderer = renderer;
-      container.appendChild(renderer.domElement);
-      const ambientLight = new THREE.AmbientLight(isNight ? 1976635 : isSunset ? 16096779 : 16777215, isNight ? 0.4 : 0.8);
-      scene.add(ambientLight);
-      const sunLight = new THREE.DirectionalLight(isNight ? 9684477 : isSunset ? 16347926 : 16777215, isNight ? 0.3 : 1);
-      sunLight.position.set(15, 30, 20);
-      scene.add(sunLight);
-      const planeGeo = new THREE.PlaneGeometry(80, 80);
-      const planeMat = new THREE.MeshStandardMaterial({ color: 725801, roughness: 0.8 });
-      const plane = new THREE.Mesh(planeGeo, planeMat);
-      plane.rotation.x = -Math.PI / 2;
-      scene.add(plane);
-      const grid = new THREE.GridHelper(80, 40, 6514417, 1976635);
-      grid.position.y = 0.01;
-      scene.add(grid);
-      const landmarks = extract3DLandmarksFromLedger(ledger);
-      for (const lm of landmarks) {
-        const boxGeo = new THREE.BoxGeometry(8, 7, 8);
-        const boxMat = new THREE.MeshStandardMaterial({ color: lm.color, roughness: 0.5 });
-        const box = new THREE.Mesh(boxGeo, boxMat);
-        box.position.set(lm.x, 3.5, lm.z);
-        scene.add(box);
-        const roofGeo = new THREE.ConeGeometry(6, 4, 4);
-        const roofMat = new THREE.MeshStandardMaterial({ color: 3359061 });
-        const roof = new THREE.Mesh(roofGeo, roofMat);
-        roof.position.set(lm.x, 9, lm.z);
-        roof.rotation.y = Math.PI / 4;
-        scene.add(roof);
-        const ringGeo = new THREE.TorusGeometry(1.2, 0.15, 8, 24);
-        const ringMat = new THREE.MeshBasicMaterial({ color: 3718648 });
-        const ring = new THREE.Mesh(ringGeo, ringMat);
-        ring.position.set(lm.x, 1.2, lm.z + 4.1);
-        scene.add(ring);
-      }
-      const playerMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.8, 16), new THREE.MeshStandardMaterial({ color: 3718648, roughness: 0.3 }));
-      playerMesh.position.set(0, 0.9, 8);
-      scene.add(playerMesh);
-      let px = 0;
-      let pz = 8;
-      let playerRot = 0;
-      const speed = 0.6;
-      const updateCamera = () => {
-        playerMesh.position.set(px, 0.9, pz);
-        playerMesh.rotation.y = playerRot;
-        const camDist = 6;
-        const camHeight = 3.2;
-        camera.position.set(px - Math.sin(playerRot) * camDist, camHeight, pz - Math.cos(playerRot) * camDist);
-        camera.lookAt(px, 1.4, pz);
-        let closest = null;
-        let minDist = 999;
-        for (const lm of landmarks) {
-          const d = Math.hypot(px - lm.x, pz - lm.z);
-          if (d < minDist) {
-            minDist = d;
-            closest = lm;
-          }
-        }
-        if (closest && minDist < 8) {
-          proxPrompt.style.display = "block";
-          proxPrompt.textContent = `\uD83D\uDEAA Near ${closest.name} • [Click to Enter]`;
-          proxPrompt.onclick = () => {
-            this.onAction(`*Enters ${closest.name}*`);
-          };
-          const targetBox = sidebar.querySelector("#vn-3d-sidebar-target");
-          if (targetBox) {
-            targetBox.innerHTML = `
-              <div style="background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 10px;">
-                <strong style="color: #38bdf8; font-size: 12px;">\uD83D\uDCCD ${closest.name}</strong>
-                <p style="font-size: 11px; color: #cbd5e1; margin: 4px 0 8px 0;">You are standing right outside the entrance.</p>
-                <button id="vn-3d-enter-building-btn" style="width: 100%; background: #0284c7; color: #fff; border: none; font-size: 11px; font-weight: 700; padding: 6px; border-radius: 4px; cursor: pointer;">
-                  Enter Landmark
-                </button>
-              </div>
-            `;
-            targetBox.querySelector("#vn-3d-enter-building-btn")?.addEventListener("click", () => {
-              this.onAction(`*Enters ${closest.name}*`);
-            });
-          }
-        } else {
-          proxPrompt.style.display = "none";
-        }
-      };
-      this.activeKeydownHandler = (e) => {
-        if (["KeyW", "w", "W", "ArrowUp"].includes(e.code) || ["w", "W", "ArrowUp"].includes(e.key)) {
-          px += Math.sin(playerRot) * speed;
-          pz += Math.cos(playerRot) * speed;
-        } else if (["KeyS", "s", "S", "ArrowDown"].includes(e.code) || ["s", "S", "ArrowDown"].includes(e.key)) {
-          px -= Math.sin(playerRot) * speed;
-          pz -= Math.cos(playerRot) * speed;
-        } else if (["KeyA", "a", "A", "ArrowLeft"].includes(e.code) || ["a", "A", "ArrowLeft"].includes(e.key)) {
-          playerRot += 0.08;
-        } else if (["KeyD", "d", "D", "ArrowRight"].includes(e.code) || ["d", "D", "ArrowRight"].includes(e.key)) {
-          playerRot -= 0.08;
-        } else if (["KeyQ", "q", "Q"].includes(e.code) || ["q", "Q"].includes(e.key)) {
-          playerRot += 0.12;
-        } else if (["KeyE", "e", "E"].includes(e.code) || ["e", "E"].includes(e.key)) {
-          playerRot -= 0.12;
-        }
-        updateCamera();
-      };
-      window.addEventListener("keydown", this.activeKeydownHandler);
-      const animate = () => {
-        this.threeAnimId = requestAnimationFrame(animate);
-        renderer.render(scene, camera);
-      };
-      animate();
-      updateCamera();
-    } catch (err) {
-      console.error("[LumiVN] 3D World initialization error:", err);
-    }
   }
 }
 
@@ -11350,493 +10974,55 @@ SKILL TREES (Editable; parsed into interactive progression nodes):
 - Shadowstep: tier=1 | cost=1 | requires=[] | type=active | cd=1 | cost_res={mp:10} | formula={ATK}*1.4 | desc=Slip behind opponent to strike.
 - Assassinate: tier=2 | cost=2 | requires=[Shadowstep] | type=active | cd=3 | cost_res={mp:30} | formula={ATK}*2.5 | desc=Lethal ambush attack.
 - Haggling: tier=1 | cost=1 | requires=[] | type=passive | desc=Store trading prices discounted by 15%.`;
+var DEFAULT_DIRECTOR_SETTINGS = {
+  systemPrompt: `You are LumiWorld, the private world-state director and senior fiction editor for an interactive Lumiverse simulation. You decide what the living world does behind the next visible reply and set the craft standard it is written to. You never write the reply, never speak for NPCs, and never decide what {{user}} does, thinks, or feels.
 
-// src/frontend/hud/tab-diagnostics.ts
-class DiagnosticsTab {
-  root;
-  ctx;
-  audioEngine;
-  currentLedger = {};
-  currentManifest;
-  activeFilter = "all";
-  unsubscribeBus;
-  statRulesSettings = null;
-  constructor(ctx, audioEngine) {
-    this.ctx = ctx;
-    this.audioEngine = audioEngine;
-    this.root = document.createElement("div");
-    this.root.className = "vn-hud-tab vn-tab-diagnostics";
-  }
-  setAudioEngine(engine) {
-    this.audioEngine = engine;
-  }
-  setStatRulesSettings(settings) {
-    this.statRulesSettings = settings;
-    const modeSelect = this.root.querySelector("#vn-mvu-mode-select");
-    const rulesInput = this.root.querySelector("#vn-stat-rules-input");
-    const ledgerInput = this.root.querySelector("#vn-ledger-prompt-input");
-    const rpgInput = this.root.querySelector("#vn-rpg-rules-input");
-    if (modeSelect)
-      modeSelect.value = settings.mode || "mvu_quiet";
-    if (rulesInput)
-      rulesInput.value = settings.statRules?.trim() ? settings.statRules : DEFAULT_STAT_RULES;
-    if (ledgerInput)
-      ledgerInput.value = settings.ledgerPrompt?.trim() ? settings.ledgerPrompt : DEFAULT_LEDGER_PROMPT;
-    if (rpgInput)
-      rpgInput.value = settings.rpgPrompt?.trim() ? settings.rpgPrompt : DEFAULT_RPG_PROMPT;
-  }
-  render(ledger, manifest) {
-    this.currentLedger = ledger;
-    this.currentManifest = manifest;
-    diagBus.setLedger(ledger);
-    if (manifest)
-      diagBus.setManifest(manifest);
-    this.root.innerHTML = "";
-    this.root.style.cssText = "display: flex; flex-direction: column; gap: 14px; height: 100%; color: #f1f5f9; font-family: system-ui, -apple-system, sans-serif;";
-    const telemetry = diagBus.getTelemetry();
-    const hasLedger = Boolean(ledger && (ledger.clock || ledger.scene || ledger.actors));
-    const deltaStatus = hasLedger ? "accepted" : "idle";
-    const header = document.createElement("div");
-    header.style.cssText = "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid #334155; padding-bottom: 10px;";
-    header.innerHTML = `
-      <div>
-        <h3 style="margin: 0; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 6px;">
-          <span>\uD83D\uDEE0️</span> <span>Engine Diagnostics & Clipboard Export</span>
-        </h3>
-        <p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8;">
-          Inspect delta synchronization, export living world ledgers, and view engine logs.
-        </p>
-      </div>
-      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-        <button id="vn-copy-all-btn" class="vn-btn vn-btn-sm" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; color: #fff; font-weight: 700; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 11px; box-shadow: 0 2px 8px rgba(99,102,241,0.4);">
-          \uD83D\uDCCB Copy All
-        </button>
-        <button id="vn-copy-yaml-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #38bdf8; font-weight: 600; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
-          \uD83D\uDCC4 Copy Ledger (YAML)
-        </button>
-        <button id="vn-copy-director-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #8b5cf6; color: #c084fc; font-weight: 600; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
-          \uD83C\uDFAC Copy Director Note
-        </button>
-        <button id="vn-copy-json-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
-          \uD83D\uDCE6 Copy State (JSON)
-        </button>
-        <button id="vn-copy-diag-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
-          \uD83D\uDCDC Copy Logs
-        </button>
-      </div>
-    `;
-    this.root.appendChild(header);
-    const showToast = (btn, label) => {
-      const orig = btn.textContent;
-      btn.textContent = "✓ Copied!";
-      btn.style.borderColor = "#10b981";
-      setTimeout(() => {
-        btn.textContent = orig;
-        btn.style.borderColor = "";
-      }, 1500);
-    };
-    header.querySelector("#vn-copy-all-btn")?.addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      await navigator.clipboard.writeText(diagBus.exportAllBundle()).catch(() => {
-        return;
-      });
-      showToast(btn, "Copy All");
-    });
-    header.querySelector("#vn-copy-yaml-btn")?.addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      const yamlStr = diagBus.formatLedgerYaml(this.currentLedger);
-      await navigator.clipboard.writeText(yamlStr).catch(() => {
-        return;
-      });
-      showToast(btn, "Copy Ledger (YAML)");
-    });
-    header.querySelector("#vn-copy-director-btn")?.addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      const note = diagBus.getDirectorNote();
-      if (note && note.directorNote) {
-        const textToCopy = `[${note.threadLabel || "Active Thread"}]
-${note.directorNote}`;
-        await navigator.clipboard.writeText(textToCopy).catch(() => {
-          return;
-        });
-        showToast(btn, "Copy Director Note");
-      } else {
-        showToast(btn, "No Note Available");
-      }
-    });
-    header.querySelector("#vn-copy-json-btn")?.addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      await navigator.clipboard.writeText(JSON.stringify(this.currentLedger, null, 2)).catch(() => {
-        return;
-      });
-      showToast(btn, "Copy State (JSON)");
-    });
-    header.querySelector("#vn-copy-diag-btn")?.addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      const logLines = diagBus.getLogs().map((l) => `[${l.timestamp}] [${l.level.toUpperCase()}] ${l.message}`).join(`
-`);
-      await navigator.clipboard.writeText(logLines).catch(() => {
-        return;
-      });
-      showToast(btn, "Copy Logs");
-    });
-    const midRow = document.createElement("div");
-    midRow.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;";
-    const participants = ledger.scene?.participants || [];
-    const actorEntries = Object.entries(ledger.actors || {});
-    const rosterEntries = ledger.roster || [];
-    midRow.innerHTML = `
-      <!-- Delta & Telemetry Status Card -->
-      <div style="background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
-          <strong style="color: #38bdf8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Delta Telemetry Status</strong>
-          <span style="font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; ${deltaStatus === "accepted" ? "background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid #10b981;" : "background: rgba(245,158,11,0.2); color: #fbbf24; border: 1px solid #f59e0b;"}">
-            ${deltaStatus === "accepted" ? "● Delta Accepted" : "○ Waiting Delta"}
-          </span>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px;">
-          <div style="display: flex; justify-content: space-between;">
-            <span style="color: #94a3b8;">Clock Anchor:</span>
-            <span style="font-weight: 600; color: #f8fafc;">${ledger.clock?.t || "Unknown"} (${ledger.clock?.phase || "Day"})${ledger.clock?.date ? ` • ${ledger.clock.date}` : ""}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between;">
-            <span style="color: #94a3b8;">Place Scoping:</span>
-            <span style="font-weight: 600; color: #38bdf8;">${ledger.scene?.place || "default"}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between;">
-            <span style="color: #94a3b8;">Region / Country:</span>
-            <span style="color: #cbd5e1;">${[ledger.clock?.location, ledger.clock?.region, ledger.clock?.country].filter(Boolean).join(", ") || "Nerima, Tokyo"}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between;">
-            <span style="color: #94a3b8;">Background Rendered:</span>
-            <span style="color: #94a3b8; font-family: monospace; font-size: 10px;">${(telemetry?.bgUrl || "Default").slice(0, 30)}...</span>
-          </div>
-        </div>
-      </div>
+INPUTS (use only what is visible; skip anything that depends on a missing field): clock, roster (lod, loc, status), places and routes (privacy, norm, traffic, resources), fronts, bplots (phase, ripple, next.due, carriers with version and cred, chain), opportunities, scene (place, participants, latents, pressures, recent_beats, affordances, stall, streak), world.facts, tone_weights, content_bounds, user state (outfit, hand slots, carried, posture, position), NPC dossiers (want_now, goals, beliefs, memories, secrets, relations, passions, profile dispositions/values/boundaries/red_lines/defense/tells, constraints, outfit, inventory, combat tier), the last reply, your previous note.
 
-      <!-- Living Roster & Epistemics Presence Card -->
-      <div style="background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
-          <strong style="color: #a78bfa; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Epistemic Presence Breakdown</strong>
-          <span style="font-size: 10px; color: #94a3b8;">${actorEntries.length} dossiers loaded</span>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 11px;">
-          <div>
-            <span style="color: #38bdf8; font-weight: 600;">Spotlight (${participants.length}):</span>
-            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
-              ${participants.length > 0 ? participants.map((p) => `<span style="background: rgba(56,189,248,0.2); color: #7dd3fc; border: 1px solid #0284c7; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">\uD83D\uDC64 ${p}</span>`).join("") : '<span style="color: #64748b; font-size: 10px;">No spotlight participants</span>'}
-            </div>
-          </div>
-          <div>
-            <span style="color: #94a3b8;">Living Roster (${rosterEntries.length}):</span>
-            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
-              ${rosterEntries.slice(0, 6).map((r) => `<span style="background: #1e293b; border: 1px solid #334155; padding: 1px 6px; border-radius: 4px; font-size: 10px; color: #cbd5e1;">${r.name || r.id} (${r.loc || "?"})</span>`).join("")}
-              ${rosterEntries.length > 6 ? `<span style="color: #64748b; font-size: 10px;">+${rosterEntries.length - 6} more</span>` : ""}
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-    this.root.appendChild(midRow);
-    const directorNote = diagBus.getDirectorNote();
-    const directorCard = document.createElement("div");
-    directorCard.style.cssText = "background: #0f172a; border: 1px solid #6366f1; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px;";
-    directorCard.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size: 14px;">\uD83C\uDFAC</span>
-          <strong style="color: #a78bfa; font-size: 12px; text-transform: uppercase;">Active Director Guidance</strong>
-        </div>
-        <span id="vn-director-thread-label" style="font-size: 10px; background: rgba(139,92,246,0.2); border: 1px solid #8b5cf6; color: #c084fc; padding: 2px 8px; border-radius: 4px; font-weight: 600;">
-          ${directorNote?.threadLabel || "General Steering"}
-        </span>
-      </div>
-      <div id="vn-director-note-body" style="font-size: 11px; line-height: 1.5; color: #cbd5e1; max-height: 120px; overflow-y: auto; white-space: pre-wrap; font-style: italic;">
-        ${directorNote?.directorNote || "No active turn steering notes recorded."}
-      </div>
-    `;
-    this.root.appendChild(directorCard);
-    const rulesCard = document.createElement("div");
-    rulesCard.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;";
-    rulesCard.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <strong style="color: #38bdf8; font-size: 13px;">⚖️ Stat Rules & MVU Ledger Config</strong>
-        <select id="vn-mvu-mode-select" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 2px 6px; font-size: 11px;">
-          <option value="mvu_quiet">MVU Mode (Quiet LLM Evaluator)</option>
-          <option value="inline_interceptor">Inline Mode (Prompt Injection)</option>
-          <option value="passive">Passive Mode (Parse only)</option>
-        </select>
-      </div>
-      <label style="font-size: 10px; color: #94a3b8;">Stat Rules Formulation:</label>
-      <textarea id="vn-stat-rules-input" style="width: 100%; height: 95px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
-      <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema:</label>
-      <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 95px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
-      <label style="font-size: 10px; color: #94a3b8;">RPG & Combat Rules Prompt (Tactical Directives):</label>
-      <textarea id="vn-rpg-rules-input" style="width: 100%; height: 85px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
-      <div style="display:flex; justify-content:flex-end;">
-        <button id="vn-save-rules-btn" style="background: #0284c7; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; font-size: 11px; font-weight: 700; cursor: pointer;">\uD83D\uDCBE Save & Update Rules</button>
-      </div>
-    `;
-    this.root.appendChild(rulesCard);
-    const modeSelect = rulesCard.querySelector("#vn-mvu-mode-select");
-    const rulesInput = rulesCard.querySelector("#vn-stat-rules-input");
-    const ledgerInput = rulesCard.querySelector("#vn-ledger-prompt-input");
-    const rpgInput = rulesCard.querySelector("#vn-rpg-rules-input");
-    const saveRulesBtn = rulesCard.querySelector("#vn-save-rules-btn");
-    const activeMode = this.statRulesSettings?.mode || "mvu_quiet";
-    const activeRules = this.statRulesSettings?.statRules?.trim() || DEFAULT_STAT_RULES;
-    const activeLedger = this.statRulesSettings?.ledgerPrompt?.trim() || DEFAULT_LEDGER_PROMPT;
-    const activeRpg = this.statRulesSettings?.rpgPrompt?.trim() || DEFAULT_RPG_PROMPT;
-    if (modeSelect)
-      modeSelect.value = activeMode;
-    if (rulesInput)
-      rulesInput.value = activeRules;
-    if (ledgerInput)
-      ledgerInput.value = activeLedger;
-    if (rpgInput)
-      rpgInput.value = activeRpg;
-    if (!this.statRulesSettings) {
-      this.ctx?.sendToBackend?.({ type: "vn_get_stat_rules_settings" });
-    }
-    saveRulesBtn?.addEventListener("click", () => {
-      const updated = {
-        mode: modeSelect?.value || "mvu_quiet",
-        statRules: rulesInput?.value?.trim() || DEFAULT_STAT_RULES,
-        ledgerPrompt: ledgerInput?.value?.trim() || DEFAULT_LEDGER_PROMPT,
-        rpgPrompt: rpgInput?.value?.trim() || DEFAULT_RPG_PROMPT,
-        enabled: true
-      };
-      this.statRulesSettings = updated;
-      this.ctx?.sendToBackend?.({
-        type: "vn_save_stat_rules_settings",
-        settings: updated
-      });
-      if (saveRulesBtn) {
-        const orig = saveRulesBtn.textContent;
-        saveRulesBtn.textContent = "✓ Saved!";
-        setTimeout(() => {
-          saveRulesBtn.textContent = orig;
-        }, 1500);
-      }
-    });
-    const audioCard = document.createElement("div");
-    audioCard.style.cssText = "background: #0f172a; border: 1px solid #10b981; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px;";
-    const isBgmActive = this.audioEngine?.isBgmActive() ?? false;
-    const bgmVol = Math.round((this.audioEngine?.getBgmVolume() ?? 0.4) * 100);
-    const currTrack = this.audioEngine?.getCurrentBgm() || "idle / adaptive";
-    audioCard.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size: 15px;">\uD83C\uDFB5</span>
-          <strong style="color: #34d399; font-size: 12px; text-transform: uppercase;">Background Music (BGM) & Audio Controls</strong>
-        </div>
-        <button id="vn-diag-toggle-bgm" style="background: ${isBgmActive ? "linear-gradient(135deg, #059669, #10b981)" : "#334155"}; border: none; color: #fff; border-radius: 6px; padding: 4px 12px; font-size: 11px; font-weight: 700; cursor: pointer;">
-          ${isBgmActive ? "\uD83D\uDFE2 BGM: Playing (Click to Pause)" : "▶ BGM: Turn On / Play"}
-        </button>
-      </div>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; font-size: 11px;">
-        <div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-            <label style="color: #94a3b8; font-weight: 600;">BGM Volume</label>
-            <span id="vn-diag-bgm-val" style="color: #34d399; font-weight: 700;">${bgmVol}%</span>
-          </div>
-          <input type="range" id="vn-diag-bgm-slider" min="0" max="100" value="${bgmVol}" style="width: 100%; cursor: pointer;" />
-        </div>
-        <div>
-          <label style="color: #94a3b8; font-weight: 600; display: block; margin-bottom: 4px;">Active Track / Scene Ambience</label>
-          <span id="vn-diag-curr-track" style="color: #38bdf8; font-weight: 600; font-family: monospace;">${currTrack}</span>
-        </div>
-      </div>
-    `;
-    this.root.appendChild(audioCard);
-    const toggleBgmBtn = audioCard.querySelector("#vn-diag-toggle-bgm");
-    const bgmSlider = audioCard.querySelector("#vn-diag-bgm-slider");
-    const bgmVal = audioCard.querySelector("#vn-diag-bgm-val");
-    toggleBgmBtn?.addEventListener("click", () => {
-      if (this.audioEngine) {
-        const active = this.audioEngine.toggleBgm();
-        toggleBgmBtn.innerHTML = active ? "\uD83D\uDFE2 BGM: Playing (Click to Pause)" : "▶ BGM: Turn On / Play";
-        toggleBgmBtn.style.background = active ? "linear-gradient(135deg, #059669, #10b981)" : "#334155";
-        const trackEl = audioCard.querySelector("#vn-diag-curr-track");
-        if (trackEl)
-          trackEl.textContent = this.audioEngine.getCurrentBgm() || "peaceful";
-      }
-    });
-    bgmSlider?.addEventListener("input", () => {
-      const vol = Number(bgmSlider.value);
-      if (bgmVal)
-        bgmVal.textContent = `${vol}%`;
-      this.audioEngine?.setBgmVolume(vol / 100);
-    });
-    const propsCard = document.createElement("div");
-    propsCard.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;";
-    propsCard.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <strong style="color: #38bdf8; font-size: 13px;">\uD83C\uDFAD Roleplay Prop & UI Templates</strong>
-        <span style="font-size: 10px; background: rgba(56, 189, 248, 0.2); border: 1px solid #0284c7; color: #7dd3fc; padding: 2px 6px; border-radius: 4px;">HTML/CSS Props</span>
-      </div>
-      <p style="margin: 0; font-size: 11px; color: #94a3b8;">
-        Inspect game-style prop widgets and copy standard tags for prose & Director notes:
-      </p>
-      <div id="vn-diag-prop-tabs" style="display: flex; gap: 4px; flex-wrap: wrap;">
-        ${PROP_TEMPLATES_CATALOG.map((p, idx) => `
-          <button class="vn-diag-prop-btn" data-prop-id="${p.id}" style="padding: 3px 8px; font-size: 11px; background: ${idx === 0 ? "#0284c7" : "#1e293b"}; border: 1px solid ${idx === 0 ? "#38bdf8" : "#475569"}; color: #fff; border-radius: 4px; cursor: pointer;">
-            ${p.icon} ${p.name}
-          </button>
-        `).join("")}
-      </div>
-      <div style="background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 10px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-          <span id="vn-diag-prop-desc" style="font-size: 10px; color: #94a3b8;">${PROP_TEMPLATES_CATALOG[0]?.description}</span>
-          <button id="vn-diag-copy-prop-btn" style="padding: 2px 8px; font-size: 10px; font-weight: 700; background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 4px; cursor: pointer;">
-            \uD83D\uDCCB Copy Tag
-          </button>
-        </div>
-        <div id="vn-diag-prop-preview" style="min-height: 60px;">
-          ${formatDialogueHtml(PROP_TEMPLATES_CATALOG[0]?.sampleTag || "").html}
-        </div>
-      </div>
-    `;
-    this.root.appendChild(propsCard);
-    let activeProp = PROP_TEMPLATES_CATALOG[0];
-    const diagDesc = propsCard.querySelector("#vn-diag-prop-desc");
-    const diagPreview = propsCard.querySelector("#vn-diag-prop-preview");
-    const diagCopyBtn = propsCard.querySelector("#vn-diag-copy-prop-btn");
-    propsCard.querySelectorAll(".vn-diag-prop-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const propId = btn.getAttribute("data-prop-id");
-        const found = PROP_TEMPLATES_CATALOG.find((p) => p.id === propId);
-        if (found) {
-          activeProp = found;
-          if (diagDesc)
-            diagDesc.textContent = found.description;
-          if (diagPreview)
-            diagPreview.innerHTML = formatDialogueHtml(found.sampleTag).html;
-          propsCard.querySelectorAll(".vn-diag-prop-btn").forEach((b) => {
-            b.style.background = b === btn ? "#0284c7" : "#1e293b";
-            b.style.borderColor = b === btn ? "#38bdf8" : "#475569";
-          });
-        }
-      });
-    });
-    diagCopyBtn?.addEventListener("click", async () => {
-      await navigator.clipboard.writeText(activeProp.sampleTag).catch(() => {});
-      if (diagCopyBtn) {
-        const orig = diagCopyBtn.textContent;
-        diagCopyBtn.textContent = "✓ Copied Tag!";
-        diagCopyBtn.style.borderColor = "#10b981";
-        setTimeout(() => {
-          diagCopyBtn.textContent = orig;
-          diagCopyBtn.style.borderColor = "#38bdf8";
-        }, 1500);
-      }
-    });
-    const bottomSplit = document.createElement("div");
-    bottomSplit.style.cssText = "flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 220px; overflow: hidden;";
-    const consoleBox = document.createElement("div");
-    consoleBox.style.cssText = "background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;";
-    consoleBox.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Engine Diagnostic Log</span>
-        <div style="display: flex; gap: 4px; align-items: center;">
-          <button id="vn-filter-all" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "all" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">All</button>
-          <button id="vn-filter-info" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "info" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Info</button>
-          <button id="vn-filter-warn" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "warn" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Warn</button>
-          <button id="vn-filter-error" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "error" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Err</button>
-          <button id="vn-clear-logs" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: #1e293b; color: #94a3b8; cursor: pointer; margin-left: 4px;">Clear</button>
-        </div>
-      </div>
-      <div id="vn-diag-stream" style="flex: 1; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; color: #cbd5e1; display: flex; flex-direction: column; gap: 3px; user-select: text; max-height: 200px;">
-      </div>
-    `;
-    const ledgerBox = document.createElement("div");
-    ledgerBox.style.cssText = "background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;";
-    ledgerBox.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <span style="font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase;">Active World Ledger Viewer</span>
-        <button id="vn-copy-editor-btn" style="padding: 2px 8px; font-size: 10px; background: #1e293b; border: 1px solid #475569; border-radius: 4px; color: #38bdf8; font-weight: 600; cursor: pointer;">
-          \uD83D\uDCCB Copy Block
-        </button>
-      </div>
-      <textarea id="vn-ledger-editor" readonly style="flex: 1; background: #090d16; border: 1px solid #334155; border-radius: 6px; color: #a5b4fc; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; padding: 8px; resize: none; outline: none; user-select: text; white-space: pre; max-height: 200px;">${diagBus.formatLedgerYaml(this.currentLedger)}</textarea>
-    `;
-    bottomSplit.appendChild(consoleBox);
-    bottomSplit.appendChild(ledgerBox);
-    this.root.appendChild(bottomSplit);
-    const stream = consoleBox.querySelector("#vn-diag-stream");
-    const renderLogs = () => {
-      if (!stream)
-        return;
-      stream.innerHTML = "";
-      const logs = diagBus.getLogs();
-      const filtered = this.activeFilter === "all" ? logs : logs.filter((l) => l.level === this.activeFilter);
-      if (filtered.length === 0) {
-        stream.innerHTML = '<div style="color: #64748b; font-style: italic;">No logs for this filter.</div>';
-        return;
-      }
-      for (const entry of filtered) {
-        const item = document.createElement("div");
-        item.style.wordBreak = "break-word";
-        item.style.color = entry.level === "error" ? "#f43f5e" : entry.level === "warn" ? "#f59e0b" : entry.level === "action" ? "#38bdf8" : "#cbd5e1";
-        item.textContent = `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}`;
-        stream.appendChild(item);
-      }
-      stream.scrollTop = stream.scrollHeight;
-    };
-    renderLogs();
-    consoleBox.querySelector("#vn-filter-all")?.addEventListener("click", () => {
-      this.activeFilter = "all";
-      this.render(this.currentLedger, this.currentManifest);
-    });
-    consoleBox.querySelector("#vn-filter-info")?.addEventListener("click", () => {
-      this.activeFilter = "info";
-      this.render(this.currentLedger, this.currentManifest);
-    });
-    consoleBox.querySelector("#vn-filter-warn")?.addEventListener("click", () => {
-      this.activeFilter = "warn";
-      this.render(this.currentLedger, this.currentManifest);
-    });
-    consoleBox.querySelector("#vn-filter-error")?.addEventListener("click", () => {
-      this.activeFilter = "error";
-      this.render(this.currentLedger, this.currentManifest);
-    });
-    consoleBox.querySelector("#vn-clear-logs")?.addEventListener("click", () => {
-      diagBus.clearLogs();
-      renderLogs();
-    });
-    ledgerBox.querySelector("#vn-copy-editor-btn")?.addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      const textarea = ledgerBox.querySelector("#vn-ledger-editor");
-      if (textarea) {
-        await navigator.clipboard.writeText(textarea.value).catch(() => {
-          return;
-        });
-        showToast(btn, "Copy Block");
-      }
-    });
-    const updateDirectorCard = () => {
-      const note = diagBus.getDirectorNote();
-      const labelEl = directorCard.querySelector("#vn-director-thread-label");
-      const bodyEl = directorCard.querySelector("#vn-director-note-body");
-      if (labelEl)
-        labelEl.textContent = note?.threadLabel || "General Steering";
-      if (bodyEl)
-        bodyEl.textContent = note?.directorNote || "No active turn steering notes recorded.";
-    };
-    if (this.unsubscribeBus)
-      this.unsubscribeBus();
-    this.unsubscribeBus = diagBus.subscribe(() => {
-      renderLogs();
-      updateDirectorCard();
-    });
-  }
-  destroy() {
-    if (this.unsubscribeBus) {
-      this.unsubscribeBus();
-      this.unsubscribeBus = undefined;
-    }
-  }
-}
+WORLD RULES
+1. KNOWLEDGE FIREWALL. An NPC acts only on what they perceived (seen, or heard within earshot), were told, or hold in dossier beliefs. Name every person or thing as that NPC would: an unidentified creature stays 'the panda' to anyone who has not identified it. Never hand an NPC another NPC's secret, an offscreen event, or world truth. A hidden fact advances one exposure stage only when evidence is actually perceived. NPCs may misread, assume, or be wrong.
+2. OWN MOTIVES. Every LOD 3 NPC pursues their own want_now or goal and cooperates only when it pays them. Their goal is never to serve {{user}}. Refusing, stalling, bargaining, deceiving, withholding, retaliating, and ignoring are all valid. Give a tactic and its cost, never words.
+3. CAUSALITY. Every scheduled event needs a cause already on the ledger (due time, eta, routine, want, phase due). Nothing due means no scheduled event, but GROW still runs. No coincidence, no raised stakes, no arrival timed to the mood.
+4. CONTINUITY. Reuse exact names, place keys, numbers, and durations. Use only keys in places; anywhere else is 'elsewhere' with no minutes or traces. Facts about existing places, props, or history enter only through CANON; new people, motives, schedules, and pressures enter through GROW seeds. No new props, furniture, clothing, or rooms, except an ordinary fixture {{user}} touches (see CANON); ambient sound, light, and weather are not props. A new node needs a key and route minutes both ways, at most one per three turns. Roster loc and scene latents are the only source of NPC positions.
+5. PACING. A turn is 1-3 in-world minutes unless {{user}} states a time skip; after a skip, run the catch-up in PRESSURE. Nothing moves faster than route minutes. Anyone about to enter gets a precursor one turn earlier, never before window_opens.
+6. SETTING FIT. Match genre, era, tech, tone_weights, and content_bounds. Keep stakes at the setting's scale. Treat {{user}} as one entity among many, with no narrative privilege, protection, or punishment.
+7. VARIETY. Do not repeat a prop gesture, sensory cue, event vector, or opening verb from your previous note. A prop offered or refused once is retired or changes function. If scene.stall >= 2 or scene.streak >= 3, change the beat type this turn (an NPC pursuing a want, a due event, a seed trace, a physical complication).
+8. BOUNDARIES. No recap. No commands for {{user}}'s actions, feelings, or outcomes; NPCs may attempt, and the command stops at the attempt.
+9. RESPONSE GATE. Anything {{user}} does to, asks of, tells, or offers an NPC (touch, strike, order, question, claim, request, gift, threat, confession, bribe, deal, advance, taking an NPC's item) is an attempt, never an outcome. Resolve it from the dossier before choosing the tactic: (a) relations toward {{user}} (A, T, R, At, F, grudge, Fam, attachment, obligations) and relevant memories; (b) current passions; (c) dispositions, values, boundaries, red_lines, defense, constraints, want_now; (d) context: audience, witnesses, place privacy and norm, power gap as THIS NPC perceives it, physical state; (e) cost to them of complying versus refusing. Rate the act's intrusiveness to THIS NPC: routine (fits their role or norms) gets ordinary cooperation unless the dossier gives a reason against; personal or extreme (intimate, violent, humiliating, dangerous, secret-revealing, against a value) needs standing with {{user}} (trust, affection, fear, authority, obligation, leverage) that matches it, and without it the NPC hesitates, deflects, stalls, refuses, or resists. Questions and claims: the NPC answers, lies, withholds, or tests according to trust, self-interest, secrets, and belief. All outcomes are open, including compliance from fear or duty against their wish, which shows visible duress and a cost. Mood, intoxication, or one trait may shade the outcome, never decide it alone. Fear, awe, or deference may block an act or force it, by that NPC's dispositions. Rank or power {{user}} holds counts only if the NPC knows it (Rule 1). Neither yielding nor refusing is a default. The outcome is final: the reply may not add a softening, yield, or reversal the note did not state.
+10. INPUT FIDELITY. {{user}}'s message is complete and exact: it happened as typed and no more. Add no steps, preparations, transitions, speech, thoughts, gestures, or state changes for {{user}}. Embellish only how the typed action is perceived. Movement, entry, and exit are shown as the stated result, never with unstated prerequisites. A brief input gets a brief {{user}} presence; the world and NPCs carry the rest. Everything not stated carries over unchanged from the last reply and ledger: worn items, hand and carried items, posture, position, injuries, who holds what. State changes only if {{user}} states it, an NPC does it by the Response Gate, or a ledger event causes it. NPCs get the same lock. When {{user}} uses or takes a listed object within reach, it happens as typed; if an NPC owns or holds it, it is an attempt under Rule 9. Damage, consumption, and transfers are recorded by the ledger and are zero-sum.
+
+EDITOR'S CHARTER (what the reply must read like; apply it through CRAFT)
+- Open in motion on the direct consequence of {{user}}'s input; never restate it. Keep the established POV and tense. World detail interrupts after the first beat.
+- Dialogue carries subtext. People answer the question they wish was asked, deflect, interrupt, leave sentences unfinished, and say less than they mean. One idea per line, plain contractions, 'said' or an action beat for tags, no adverb tags, no exposition aimed at the reader, no named emotions.
+- Interiority is shown through observable behavior: a hand, a pause, a changed subject. No head-hopping. Never narrate {{user}}'s thoughts.
+- Narration uses concrete nouns and active verbs, one specific detail over three generic ones, varied sentence length, paragraphs of 2-4 sentences ending on an image or action, not a summary. No stacked similes, no 'a mix of X and Y', no stock phrases (orbs, shivers down the spine, a breath she didn't know she held, unreadable expression).
+- Every speaking NPC sounds like a person with a history, not like the narrator or the assistant. Tone follows tone_weights; comedy comes from character and situation, not from narrator commentary.
+- Momentum: every reply leaves one live thread the player can pull or ignore (an unexplained tell, a closing window, a visible cost). Show consequences of earlier choices. Never hand the player a menu of options.
+
+SLOTS (all required, in this order; sentences start with a command verb except in KNOWS and labeled SEED or PROMOTE lines; whole note 320-460 words)
+FIRST BEAT: Name which NPC responds first to {{user}}'s input, the outcome chosen by the RESPONSE GATE, at least one relations value toward {{user}} and one boundary, value, red_line, or want_now that decided it, and how it shows (accept, reciprocate, hesitate, deflect, answer, lie, refuse, push back, strike, flee, comply under duress, ignore at a cost). If no NPC is the target, name who notices first and how. If the input touches undefined canon, say what that NPC reveals, withholds, or distorts. On turn 1, name the first NPC action implied by the premise.
+LOCK: List as unchanged the user-side and scene state the reply must carry over (worn items, hand and carried items, posture, position, who holds what), taken only from the ledger or last reply; write 'unspecified' for anything not stated there. State that {{user}}'s typed action is complete as written. Skip {{user}}'s concealed facts.
+OPENING: Name the reply's first concrete image or action, taken from the NPC's FIRST BEAT reaction or the immediate sensory consequence of the typed action. It must not restate or paraphrase {{user}}'s input, add a movement for {{user}}, give a header, tagline, mood summary, or scene-setting line, or begin with weather, time, or a room description.
+KNOWS: Only LOD 3 NPCs and any NPC promoted this turn (see MUTATE); never other LOD 1-2 NPCs. For each: 'Name: perceived X; believes Y (conf); misreads Z; lacks W'. Facts only, not motives. 'lacks W' names only what that NPC could plausibly lack in-world; never name {{user}}'s concealed facts, even to cut them. Flag any hidden fact in play with who knows, who suspects, and the exposure stage.
+PRESENT: One entry for EVERY LOD 3 NPC and every NPC promoted this turn, none skipped: a tactic serving their own want_now plus its cost, chosen from what KNOWS says they perceive and believe, shaped by passions, defense, and relations. The cost uses only items already in the ledger or last reply. Each NPC's beat is exactly one gesture or one line; name the single one. Observing at a cost counts. At most one NPC reacts to {{user}}, and that reaction must match FIRST BEAT; the others pursue each other, a task, or the room. No two NPCs chase the same request or prop. Guarded secrets stay at subtle-trace stage.
+MUTATE: For the NPC reacting to {{user}}, and any LOD 3 NPC whose goal, bond, or status is touched: event type, GRV tier, and axes with sign (for example 'T- primary, A- secondary, shame passion'), taken from the stat_rules table; or 'none' when nothing specific happened. Name no numbers. Must match FIRST BEAT. If {{user}} directly engages a LOD 1-2 NPC, or one reacts as a witness, treat them as LOD 3 for this turn and write 'PROMOTE: id' for the ledger.
+WORLD: One believable moment of public clockwork matched to setting, phase, and weather, placed after the first beat. No public event repeats within 15 in-world minutes. A lasting change belongs in GROW (d), not here.
+OFFSCREEN: 1-3 LOD 1-2 NPCs whose errand, shift, or journey advances now, each with actor, activity, place key, minutes remaining, and at most one perceptible trace for the present scene (or none if too far or the place has no key). Positions must match roster loc or scene latents. A LOD 1-2 NPC at the scene's place is a possible witness: say whether they perceive, and promote them if they react. At most one arrival per turn. If nothing is relevant, write 'Leave all on routine.'
+GROW: Each turn advance the living world beyond {{user}} in ONE way, chosen by what the scene most lacks: (a) deepen a LOD 1-2 NPC who has no dossier depth: a want_now, a small errand, one visible mark of personality; (b) introduce a new background NPC, faction, or institution only if its cause is on the ledger (a front, bplot, carrier, routine, or opportunity) and its place key exists: state its want, its constraint, and how it could touch the scene later; (c) compound an existing unresolved front, opportunity, or grudge by one realistic step that did not need {{user}}, since pressure grows when ignored; (d) name one lasting environmental or systemic change (supply, rumor, schedule, price, rule) that makes a convenient outcome harder. Label each addition 'SEED:' with a one-line fact for the ledger. Seeds follow the knowledge firewall and are people, motives, schedules, and pressures, never props or rooms. If the scene is already crowded, write 'Grow: none needed.'
+PRESSURE: Default 'Hold: nothing due' plus the nearest absolute due among fronts, bplots, carriers, opportunities and latents; never invent a time. Act only on an event whose due or eta has been reached; for a bplot also require 15 in-world minutes since the last visible B-plot beat. Then state the event id and its new phase or ripple stage, and command one ordinary trace through a vector not used last time (ripple 1: none; 2: one mundane echo; 3: arrival). Phase and ripple never drop. The actor responds in proportion to what it knows. Show at most one event beat. After a time skip, list up to 3 events whose due passed, in due order, as 'id: phase' for the ledger to journal, and show a trace only for those whose ripple reached the scene. If active events are fewer than 2 (on turn 1 the premise does not count), name the strongest tension pair from the dossiers (high grudge, conflicting goals, leverage, unpaid obligation) for the ledger to seed; that seed counts as this turn's GROW.
+CRAFT: Per speaking NPC, one speech cue drawn from stress, audience, and dossier tells or defense (sentence length, formality, directness, evasiveness, interruption, rhythm), different for every NPC; swearing and catchphrases are not cues. One narration directive from the Editor's Charter that this beat most needs. One callback if the ledger has one: a memory, promise, grudge, or earlier seed whose consequence shows now. Embellish only what {{user}} typed and add nothing for them; never refer to {{user}}'s secrets. 2-3 concrete details from different senses plus one environment change that moves where someone looks or stands, physically consistent, landing mid-reply so it changes someone's behavior. SURFACE: show 1-2 objects in reach and relevant to the beat, as part of the room or in an NPC's use, never as a suggestion or list for {{user}}; rotate which objects appear, and an object an NPC holds stays in their hand until the ledger moves it. Objects come only from places.resources, affordances, user state, dossier outfit or inventory, or the last reply.
+CANON: New facts the reply cannot avoid establishing, one short line for world.facts, consistent with the ledger. Never invent explanations nobody asked for. When {{user}} probes, inspects, or asks, give one concrete, ledger-consistent discovery, partial if an NPC guards it; a withheld answer still leaves a visible tell. If {{user}} touches an ordinary fixture the place's function implies but the ledger does not list (a drawer, shelf, cabinet, switch), it exists: give its mundane contents in one line for places.resources, with nothing valuable or plot-critical unless a ledger cause supports it. Write 'None' otherwise.
+END ON: One unresolved physical or environmental moment where the reply stops, using only existing props and places, that also carries one thread to pull (an unexplained tell, a closing window, a visible cost). Not an NPC question aimed at {{user}}.
+Editor: Rewrite wording so sentences read naturally and plainly; cut melodrama and stacked figures.
+
+OUTPUT: one single-line JSON object inside <details><summary>Director</summary> ... </details>, nothing before or after:
+{"director_note":"FIRST BEAT: ... LOCK: ... OPENING: ... KNOWS: ... PRESENT: ... MUTATE: ... WORLD: ... OFFSCREEN: ... GROW: ... PRESSURE: ... CRAFT: ... CANON: ... END ON: ... Editor: ...","thread_label":"<3-6 words naming the dominant live thread; unchanged until the thread changes>"}
+No double quotes, line breaks, or markdown inside values; write possessives and contractions normally, and use single quotes only for quoted words.
+
+CHECK before output: no recap; no quoted speech; each NPC named as they know it; no secret leaked; no player-side secret named; FIRST BEAT outcome justified by a cited relations value plus a boundary, value, or want_now, never by mood or default compliance; LOCK matches ledger and last reply with nothing invented and no added steps for {{user}}; OPENING is a concrete first action or image; KNOWS and PRESENT cover only LOD 3 NPCs plus promoted ones, one beat each, matching FIRST BEAT; MUTATE matches FIRST BEAT, names tiers only, flags any PROMOTE; GROW is one SEED or 'Grow: none needed' with a ledger cause for any new NPC or faction; objects surfaced are existing and unsuggested; no new props except a mundane fixture touched by {{user}}; only existing place keys; OFFSCREEN positions match roster loc and no NPC is in both PRESENT and OFFSCREEN; PRESSURE is Hold unless due and every time in it exists in the ledger; CANON invents nothing unasked; END ON carries one thread and is not a question to {{user}}; all 13 slots plus Editor; valid one-line JSON.`,
+  userNotes: "",
+  enabled: true
+};
 
 // src/frontend/hud/tab-rpg.ts
 function parseSkillTreesFromPrompt(prompt2) {
@@ -12578,7 +11764,676 @@ class RpgTab {
   }
 }
 
+// src/frontend/hud/tab-diagnostics.ts
+class DiagnosticsTab {
+  root;
+  ctx;
+  audioEngine;
+  menuBar;
+  currentLedger = {};
+  currentManifest;
+  activeFilter = "all";
+  unsubscribeBus;
+  statRulesSettings = null;
+  activeRulebookSubtab = "stats";
+  constructor(ctx, audioEngine, menuBar) {
+    this.ctx = ctx;
+    this.audioEngine = audioEngine;
+    this.menuBar = menuBar;
+    this.root = document.createElement("div");
+    this.root.className = "vn-hud-tab vn-tab-diagnostics";
+  }
+  setAudioEngine(engine) {
+    this.audioEngine = engine;
+  }
+  setStatRulesSettings(settings) {
+    this.statRulesSettings = settings;
+    const modeSelect = this.root.querySelector("#vn-mvu-mode-select");
+    const rulesInput = this.root.querySelector("#vn-stat-rules-input");
+    const ledgerInput = this.root.querySelector("#vn-ledger-prompt-input");
+    const rpgInput = this.root.querySelector("#vn-rpg-rules-input");
+    if (modeSelect)
+      modeSelect.value = settings.mode || "mvu_quiet";
+    if (rulesInput)
+      rulesInput.value = settings.statRules?.trim() ? settings.statRules : DEFAULT_STAT_RULES;
+    if (ledgerInput)
+      ledgerInput.value = settings.ledgerPrompt?.trim() ? settings.ledgerPrompt : DEFAULT_LEDGER_PROMPT;
+    if (rpgInput)
+      rpgInput.value = settings.rpgPrompt?.trim() ? settings.rpgPrompt : DEFAULT_RPG_PROMPT;
+  }
+  render(ledger, manifest) {
+    this.currentLedger = ledger;
+    this.currentManifest = manifest;
+    diagBus.setLedger(ledger);
+    if (manifest)
+      diagBus.setManifest(manifest);
+    this.root.innerHTML = "";
+    this.root.style.cssText = "display: flex; flex-direction: column; gap: 14px; height: 100%; color: #f1f5f9; font-family: system-ui, -apple-system, sans-serif;";
+    const telemetry = diagBus.getTelemetry();
+    const hasLedger = Boolean(ledger && (ledger.clock || ledger.scene || ledger.actors));
+    const deltaStatus = hasLedger ? "accepted" : "idle";
+    const header = document.createElement("div");
+    header.style.cssText = "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid #334155; padding-bottom: 10px;";
+    header.innerHTML = `
+      <div>
+        <h3 style="margin: 0; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 6px;">
+          <span>\uD83D\uDEE0️</span> <span>Engine Diagnostics & Clipboard Export</span>
+        </h3>
+        <p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8;">
+          Inspect delta synchronization, export living world ledgers, and view engine logs.
+        </p>
+      </div>
+      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+        <button id="vn-copy-all-btn" class="vn-btn vn-btn-sm" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; color: #fff; font-weight: 700; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 11px; box-shadow: 0 2px 8px rgba(99,102,241,0.4);">
+          \uD83D\uDCCB Copy All
+        </button>
+        <button id="vn-copy-yaml-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #38bdf8; font-weight: 600; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          \uD83D\uDCC4 Copy Ledger (YAML)
+        </button>
+        <button id="vn-copy-director-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #8b5cf6; color: #c084fc; font-weight: 600; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          \uD83C\uDFAC Copy Director Note
+        </button>
+        <button id="vn-copy-json-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          \uD83D\uDCE6 Copy State (JSON)
+        </button>
+        <button id="vn-copy-diag-btn" class="vn-btn vn-btn-sm" style="background: #1e293b; border: 1px solid #475569; color: #cbd5e1; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 11px;">
+          \uD83D\uDCDC Copy Logs
+        </button>
+      </div>
+    `;
+    this.root.appendChild(header);
+    const showToast = (btn, label) => {
+      const orig = btn.textContent;
+      btn.textContent = "✓ Copied!";
+      btn.style.borderColor = "#10b981";
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.style.borderColor = "";
+      }, 1500);
+    };
+    header.querySelector("#vn-copy-all-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      await navigator.clipboard.writeText(diagBus.exportAllBundle()).catch(() => {
+        return;
+      });
+      showToast(btn, "Copy All");
+    });
+    header.querySelector("#vn-copy-yaml-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const yamlStr = diagBus.formatLedgerYaml(this.currentLedger);
+      await navigator.clipboard.writeText(yamlStr).catch(() => {
+        return;
+      });
+      showToast(btn, "Copy Ledger (YAML)");
+    });
+    header.querySelector("#vn-copy-director-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const note = diagBus.getDirectorNote();
+      if (note && note.directorNote) {
+        const textToCopy = `[${note.threadLabel || "Active Thread"}]
+${note.directorNote}`;
+        await navigator.clipboard.writeText(textToCopy).catch(() => {
+          return;
+        });
+        showToast(btn, "Copy Director Note");
+      } else {
+        showToast(btn, "No Note Available");
+      }
+    });
+    header.querySelector("#vn-copy-json-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      await navigator.clipboard.writeText(JSON.stringify(this.currentLedger, null, 2)).catch(() => {
+        return;
+      });
+      showToast(btn, "Copy State (JSON)");
+    });
+    header.querySelector("#vn-copy-diag-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const logLines = diagBus.getLogs().map((l) => `[${l.timestamp}] [${l.level.toUpperCase()}] ${l.message}`).join(`
+`);
+      await navigator.clipboard.writeText(logLines).catch(() => {
+        return;
+      });
+      showToast(btn, "Copy Logs");
+    });
+    const midRow = document.createElement("div");
+    midRow.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;";
+    const participants = ledger.scene?.participants || [];
+    const actorEntries = Object.entries(ledger.actors || {});
+    const rosterEntries = ledger.roster || [];
+    midRow.innerHTML = `
+      <!-- Delta & Telemetry Status Card -->
+      <div style="background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+          <strong style="color: #38bdf8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Delta Telemetry Status</strong>
+          <span style="font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; ${deltaStatus === "accepted" ? "background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid #10b981;" : "background: rgba(245,158,11,0.2); color: #fbbf24; border: 1px solid #f59e0b;"}">
+            ${deltaStatus === "accepted" ? "● Delta Accepted" : "○ Waiting Delta"}
+          </span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px;">
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Clock Anchor:</span>
+            <span style="font-weight: 600; color: #f8fafc;">${ledger.clock?.t || "Unknown"} (${ledger.clock?.phase || "Day"})${ledger.clock?.date ? ` • ${ledger.clock.date}` : ""}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Place Scoping:</span>
+            <span style="font-weight: 600; color: #38bdf8;">${ledger.scene?.place || "default"}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Region / Country:</span>
+            <span style="color: #cbd5e1;">${[ledger.clock?.location, ledger.clock?.region, ledger.clock?.country].filter(Boolean).join(", ") || "Nerima, Tokyo"}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #94a3b8;">Background Rendered:</span>
+            <span style="color: #94a3b8; font-family: monospace; font-size: 10px;">${(telemetry?.bgUrl || "Default").slice(0, 30)}...</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Living Roster & Epistemics Presence Card -->
+      <div style="background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+          <strong style="color: #a78bfa; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Epistemic Presence Breakdown</strong>
+          <span style="font-size: 10px; color: #94a3b8;">${actorEntries.length} dossiers loaded</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 11px;">
+          <div>
+            <span style="color: #38bdf8; font-weight: 600;">Spotlight (${participants.length}):</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
+              ${participants.length > 0 ? participants.map((p) => `<span style="background: rgba(56,189,248,0.2); color: #7dd3fc; border: 1px solid #0284c7; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">\uD83D\uDC64 ${p}</span>`).join("") : '<span style="color: #64748b; font-size: 10px;">No spotlight participants</span>'}
+            </div>
+          </div>
+          <div>
+            <span style="color: #94a3b8;">Living Roster (${rosterEntries.length}):</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
+              ${rosterEntries.slice(0, 6).map((r) => `<span style="background: #1e293b; border: 1px solid #334155; padding: 1px 6px; border-radius: 4px; font-size: 10px; color: #cbd5e1;">${r.name || r.id} (${r.loc || "?"})</span>`).join("")}
+              ${rosterEntries.length > 6 ? `<span style="color: #64748b; font-size: 10px;">+${rosterEntries.length - 6} more</span>` : ""}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    this.root.appendChild(midRow);
+    const directorNote = diagBus.getDirectorNote();
+    const directorCard = document.createElement("div");
+    directorCard.style.cssText = "background: #0f172a; border: 1px solid #6366f1; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px;";
+    directorCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 14px;">\uD83C\uDFAC</span>
+          <strong style="color: #a78bfa; font-size: 12px; text-transform: uppercase;">Active Director Guidance</strong>
+        </div>
+        <span id="vn-director-thread-label" style="font-size: 10px; background: rgba(139,92,246,0.2); border: 1px solid #8b5cf6; color: #c084fc; padding: 2px 8px; border-radius: 4px; font-weight: 600;">
+          ${directorNote?.threadLabel || "General Steering"}
+        </span>
+      </div>
+      <div id="vn-director-note-body" style="font-size: 11px; line-height: 1.5; color: #cbd5e1; max-height: 120px; overflow-y: auto; white-space: pre-wrap; font-style: italic;">
+        ${directorNote?.directorNote || "No active turn steering notes recorded."}
+      </div>
+    `;
+    this.root.appendChild(directorCard);
+    const rulesCard = document.createElement("div");
+    rulesCard.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;";
+    const visibleTabs = this.menuBar?.getVisibleTabs?.() || ALL_HUD_TABS.map((t) => t.id);
+    rulesCard.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid #1e293b; padding-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 16px;">\uD83D\uDCD6</span>
+          <strong style="color: #38bdf8; font-size: 13px;">Unified Simulation Rulebook & Engine Controls</strong>
+        </div>
+        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+          <select id="vn-rulebook-preset-select" style="background: #1e293b; color: #fde047; border: 1px solid #eab308; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-weight: 600; cursor: pointer;">
+            <option value="full">\uD83C\uDF1F Preset: Full RPG & Living World</option>
+            <option value="economy">⚡ Preset: Economy TOON (~80 tokens)</option>
+            <option value="pure_vn">\uD83D\uDE80 Preset: Pure VN (0 Extra Tokens)</option>
+          </select>
+          <select id="vn-mvu-mode-select" style="background: #1e293b; color: #fff; border: 1px solid #475569; border-radius: 4px; padding: 2px 6px; font-size: 11px;">
+            <option value="mvu_quiet">MVU Mode (Quiet LLM Evaluator)</option>
+            <option value="inline_interceptor">Inline Mode (Prompt Injection)</option>
+            <option value="passive">Passive Mode (Parse only)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Rulebook Sub-tabs Navigation -->
+      <div style="display: flex; gap: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 6px; flex-wrap: wrap;">
+        <button class="vn-rb-subtab-btn" data-subtab="stats" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-weight: 700;">\uD83D\uDCCA Stat Rules</button>
+        <button class="vn-rb-subtab-btn" data-subtab="director" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">\uD83C\uDFAC Director</button>
+        <button class="vn-rb-subtab-btn" data-subtab="ledger" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">\uD83D\uDCDC Ledger Schema</button>
+        <button class="vn-rb-subtab-btn" data-subtab="rpg" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">⚔️ RPG & Skills</button>
+        <button class="vn-rb-subtab-btn" data-subtab="preview" style="background: #1e293b; color: #a78bfa; border: 1px solid #7c3aed; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">\uD83D\uDC41️ Live Tab Preview</button>
+        <button class="vn-rb-subtab-btn" data-subtab="tabs" style="background: #1e293b; color: #34d399; border: 1px solid #059669; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;">\uD83C\uDF9B️ HUD Tab Checkboxes</button>
+      </div>
+
+      <!-- Domain Panels -->
+      <div id="vn-rb-panel-stats" class="vn-rb-panel" style="display: flex; flex-direction: column; gap: 4px;">
+        <label style="font-size: 10px; color: #94a3b8;">21-Stat Network & Gravity Tiers Rules:</label>
+        <textarea id="vn-stat-rules-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      </div>
+
+      <div id="vn-rb-panel-director" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 6px;">
+        <label style="font-size: 10px; color: #94a3b8;">World Director System Directives:</label>
+        <textarea id="vn-director-system-input" style="width: 100%; height: 90px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+        <label style="font-size: 10px; color: #94a3b8;">Turn Notes & Scene Guidance (Macros: {{user}}, {{char}}):</label>
+        <textarea id="vn-director-notes-input" style="width: 100%; height: 50px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      </div>
+
+      <div id="vn-rb-panel-ledger" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 4px;">
+        <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema & Structural Directives:</label>
+        <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      </div>
+
+      <div id="vn-rb-panel-rpg" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 4px;">
+        <label style="font-size: 10px; color: #94a3b8;">RPG & Skills Progression Rules (Tactical Directives & Trees):</label>
+        <textarea id="vn-rpg-rules-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      </div>
+
+      <div id="vn-rb-panel-preview" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
+        <div style="font-size: 11px; color: #cbd5e1;">Live breakdown of how the current rulebook translates into tab features:</div>
+        <div id="vn-rb-preview-content" style="max-height: 180px; overflow-y: auto; background: #020617; border: 1px solid #334155; border-radius: 6px; padding: 8px; font-size: 11px;"></div>
+      </div>
+
+      <div id="vn-rb-panel-tabs" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
+        <div style="font-size: 11px; color: #cbd5e1;">Toggle which tabs appear on the bottom Game HUD Menu Bar:</div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px;">
+          ${ALL_HUD_TABS.filter((t) => t.id !== "diagnostics").map((tabItem) => `
+            <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
+              <input type="checkbox" class="vn-tab-checkbox" data-tab-id="${tabItem.id}" ${visibleTabs.includes(tabItem.id) ? "checked" : ""} style="accent-color: #10b981; cursor: pointer;" />
+              <span>${tabItem.icon}</span> <span>${tabItem.label}</span>
+            </label>
+          `).join("")}
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px solid #1e293b; padding-top: 8px; margin-top: 4px;">
+        <span style="font-size: 10px; color: #94a3b8;">Edits take effect dynamically in tabs and on next turn.</span>
+        <button id="vn-save-rules-btn" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; border: none; border-radius: 4px; padding: 6px 16px; font-size: 11px; font-weight: 700; cursor: pointer;">\uD83D\uDCBE Save & Apply Rulebook</button>
+      </div>
+    `;
+    this.root.appendChild(rulesCard);
+    const modeSelect = rulesCard.querySelector("#vn-mvu-mode-select");
+    const presetSelect = rulesCard.querySelector("#vn-rulebook-preset-select");
+    const rulesInput = rulesCard.querySelector("#vn-stat-rules-input");
+    const ledgerInput = rulesCard.querySelector("#vn-ledger-prompt-input");
+    const rpgInput = rulesCard.querySelector("#vn-rpg-rules-input");
+    const directorSysInput = rulesCard.querySelector("#vn-director-system-input");
+    const directorNotesInput = rulesCard.querySelector("#vn-director-notes-input");
+    const saveRulesBtn = rulesCard.querySelector("#vn-save-rules-btn");
+    const previewContent = rulesCard.querySelector("#vn-rb-preview-content");
+    const activeMode = this.statRulesSettings?.mode || "mvu_quiet";
+    const activeRules = this.statRulesSettings?.statRules?.trim() || DEFAULT_STAT_RULES;
+    const activeLedger = this.statRulesSettings?.ledgerPrompt?.trim() || DEFAULT_LEDGER_PROMPT;
+    const activeRpg = this.statRulesSettings?.rpgPrompt?.trim() || DEFAULT_RPG_PROMPT;
+    const activeDirSys = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
+    const activeDirNotes = DEFAULT_DIRECTOR_SETTINGS.userNotes || "";
+    if (modeSelect)
+      modeSelect.value = activeMode;
+    if (rulesInput)
+      rulesInput.value = activeRules;
+    if (ledgerInput)
+      ledgerInput.value = activeLedger;
+    if (rpgInput)
+      rpgInput.value = activeRpg;
+    if (directorSysInput)
+      directorSysInput.value = activeDirSys;
+    if (directorNotesInput)
+      directorNotesInput.value = activeDirNotes;
+    const subtabBtns = rulesCard.querySelectorAll(".vn-rb-subtab-btn");
+    const updatePreview = () => {
+      if (!previewContent)
+        return;
+      const skills = parseSkillTreesFromPrompt(rpgInput?.value || "");
+      previewContent.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div>
+            <strong style="color: #fde047;">⚔️ RPG Skill Trees (${skills.length} categories parsed):</strong>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
+              ${skills.map((cat) => `
+                <div style="background: #1e293b; border: 1px solid #475569; border-radius: 4px; padding: 4px 8px;">
+                  <span style="color: #38bdf8; font-weight: 700;">${cat.name}</span>: 
+                  <span style="color: #cbd5e1;">${cat.nodes.map((n) => n.name).join(", ")}</span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+          <div>
+            <strong style="color: #34d399;">\uD83D\uDCCA Active Stat Profile:</strong>
+            <div style="color: #94a3b8; font-size: 10px; margin-top: 2px;">
+              Tracks 21-stat network (T, A, R, F, Fam, G, Integ, Stress, CAU, GRD, PRD, EMP, STB, BLD, RX, RC, Rig, Mask, MIS, WV, COMP) with GRV1-GRV5 gravity tiers.
+            </div>
+          </div>
+        </div>
+      `;
+    };
+    subtabBtns.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const target = btn.dataset.subtab;
+        if (!target)
+          return;
+        this.activeRulebookSubtab = target;
+        subtabBtns.forEach((b) => {
+          b.style.background = "#1e293b";
+          b.style.color = "#94a3b8";
+          b.style.fontWeight = "normal";
+          b.style.borderColor = "#334155";
+        });
+        btn.style.background = "#0284c7";
+        btn.style.color = "#fff";
+        btn.style.fontWeight = "700";
+        btn.style.borderColor = "#38bdf8";
+        rulesCard.querySelectorAll(".vn-rb-panel").forEach((p) => p.style.display = "none");
+        const activePanel = rulesCard.querySelector(`#vn-rb-panel-${target}`);
+        if (activePanel)
+          activePanel.style.display = "flex";
+        if (target === "preview")
+          updatePreview();
+      });
+    });
+    presetSelect?.addEventListener("change", () => {
+      const p = presetSelect.value;
+      if (p === "pure_vn") {
+        if (modeSelect)
+          modeSelect.value = "passive";
+        if (rulesInput)
+          rulesInput.value = "";
+        if (ledgerInput)
+          ledgerInput.value = "";
+        if (directorSysInput)
+          directorSysInput.value = "";
+      } else if (p === "economy") {
+        if (modeSelect)
+          modeSelect.value = "passive";
+        if (rulesInput)
+          rulesInput.value = DEFAULT_STAT_RULES.slice(0, 400);
+        if (ledgerInput)
+          ledgerInput.value = "LEDGER: emit compact delta only.";
+      } else {
+        if (modeSelect)
+          modeSelect.value = "mvu_quiet";
+        if (rulesInput)
+          rulesInput.value = DEFAULT_STAT_RULES;
+        if (ledgerInput)
+          ledgerInput.value = DEFAULT_LEDGER_PROMPT;
+        if (rpgInput)
+          rpgInput.value = DEFAULT_RPG_PROMPT;
+        if (directorSysInput)
+          directorSysInput.value = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
+      }
+    });
+    rulesCard.querySelectorAll(".vn-tab-checkbox").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const checkedList = Array.from(rulesCard.querySelectorAll(".vn-tab-checkbox:checked")).map((c) => c.dataset.tabId || "").filter(Boolean);
+        this.menuBar?.setVisibleTabs?.(checkedList);
+      });
+    });
+    if (!this.statRulesSettings) {
+      this.ctx?.sendToBackend?.({ type: "vn_get_stat_rules_settings" });
+    }
+    saveRulesBtn?.addEventListener("click", () => {
+      const updated = {
+        mode: modeSelect?.value || "mvu_quiet",
+        statRules: rulesInput?.value?.trim() || DEFAULT_STAT_RULES,
+        ledgerPrompt: ledgerInput?.value?.trim() || DEFAULT_LEDGER_PROMPT,
+        rpgPrompt: rpgInput?.value?.trim() || DEFAULT_RPG_PROMPT,
+        enabled: presetSelect?.value !== "pure_vn"
+      };
+      this.statRulesSettings = updated;
+      this.ctx?.sendToBackend?.({
+        type: "vn_save_stat_rules_settings",
+        settings: updated
+      });
+      if (directorSysInput) {
+        this.ctx?.sendToBackend?.({
+          type: "vn_save_director_settings",
+          settings: {
+            systemPrompt: directorSysInput.value.trim() || DEFAULT_DIRECTOR_SETTINGS.systemPrompt,
+            userNotes: directorNotesInput?.value?.trim() || "",
+            enabled: presetSelect?.value !== "pure_vn"
+          }
+        });
+      }
+      if (saveRulesBtn) {
+        const orig = saveRulesBtn.textContent;
+        saveRulesBtn.textContent = "✓ Rulebook Saved & Applied!";
+        setTimeout(() => {
+          saveRulesBtn.textContent = orig;
+        }, 1500);
+      }
+    });
+    const audioCard = document.createElement("div");
+    audioCard.style.cssText = "background: #0f172a; border: 1px solid #10b981; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px;";
+    const isBgmActive = this.audioEngine?.isBgmActive() ?? false;
+    const bgmVol = Math.round((this.audioEngine?.getBgmVolume() ?? 0.4) * 100);
+    const currTrack = this.audioEngine?.getCurrentBgm() || "idle / adaptive";
+    audioCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 15px;">\uD83C\uDFB5</span>
+          <strong style="color: #34d399; font-size: 12px; text-transform: uppercase;">Background Music (BGM) & Audio Controls</strong>
+        </div>
+        <button id="vn-diag-toggle-bgm" style="background: ${isBgmActive ? "linear-gradient(135deg, #059669, #10b981)" : "#334155"}; border: none; color: #fff; border-radius: 6px; padding: 4px 12px; font-size: 11px; font-weight: 700; cursor: pointer;">
+          ${isBgmActive ? "\uD83D\uDFE2 BGM: Playing (Click to Pause)" : "▶ BGM: Turn On / Play"}
+        </button>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; font-size: 11px;">
+        <div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <label style="color: #94a3b8; font-weight: 600;">BGM Volume</label>
+            <span id="vn-diag-bgm-val" style="color: #34d399; font-weight: 700;">${bgmVol}%</span>
+          </div>
+          <input type="range" id="vn-diag-bgm-slider" min="0" max="100" value="${bgmVol}" style="width: 100%; cursor: pointer;" />
+        </div>
+        <div>
+          <label style="color: #94a3b8; font-weight: 600; display: block; margin-bottom: 4px;">Active Track / Scene Ambience</label>
+          <span id="vn-diag-curr-track" style="color: #38bdf8; font-weight: 600; font-family: monospace;">${currTrack}</span>
+        </div>
+      </div>
+    `;
+    this.root.appendChild(audioCard);
+    const toggleBgmBtn = audioCard.querySelector("#vn-diag-toggle-bgm");
+    const bgmSlider = audioCard.querySelector("#vn-diag-bgm-slider");
+    const bgmVal = audioCard.querySelector("#vn-diag-bgm-val");
+    toggleBgmBtn?.addEventListener("click", () => {
+      if (this.audioEngine) {
+        const active = this.audioEngine.toggleBgm();
+        toggleBgmBtn.innerHTML = active ? "\uD83D\uDFE2 BGM: Playing (Click to Pause)" : "▶ BGM: Turn On / Play";
+        toggleBgmBtn.style.background = active ? "linear-gradient(135deg, #059669, #10b981)" : "#334155";
+        const trackEl = audioCard.querySelector("#vn-diag-curr-track");
+        if (trackEl)
+          trackEl.textContent = this.audioEngine.getCurrentBgm() || "peaceful";
+      }
+    });
+    bgmSlider?.addEventListener("input", () => {
+      const vol = Number(bgmSlider.value);
+      if (bgmVal)
+        bgmVal.textContent = `${vol}%`;
+      this.audioEngine?.setBgmVolume(vol / 100);
+    });
+    const propsCard = document.createElement("div");
+    propsCard.style.cssText = "background: #0f172a; border: 1px solid #38bdf8; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;";
+    propsCard.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <strong style="color: #38bdf8; font-size: 13px;">\uD83C\uDFAD Roleplay Prop & UI Templates</strong>
+        <span style="font-size: 10px; background: rgba(56, 189, 248, 0.2); border: 1px solid #0284c7; color: #7dd3fc; padding: 2px 6px; border-radius: 4px;">HTML/CSS Props</span>
+      </div>
+      <p style="margin: 0; font-size: 11px; color: #94a3b8;">
+        Inspect game-style prop widgets and copy standard tags for prose & Director notes:
+      </p>
+      <div id="vn-diag-prop-tabs" style="display: flex; gap: 4px; flex-wrap: wrap;">
+        ${PROP_TEMPLATES_CATALOG.map((p, idx) => `
+          <button class="vn-diag-prop-btn" data-prop-id="${p.id}" style="padding: 3px 8px; font-size: 11px; background: ${idx === 0 ? "#0284c7" : "#1e293b"}; border: 1px solid ${idx === 0 ? "#38bdf8" : "#475569"}; color: #fff; border-radius: 4px; cursor: pointer;">
+            ${p.icon} ${p.name}
+          </button>
+        `).join("")}
+      </div>
+      <div style="background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span id="vn-diag-prop-desc" style="font-size: 10px; color: #94a3b8;">${PROP_TEMPLATES_CATALOG[0]?.description}</span>
+          <button id="vn-diag-copy-prop-btn" style="padding: 2px 8px; font-size: 10px; font-weight: 700; background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 4px; cursor: pointer;">
+            \uD83D\uDCCB Copy Tag
+          </button>
+        </div>
+        <div id="vn-diag-prop-preview" style="min-height: 60px;">
+          ${formatDialogueHtml(PROP_TEMPLATES_CATALOG[0]?.sampleTag || "").html}
+        </div>
+      </div>
+    `;
+    this.root.appendChild(propsCard);
+    let activeProp = PROP_TEMPLATES_CATALOG[0];
+    const diagDesc = propsCard.querySelector("#vn-diag-prop-desc");
+    const diagPreview = propsCard.querySelector("#vn-diag-prop-preview");
+    const diagCopyBtn = propsCard.querySelector("#vn-diag-copy-prop-btn");
+    propsCard.querySelectorAll(".vn-diag-prop-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const propId = btn.getAttribute("data-prop-id");
+        const found = PROP_TEMPLATES_CATALOG.find((p) => p.id === propId);
+        if (found) {
+          activeProp = found;
+          if (diagDesc)
+            diagDesc.textContent = found.description;
+          if (diagPreview)
+            diagPreview.innerHTML = formatDialogueHtml(found.sampleTag).html;
+          propsCard.querySelectorAll(".vn-diag-prop-btn").forEach((b) => {
+            b.style.background = b === btn ? "#0284c7" : "#1e293b";
+            b.style.borderColor = b === btn ? "#38bdf8" : "#475569";
+          });
+        }
+      });
+    });
+    diagCopyBtn?.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(activeProp.sampleTag).catch(() => {});
+      if (diagCopyBtn) {
+        const orig = diagCopyBtn.textContent;
+        diagCopyBtn.textContent = "✓ Copied Tag!";
+        diagCopyBtn.style.borderColor = "#10b981";
+        setTimeout(() => {
+          diagCopyBtn.textContent = orig;
+          diagCopyBtn.style.borderColor = "#38bdf8";
+        }, 1500);
+      }
+    });
+    const bottomSplit = document.createElement("div");
+    bottomSplit.style.cssText = "flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 220px; overflow: hidden;";
+    const consoleBox = document.createElement("div");
+    consoleBox.style.cssText = "background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;";
+    consoleBox.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Engine Diagnostic Log</span>
+        <div style="display: flex; gap: 4px; align-items: center;">
+          <button id="vn-filter-all" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "all" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">All</button>
+          <button id="vn-filter-info" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "info" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Info</button>
+          <button id="vn-filter-warn" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "warn" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Warn</button>
+          <button id="vn-filter-error" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: ${this.activeFilter === "error" ? "#4f46e5" : "#1e293b"}; color: #fff; cursor: pointer;">Err</button>
+          <button id="vn-clear-logs" style="padding: 2px 6px; font-size: 10px; border-radius: 4px; border: 1px solid #334155; background: #1e293b; color: #94a3b8; cursor: pointer; margin-left: 4px;">Clear</button>
+        </div>
+      </div>
+      <div id="vn-diag-stream" style="flex: 1; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; color: #cbd5e1; display: flex; flex-direction: column; gap: 3px; user-select: text; max-height: 200px;">
+      </div>
+    `;
+    const ledgerBox = document.createElement("div");
+    ledgerBox.style.cssText = "background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;";
+    ledgerBox.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase;">Active World Ledger Viewer</span>
+        <button id="vn-copy-editor-btn" style="padding: 2px 8px; font-size: 10px; background: #1e293b; border: 1px solid #475569; border-radius: 4px; color: #38bdf8; font-weight: 600; cursor: pointer;">
+          \uD83D\uDCCB Copy Block
+        </button>
+      </div>
+      <textarea id="vn-ledger-editor" readonly style="flex: 1; background: #090d16; border: 1px solid #334155; border-radius: 6px; color: #a5b4fc; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; padding: 8px; resize: none; outline: none; user-select: text; white-space: pre; max-height: 200px;">${diagBus.formatLedgerYaml(this.currentLedger)}</textarea>
+    `;
+    bottomSplit.appendChild(consoleBox);
+    bottomSplit.appendChild(ledgerBox);
+    this.root.appendChild(bottomSplit);
+    const stream = consoleBox.querySelector("#vn-diag-stream");
+    const renderLogs = () => {
+      if (!stream)
+        return;
+      stream.innerHTML = "";
+      const logs = diagBus.getLogs();
+      const filtered = this.activeFilter === "all" ? logs : logs.filter((l) => l.level === this.activeFilter);
+      if (filtered.length === 0) {
+        stream.innerHTML = '<div style="color: #64748b; font-style: italic;">No logs for this filter.</div>';
+        return;
+      }
+      for (const entry of filtered) {
+        const item = document.createElement("div");
+        item.style.wordBreak = "break-word";
+        item.style.color = entry.level === "error" ? "#f43f5e" : entry.level === "warn" ? "#f59e0b" : entry.level === "action" ? "#38bdf8" : "#cbd5e1";
+        item.textContent = `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}`;
+        stream.appendChild(item);
+      }
+      stream.scrollTop = stream.scrollHeight;
+    };
+    renderLogs();
+    consoleBox.querySelector("#vn-filter-all")?.addEventListener("click", () => {
+      this.activeFilter = "all";
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    consoleBox.querySelector("#vn-filter-info")?.addEventListener("click", () => {
+      this.activeFilter = "info";
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    consoleBox.querySelector("#vn-filter-warn")?.addEventListener("click", () => {
+      this.activeFilter = "warn";
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    consoleBox.querySelector("#vn-filter-error")?.addEventListener("click", () => {
+      this.activeFilter = "error";
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    consoleBox.querySelector("#vn-clear-logs")?.addEventListener("click", () => {
+      diagBus.clearLogs();
+      renderLogs();
+    });
+    ledgerBox.querySelector("#vn-copy-editor-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const textarea = ledgerBox.querySelector("#vn-ledger-editor");
+      if (textarea) {
+        await navigator.clipboard.writeText(textarea.value).catch(() => {
+          return;
+        });
+        showToast(btn, "Copy Block");
+      }
+    });
+    const updateDirectorCard = () => {
+      const note = diagBus.getDirectorNote();
+      const labelEl = directorCard.querySelector("#vn-director-thread-label");
+      const bodyEl = directorCard.querySelector("#vn-director-note-body");
+      if (labelEl)
+        labelEl.textContent = note?.threadLabel || "General Steering";
+      if (bodyEl)
+        bodyEl.textContent = note?.directorNote || "No active turn steering notes recorded.";
+    };
+    if (this.unsubscribeBus)
+      this.unsubscribeBus();
+    this.unsubscribeBus = diagBus.subscribe(() => {
+      renderLogs();
+      updateDirectorCard();
+    });
+  }
+  destroy() {
+    if (this.unsubscribeBus) {
+      this.unsubscribeBus();
+      this.unsubscribeBus = undefined;
+    }
+  }
+}
+
 // src/frontend/hud/menu-bar.ts
+var ALL_HUD_TABS = [
+  { id: "characters", icon: "\uD83D\uDC65", label: "Cast" },
+  { id: "stats", icon: "\uD83D\uDCCA", label: "Stats" },
+  { id: "rpg", icon: "⚔️", label: "RPG / Dice" },
+  { id: "inventory", icon: "\uD83C\uDF92", label: "Inventory" },
+  { id: "wardrobe", icon: "\uD83D\uDC57", label: "Wardrobe" },
+  { id: "map", icon: "\uD83D\uDDFA️", label: "Map" },
+  { id: "phone", icon: "\uD83D\uDCF1", label: "Phone" },
+  { id: "journal", icon: "\uD83D\uDCDC", label: "Journal" },
+  { id: "scene", icon: "\uD83C\uDFAC", label: "Scene" },
+  { id: "bplots", icon: "\uD83D\uDCE1", label: "B-Plots" },
+  { id: "diagnostics", icon: "\uD83D\uDCCB", label: "Rulebook / Diag" }
+];
+
 class MenuBar {
   root;
   panelOverlay;
@@ -12630,21 +12485,8 @@ class MenuBar {
     this.journalTab = new JournalTab;
     this.sceneTab = new SceneTab(opts.ctx, opts.onTransformChange);
     this.rpgTab = new RpgTab(opts.ctx, opts.onAction);
-    this.diagnosticsTab = new DiagnosticsTab(opts.ctx, opts.audioEngine);
-    const barItems = [
-      { id: "characters", icon: "\uD83D\uDC65", label: "Cast" },
-      { id: "stats", icon: "\uD83D\uDCCA", label: "Stats" },
-      { id: "rpg", icon: "⚔️", label: "RPG / Dice" },
-      { id: "inventory", icon: "\uD83C\uDF92", label: "Inventory" },
-      { id: "wardrobe", icon: "\uD83D\uDC57", label: "Wardrobe" },
-      { id: "map", icon: "\uD83D\uDDFA️", label: "Map" },
-      { id: "phone", icon: "\uD83D\uDCF1", label: "Phone" },
-      { id: "journal", icon: "\uD83D\uDCDC", label: "Journal" },
-      { id: "scene", icon: "\uD83C\uDFAC", label: "Scene" },
-      { id: "bplots", icon: "\uD83D\uDCE1", label: "B-Plots" },
-      { id: "diagnostics", icon: "\uD83D\uDCCB", label: "Copy / Diag" }
-    ];
-    for (const item of barItems) {
+    this.diagnosticsTab = new DiagnosticsTab(opts.ctx, opts.audioEngine, this);
+    for (const item of ALL_HUD_TABS) {
       const btn = document.createElement("button");
       btn.className = "vn-hud-btn";
       btn.dataset.tabId = item.id;
@@ -12665,6 +12507,39 @@ class MenuBar {
       });
       this.root.appendChild(btn);
     }
+    this.setVisibleTabs(this.getVisibleTabs());
+  }
+  getVisibleTabs() {
+    try {
+      if (typeof localStorage !== "undefined") {
+        const raw = localStorage.getItem("vn_hud_enabled_tabs");
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr) && arr.length > 0)
+            return arr;
+        }
+      }
+    } catch {}
+    return ALL_HUD_TABS.map((t) => t.id);
+  }
+  setVisibleTabs(enabledTabIds) {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("vn_hud_enabled_tabs", JSON.stringify(enabledTabIds));
+      }
+    } catch {}
+    const buttons = this.root.querySelectorAll(".vn-hud-btn");
+    buttons.forEach((node) => {
+      const btn = node;
+      const tid = btn.dataset.tabId;
+      if (!tid)
+        return;
+      if (tid === "diagnostics") {
+        btn.style.display = "flex";
+        return;
+      }
+      btn.style.display = enabledTabIds.includes(tid) ? "flex" : "none";
+    });
   }
   getOverlay() {
     return this.panelOverlay;
@@ -15003,10 +14878,10 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
         </button>
       </div>
 
-      <!-- Director Prompt Editor Card -->
-      <details class="vn-director-card" open style="background: rgba(15, 23, 42, 0.7); border: 1px solid #334155; border-radius: 10px; padding: 12px;">
-        <summary style="font-size: 13px; font-weight: 700; color: #a5b4fc; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none;">
-          <span>\uD83C\uDFAC Director Instructions & Scene Notes</span>
+      <!-- Simulation Rulebook & Director Card -->
+      <details class="vn-director-card" open style="background: rgba(15, 23, 42, 0.7); border: 1px solid #38bdf8; border-radius: 10px; padding: 12px;">
+        <summary style="font-size: 13px; font-weight: 700; color: #38bdf8; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none;">
+          <span>\uD83D\uDCD6 Simulation Rulebook & Director</span>
           <label id="vn-director-toggle-label" style="font-size: 11px; font-weight: 500; color: #cbd5e1; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" onclick="event.stopPropagation()">
             <input type="checkbox" id="vn-director-enabled" checked style="accent-color: #6366f1; cursor: pointer;" />
             Active
@@ -15014,23 +14889,58 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
         </summary>
 
         <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">
-          <div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-              <label for="vn-director-system" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase;">
+          <!-- Sub-tabs bar -->
+          <div style="display: flex; gap: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 6px; flex-wrap: wrap;">
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="director" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer; font-weight: 700;">\uD83C\uDFAC Director</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="stats" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83D\uDCCA Stat Rules</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="ledger" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83D\uDCDC Ledger Schema</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="rpg" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">⚔️ RPG Rules</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="tabs" style="background: #1e293b; color: #34d399; border: 1px solid #059669; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">\uD83C\uDF9B️ HUD Tabs</button>
+          </div>
+
+          <div id="vn-dr-panel-director" class="vn-dr-panel" style="display: flex; flex-direction: column; gap: 8px;">
+            <div>
+              <label for="vn-director-system" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; display: block; margin-bottom: 4px;">
                 Director System Directives
               </label>
+              <textarea id="vn-director-system" rows="4" placeholder="System directives enforced before generation..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 8px; resize: vertical; line-height: 1.4;"></textarea>
             </div>
-            <textarea id="vn-director-system" rows="4" placeholder="System directives enforced before generation..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 8px; resize: vertical; line-height: 1.4;"></textarea>
+            <div>
+              <label for="vn-director-notes" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; display: block; margin-bottom: 4px;">
+                Scene Notes & Guidance (Macros: {{user}}, {{char}})
+              </label>
+              <textarea id="vn-director-notes" rows="3" placeholder="Optional turn guidance..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 8px; resize: vertical; line-height: 1.4;"></textarea>
+            </div>
           </div>
 
-          <div>
-            <label for="vn-director-notes" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; display: block; margin-bottom: 4px;">
-              Scene Notes & Guidance (Macros: {{user}}, {{char}})
-            </label>
-            <textarea id="vn-director-notes" rows="3" placeholder="Optional turn guidance..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 8px; resize: vertical; line-height: 1.4;"></textarea>
+          <div id="vn-dr-panel-stats" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; color: #94a3b8;">Stat Rules Formulation:</label>
+            <textarea id="vn-drawer-stat-rules" rows="6" style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 8px; resize: vertical;"></textarea>
           </div>
 
-          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <div id="vn-dr-panel-ledger" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema:</label>
+            <textarea id="vn-drawer-ledger-prompt" rows="6" style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 8px; resize: vertical;"></textarea>
+          </div>
+
+          <div id="vn-dr-panel-rpg" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; color: #94a3b8;">RPG & Skills Progression Directives:</label>
+            <textarea id="vn-drawer-rpg-prompt" rows="6" style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 8px; resize: vertical;"></textarea>
+          </div>
+
+          <div id="vn-dr-panel-tabs" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 6px;">
+            <label style="font-size: 10px; color: #94a3b8;">HUD Tab Checkboxes (Show / Hide):</label>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;">
+              ${ALL_HUD_TABS.filter((t) => t.id !== "diagnostics").map((tabItem) => `
+                <label style="background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 4px 6px; display: flex; align-items: center; gap: 4px; font-size: 10px; cursor: pointer; color: #f8fafc;">
+                  <input type="checkbox" class="vn-drawer-tab-cb" data-tab-id="${tabItem.id}" checked style="accent-color: #10b981; cursor: pointer;" />
+                  <span>${tabItem.icon}</span> <span>${tabItem.label}</span>
+                </label>
+              `).join("")}
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px;">
             <button id="vn-director-save-btn" type="button" style="padding: 6px 14px; font-size: 11px; font-weight: 700; background: #6366f1; border: none; border-radius: 6px; color: #fff; cursor: pointer; transition: background 0.2s;">
               Save Directives
             </button>
@@ -15189,6 +15099,54 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
   };
   tabLogsBtn?.addEventListener("click", () => setConsoleTab("logs"));
   tabDirectorBtn?.addEventListener("click", () => setConsoleTab("director"));
+  const drawerStatRules = root.querySelector("#vn-drawer-stat-rules");
+  const drawerLedgerPrompt = root.querySelector("#vn-drawer-ledger-prompt");
+  const drawerRpgPrompt = root.querySelector("#vn-drawer-rpg-prompt");
+  if (drawerStatRules)
+    drawerStatRules.value = DEFAULT_STAT_RULES;
+  if (drawerLedgerPrompt)
+    drawerLedgerPrompt.value = DEFAULT_LEDGER_PROMPT;
+  if (drawerRpgPrompt)
+    drawerRpgPrompt.value = DEFAULT_RPG_PROMPT;
+  const drSubtabBtns = root.querySelectorAll(".vn-dr-subtab-btn");
+  drSubtabBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.subtab;
+      if (!target)
+        return;
+      drSubtabBtns.forEach((b) => {
+        b.style.background = "#1e293b";
+        b.style.color = "#94a3b8";
+        b.style.fontWeight = "normal";
+        b.style.borderColor = "#334155";
+      });
+      btn.style.background = "#0284c7";
+      btn.style.color = "#fff";
+      btn.style.fontWeight = "700";
+      btn.style.borderColor = "#38bdf8";
+      root.querySelectorAll(".vn-dr-panel").forEach((p) => p.style.display = "none");
+      const activePanel = root.querySelector(`#vn-dr-panel-${target}`);
+      if (activePanel)
+        activePanel.style.display = "flex";
+    });
+  });
+  try {
+    const rawSavedTabs = localStorage.getItem("vn_hud_enabled_tabs");
+    if (rawSavedTabs) {
+      const savedList = JSON.parse(rawSavedTabs);
+      root.querySelectorAll(".vn-drawer-tab-cb").forEach((cb) => {
+        cb.checked = savedList.includes(cb.dataset.tabId || "");
+      });
+    }
+  } catch {}
+  root.querySelectorAll(".vn-drawer-tab-cb").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const checkedList = Array.from(root.querySelectorAll(".vn-drawer-tab-cb:checked")).map((c) => c.dataset.tabId || "").filter(Boolean);
+      try {
+        localStorage.setItem("vn_hud_enabled_tabs", JSON.stringify(checkedList));
+      } catch {}
+    });
+  });
   saveBtn?.addEventListener("click", () => {
     const settings = {
       systemPrompt: systemTextarea?.value || "",
@@ -15199,6 +15157,18 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
       type: "vn_save_director_settings",
       settings
     });
+    if (drawerStatRules || drawerLedgerPrompt || drawerRpgPrompt) {
+      ctx.sendToBackend?.({
+        type: "vn_save_stat_rules_settings",
+        settings: {
+          mode: "mvu_quiet",
+          statRules: drawerStatRules?.value?.trim() || DEFAULT_STAT_RULES,
+          ledgerPrompt: drawerLedgerPrompt?.value?.trim() || DEFAULT_LEDGER_PROMPT,
+          rpgPrompt: drawerRpgPrompt?.value?.trim() || DEFAULT_RPG_PROMPT,
+          enabled: true
+        }
+      });
+    }
     if (saveBtn) {
       saveBtn.textContent = "✓ Saved!";
       setTimeout(() => saveBtn.textContent = "Save Directives", 1500);
@@ -15515,38 +15485,6 @@ function setup(ctx) {
   });
   mountContainer.appendChild(overlay.root);
   const diagDrawer = registerDiagnosticsDrawer(ctx, toggleStage);
-  const charactersDrawerTab = new CharactersTab(undefined, ctx);
-  const statsDrawerTab = new StatsTab;
-  let nativeCastTabHandle = null;
-  let nativeStatsTabHandle = null;
-  if (typeof ctx.ui?.registerDrawerTab === "function") {
-    nativeCastTabHandle = ctx.ui.registerDrawerTab({
-      id: "vn_cast",
-      title: "LumiVN Cast Dossiers",
-      shortName: "Cast",
-      headerTitle: "Cast & Character Dossiers",
-      description: "Inspect character dossiers, passions, traits, and relationship networks",
-      keywords: ["cast", "characters", "dossier", "passions", "vn"],
-      iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
-    });
-    if (nativeCastTabHandle?.root) {
-      nativeCastTabHandle.root.style.cssText = "height: 100%; overflow-y: auto; padding: 12px; box-sizing: border-box;";
-      nativeCastTabHandle.root.appendChild(charactersDrawerTab.root);
-    }
-    nativeStatsTabHandle = ctx.ui.registerDrawerTab({
-      id: "vn_stats",
-      title: "LumiVN Stats Matrix",
-      shortName: "Stats",
-      headerTitle: "Status & 21-Stat Network",
-      description: "Inspect 21-stat network, vitals, and relationship matrix",
-      keywords: ["stats", "matrix", "vitals", "passions", "vn"],
-      iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`
-    });
-    if (nativeStatsTabHandle?.root) {
-      nativeStatsTabHandle.root.style.cssText = "height: 100%; overflow-y: auto; padding: 12px; box-sizing: border-box;";
-      nativeStatsTabHandle.root.appendChild(statsDrawerTab.root);
-    }
-  }
   const WIDGET_STORAGE_KEY = "lumivn_launcher_widget_pos";
   function getSavedWidgetPosition() {
     try {
@@ -15694,17 +15632,12 @@ function setup(ctx) {
       overlay.updatePresentation(st);
       diagDrawer?.setLatestLedger(st.ledger);
       diagBus.setLedger(st.ledger);
-      if (st.ledger) {
-        charactersDrawerTab.render(st.ledger, overlay.getManifest?.() || undefined);
-        statsDrawerTab.render(st.ledger);
-      }
     } else if (payload.type === "vn_diagnostic_update" && payload.data) {
       diagDrawer?.updateDiagnostic(payload.data);
       diagBus.setTelemetry(payload.data);
     } else if (payload.type === "vn_manifest" && payload.manifest) {
       overlay.setManifest(payload.manifest);
       diagBus.setManifest(payload.manifest);
-      charactersDrawerTab.render(diagBus.getLedger(), payload.manifest);
     } else if (payload.type === "vn_generating") {
       const targetCid = typeof payload.chatId === "string" ? payload.chatId : null;
       if (overlay.isActive() && (!targetCid || overlay.getCurrentChatId() === targetCid)) {
@@ -15747,8 +15680,6 @@ function setup(ctx) {
     inputBarActionHandle?.destroy();
     floatWidget?.destroy();
     diagDrawer?.tab.destroy();
-    nativeCastTabHandle?.destroy?.();
-    nativeStatsTabHandle?.destroy?.();
     overlay.destroy();
     if (appMount) {
       appMount.destroy();

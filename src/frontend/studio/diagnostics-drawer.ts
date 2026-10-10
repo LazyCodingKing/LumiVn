@@ -1,6 +1,9 @@
 import type { SpindleFrontendContext, SpindleDrawerTabHandle } from "lumiverse-spindle-types";
 import type { DiagnosticData, DirectorSettings, DirectorLogEntry } from "../../shared/types.js";
 import { PROP_TEMPLATES_CATALOG, formatDialogueHtml, TEXT_EFFECTS_CSS } from "../stage/rich-text.js";
+import { DEFAULT_STAT_RULES, DEFAULT_LEDGER_PROMPT } from "../../backend/default-rules.js";
+import { DEFAULT_RPG_PROMPT } from "../../backend/storage.js";
+import { ALL_HUD_TABS } from "../hud/menu-bar.js";
 
 export interface DiagnosticsDrawerHandle {
   tab: SpindleDrawerTabHandle;
@@ -56,10 +59,10 @@ export function registerDiagnosticsDrawer(
         </button>
       </div>
 
-      <!-- Director Prompt Editor Card -->
-      <details class="vn-director-card" open style="background: rgba(15, 23, 42, 0.7); border: 1px solid #334155; border-radius: 10px; padding: 12px;">
-        <summary style="font-size: 13px; font-weight: 700; color: #a5b4fc; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none;">
-          <span>🎬 Director Instructions & Scene Notes</span>
+      <!-- Simulation Rulebook & Director Card -->
+      <details class="vn-director-card" open style="background: rgba(15, 23, 42, 0.7); border: 1px solid #38bdf8; border-radius: 10px; padding: 12px;">
+        <summary style="font-size: 13px; font-weight: 700; color: #38bdf8; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none;">
+          <span>📖 Simulation Rulebook & Director</span>
           <label id="vn-director-toggle-label" style="font-size: 11px; font-weight: 500; color: #cbd5e1; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" onclick="event.stopPropagation()">
             <input type="checkbox" id="vn-director-enabled" checked style="accent-color: #6366f1; cursor: pointer;" />
             Active
@@ -67,23 +70,58 @@ export function registerDiagnosticsDrawer(
         </summary>
 
         <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">
-          <div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-              <label for="vn-director-system" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase;">
+          <!-- Sub-tabs bar -->
+          <div style="display: flex; gap: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 6px; flex-wrap: wrap;">
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="director" style="background: #0284c7; color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer; font-weight: 700;">🎬 Director</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="stats" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">📊 Stat Rules</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="ledger" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">📜 Ledger Schema</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="rpg" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">⚔️ RPG Rules</button>
+            <button type="button" class="vn-dr-subtab-btn" data-subtab="tabs" style="background: #1e293b; color: #34d399; border: 1px solid #059669; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;">🎛️ HUD Tabs</button>
+          </div>
+
+          <div id="vn-dr-panel-director" class="vn-dr-panel" style="display: flex; flex-direction: column; gap: 8px;">
+            <div>
+              <label for="vn-director-system" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; display: block; margin-bottom: 4px;">
                 Director System Directives
               </label>
+              <textarea id="vn-director-system" rows="4" placeholder="System directives enforced before generation..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 8px; resize: vertical; line-height: 1.4;"></textarea>
             </div>
-            <textarea id="vn-director-system" rows="4" placeholder="System directives enforced before generation..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 8px; resize: vertical; line-height: 1.4;"></textarea>
+            <div>
+              <label for="vn-director-notes" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; display: block; margin-bottom: 4px;">
+                Scene Notes & Guidance (Macros: {{user}}, {{char}})
+              </label>
+              <textarea id="vn-director-notes" rows="3" placeholder="Optional turn guidance..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 8px; resize: vertical; line-height: 1.4;"></textarea>
+            </div>
           </div>
 
-          <div>
-            <label for="vn-director-notes" style="font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; display: block; margin-bottom: 4px;">
-              Scene Notes & Guidance (Macros: {{user}}, {{char}})
-            </label>
-            <textarea id="vn-director-notes" rows="3" placeholder="Optional turn guidance..." style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 8px; resize: vertical; line-height: 1.4;"></textarea>
+          <div id="vn-dr-panel-stats" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; color: #94a3b8;">Stat Rules Formulation:</label>
+            <textarea id="vn-drawer-stat-rules" rows="6" style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 8px; resize: vertical;"></textarea>
           </div>
 
-          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <div id="vn-dr-panel-ledger" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema:</label>
+            <textarea id="vn-drawer-ledger-prompt" rows="6" style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 8px; resize: vertical;"></textarea>
+          </div>
+
+          <div id="vn-dr-panel-rpg" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 4px;">
+            <label style="font-size: 10px; color: #94a3b8;">RPG & Skills Progression Directives:</label>
+            <textarea id="vn-drawer-rpg-prompt" rows="6" style="width: 100%; box-sizing: border-box; background: #020617; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 8px; resize: vertical;"></textarea>
+          </div>
+
+          <div id="vn-dr-panel-tabs" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 6px;">
+            <label style="font-size: 10px; color: #94a3b8;">HUD Tab Checkboxes (Show / Hide):</label>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;">
+              ${ALL_HUD_TABS.filter((t) => t.id !== "diagnostics").map((tabItem) => `
+                <label style="background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 4px 6px; display: flex; align-items: center; gap: 4px; font-size: 10px; cursor: pointer; color: #f8fafc;">
+                  <input type="checkbox" class="vn-drawer-tab-cb" data-tab-id="${tabItem.id}" checked style="accent-color: #10b981; cursor: pointer;" />
+                  <span>${tabItem.icon}</span> <span>${tabItem.label}</span>
+                </label>
+              `).join("")}
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px;">
             <button id="vn-director-save-btn" type="button" style="padding: 6px 14px; font-size: 11px; font-weight: 700; background: #6366f1; border: none; border-radius: 6px; color: #fff; cursor: pointer; transition: background 0.2s;">
               Save Directives
             </button>
@@ -247,6 +285,59 @@ export function registerDiagnosticsDrawer(
   tabLogsBtn?.addEventListener("click", () => setConsoleTab("logs"));
   tabDirectorBtn?.addEventListener("click", () => setConsoleTab("director"));
 
+  const drawerStatRules = root.querySelector("#vn-drawer-stat-rules") as HTMLTextAreaElement | null;
+  const drawerLedgerPrompt = root.querySelector("#vn-drawer-ledger-prompt") as HTMLTextAreaElement | null;
+  const drawerRpgPrompt = root.querySelector("#vn-drawer-rpg-prompt") as HTMLTextAreaElement | null;
+
+  if (drawerStatRules) drawerStatRules.value = DEFAULT_STAT_RULES;
+  if (drawerLedgerPrompt) drawerLedgerPrompt.value = DEFAULT_LEDGER_PROMPT;
+  if (drawerRpgPrompt) drawerRpgPrompt.value = DEFAULT_RPG_PROMPT;
+
+  // Drawer rulebook subtab switching
+  const drSubtabBtns = root.querySelectorAll<HTMLButtonElement>(".vn-dr-subtab-btn");
+  drSubtabBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.subtab;
+      if (!target) return;
+      drSubtabBtns.forEach((b) => {
+        b.style.background = "#1e293b";
+        b.style.color = "#94a3b8";
+        b.style.fontWeight = "normal";
+        b.style.borderColor = "#334155";
+      });
+      btn.style.background = "#0284c7";
+      btn.style.color = "#fff";
+      btn.style.fontWeight = "700";
+      btn.style.borderColor = "#38bdf8";
+
+      root.querySelectorAll<HTMLElement>(".vn-dr-panel").forEach((p) => (p.style.display = "none"));
+      const activePanel = root.querySelector(`#vn-dr-panel-${target}`) as HTMLElement | null;
+      if (activePanel) activePanel.style.display = "flex";
+    });
+  });
+
+  // Drawer HUD tab checkboxes
+  try {
+    const rawSavedTabs = localStorage.getItem("vn_hud_enabled_tabs");
+    if (rawSavedTabs) {
+      const savedList: string[] = JSON.parse(rawSavedTabs);
+      root.querySelectorAll<HTMLInputElement>(".vn-drawer-tab-cb").forEach((cb) => {
+        cb.checked = savedList.includes(cb.dataset.tabId || "");
+      });
+    }
+  } catch {}
+
+  root.querySelectorAll<HTMLInputElement>(".vn-drawer-tab-cb").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const checkedList = Array.from(root.querySelectorAll<HTMLInputElement>(".vn-drawer-tab-cb:checked"))
+        .map((c) => c.dataset.tabId || "")
+        .filter(Boolean);
+      try {
+        localStorage.setItem("vn_hud_enabled_tabs", JSON.stringify(checkedList));
+      } catch {}
+    });
+  });
+
   saveBtn?.addEventListener("click", () => {
     const settings: DirectorSettings = {
       systemPrompt: systemTextarea?.value || "",
@@ -257,6 +348,20 @@ export function registerDiagnosticsDrawer(
       type: "vn_save_director_settings",
       settings,
     });
+
+    if (drawerStatRules || drawerLedgerPrompt || drawerRpgPrompt) {
+      ctx.sendToBackend?.({
+        type: "vn_save_stat_rules_settings",
+        settings: {
+          mode: "mvu_quiet",
+          statRules: drawerStatRules?.value?.trim() || DEFAULT_STAT_RULES,
+          ledgerPrompt: drawerLedgerPrompt?.value?.trim() || DEFAULT_LEDGER_PROMPT,
+          rpgPrompt: drawerRpgPrompt?.value?.trim() || DEFAULT_RPG_PROMPT,
+          enabled: true,
+        },
+      });
+    }
+
     if (saveBtn) {
       saveBtn.textContent = "✓ Saved!";
       setTimeout(() => (saveBtn.textContent = "Save Directives"), 1500);
