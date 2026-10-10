@@ -109,6 +109,7 @@ export const DEFAULT_LEDGER_PROMPT = `LEDGER (after prose; authoritative world s
 3. Props exist in exactly one place (hand slot, container, or local \`places.resources\`); transfers are zero-sum.
 4. Place keys MUST be \`<unique_scope_name>:<room>\` (e.g. \`tendo_residence:kitchen\`, \`nerima_high:classroom_2a\`) so backgrounds map without room-name collisions.
 5. ALWAYS EMIT: clock, scene, roster, journal, open opportunities, bplots (\`id\` + changed fields only; ripple, status, due, carrier changes count as changed).
+6. DIRECTOR INTEGRATION: Record each Director SEED once, as an NPC dossier stub, bplot, front, or world.facts line, then continue it from the ledger. On 'PROMOTE: id', raise that NPC to LOD 3, write a full dossier with edges starting at 0 toward {{user}}, and update the roster. Write journal memories and grudges into the NPC's dossier so the Response Gate can read them next turn. When a place is first entered or has resources: [], seed places.resources with 3-6 ordinary objects that fit its function, era, and setting (one large fixture, one small portable item, one item an inhabitant would use), with no plot value unless a ledger cause supports it. Add any fixture contents the Director gives in CANON to places.resources. Props exist in one place only; moves and consumption are zero-sum.
 
 Always append this details block after prose:
 <details><summary>📊 Ledger</summary>
