@@ -89,7 +89,7 @@ export class MenuBar {
 
     // Instantiate tab views
     this.charactersTab = new CharactersTab(opts.ttsEngine, opts.ctx);
-    this.bplotsTab = new BPlotsTab();
+    this.bplotsTab = new BPlotsTab(opts.onAction);
     this.wardrobeTab = new WardrobeTab(opts.onAction);
     this.statsTab = new StatsTab();
     this.inventoryTab = new InventoryTab(opts.onAction);

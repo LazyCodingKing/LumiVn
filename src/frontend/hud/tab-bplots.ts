@@ -1,9 +1,66 @@
 import type { LedgerData, BPlot, RosterCharacter, FrontNode, TravelNode, SceneLatent } from "../../shared/types.js";
 
+export interface InterludeBeat {
+  speaker: string;
+  avatarIcon: string;
+  text: string;
+  type: "dialogue" | "action";
+}
+
+export function generateBondInterlude(
+  actorA: { id: string; name?: string; loc?: string; status?: string; want?: string },
+  actorB: { id: string; name?: string; loc?: string; status?: string; want?: string },
+  placeName?: string
+): InterludeBeat[] {
+  const nameA = actorA.name || actorA.id;
+  const nameB = actorB.name || actorB.id;
+  const loc = placeName || actorA.loc || actorB.loc || "the district outskirts";
+
+  return [
+    {
+      speaker: "Narrator",
+      avatarIcon: "🎬",
+      type: "action",
+      text: `[Off-Screen Interlude: Meanwhile, at ${loc}... ${nameA} and ${nameB} meet quietly, away from the spotlight.]`,
+    },
+    {
+      speaker: nameA,
+      avatarIcon: "👤",
+      type: "dialogue",
+      text: actorA.status
+        ? `"${nameB}, thank you for meeting me here. As you know, ${actorA.status}."`
+        : `"${nameB}, do you have a moment? There is a matter between us that cannot wait."`,
+    },
+    {
+      speaker: nameB,
+      avatarIcon: "👥",
+      type: "dialogue",
+      text: actorB.want
+        ? `"I hear you clearly. But my own agenda regarding ${actorB.want} remains just as urgent."`
+        : `"I've been keeping an eye on things as well. Let us be plain about what is happening."`,
+    },
+    {
+      speaker: nameA,
+      avatarIcon: "👤",
+      type: "dialogue",
+      text: `"If we coordinate our moves now, neither of us will be blindsided by whatever comes next."`,
+    },
+    {
+      speaker: nameB,
+      avatarIcon: "👥",
+      type: "dialogue",
+      text: `"Agreed. Keep this between ourselves until the timing is right."`,
+    },
+  ];
+}
+
 export class BPlotsTab {
   public root: HTMLElement;
+  private onAction?: (actionText: string) => void;
+  private activeCutscene: { actorA: string; actorB: string; beats: InterludeBeat[]; currentBeat: number } | null = null;
 
-  constructor() {
+  constructor(onAction?: (actionText: string) => void) {
+    this.onAction = onAction;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-bplots";
   }
@@ -181,6 +238,152 @@ export class BPlotsTab {
       offSection.appendChild(offGrid);
     }
     this.root.appendChild(offSection);
+
+    // ── 3. Bond Theater (Emergent NPC × NPC Cutscenes) ──
+    const theaterSec = document.createElement("div");
+    theaterSec.className = "vn-section";
+    theaterSec.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <h4 style="margin: 0;">🎬 Bond Theater — NPC × NPC Offscreen Interlude</h4>
+        <span style="font-size: 10px; color: #a5b4fc; background: rgba(99,102,241,0.2); padding: 2px 8px; border-radius: 4px;">Emergent Cutscene Player</span>
+      </div>
+    `;
+
+    const allNpcCandidates = [
+      ...offscreenCast.map((c) => ({ id: c.id, name: c.name || c.id, loc: c.loc, status: c.status, want: "" })),
+      ...bplots.map((b) => ({ id: b.who || b.id || "Unknown", name: b.who || b.id, loc: "district", status: b.doing, want: b.want })),
+    ];
+
+    const uniqueNpcs = Array.from(new Map(allNpcCandidates.map((n) => [n.id, n])).values());
+
+    if (uniqueNpcs.length < 2) {
+      theaterSec.innerHTML += `
+        <div class="vn-muted" style="padding: 12px; background: #0f172a; border-radius: 8px; border: 1px dashed #334155; font-size: 11px;">
+          Bond Theater stages confidential side scenes when at least two offscreen actors or B-plot carriers are active in the world.
+        </div>
+      `;
+    } else {
+      const theaterCard = document.createElement("div");
+      theaterCard.style.cssText =
+        "background: #0f172a; border: 1px solid #6366f1; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);";
+
+      theaterCard.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #1e293b; padding-bottom: 10px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 11px; color: #94a3b8;">Actor 1:</span>
+            <select id="vn-theater-actor-a" style="background: #1e293b; border: 1px solid #475569; color: #38bdf8; font-size: 11px; padding: 3px 8px; border-radius: 4px; outline: none; cursor: pointer;">
+              ${uniqueNpcs.map((n) => `<option value="${n.id}">${n.name}</option>`).join("")}
+            </select>
+            <span style="font-size: 11px; color: #94a3b8;">×</span>
+            <span style="font-size: 11px; color: #94a3b8;">Actor 2:</span>
+            <select id="vn-theater-actor-b" style="background: #1e293b; border: 1px solid #475569; color: #c084fc; font-size: 11px; padding: 3px 8px; border-radius: 4px; outline: none; cursor: pointer;">
+              ${uniqueNpcs.map((n, idx) => `<option value="${n.id}" ${idx === 1 ? "selected" : ""}>${n.name}</option>`).join("")}
+            </select>
+          </div>
+          <button id="vn-start-theater-btn" style="background: linear-gradient(135deg, #4f46e5, #6366f1); border: none; color: #fff; font-size: 11px; font-weight: 700; padding: 5px 14px; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 8px rgba(99,102,241,0.4);">
+            ▶ Watch Interlude
+          </button>
+        </div>
+
+        <div id="vn-theater-stage-box" style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="color: #94a3b8; font-size: 11px; font-style: italic; padding: 10px; text-align: center;">
+            Select two actors above and click "Watch Interlude" to listen into their offscreen conversation.
+          </div>
+        </div>
+      `;
+
+      theaterSec.appendChild(theaterCard);
+
+      const stageBox = theaterCard.querySelector("#vn-theater-stage-box") as HTMLElement;
+      const startBtn = theaterCard.querySelector("#vn-start-theater-btn") as HTMLButtonElement;
+      const selectA = theaterCard.querySelector("#vn-theater-actor-a") as HTMLSelectElement;
+      const selectB = theaterCard.querySelector("#vn-theater-actor-b") as HTMLSelectElement;
+
+      startBtn?.addEventListener("click", () => {
+        const idA = selectA.value;
+        const idB = selectB.value;
+        const npcA = uniqueNpcs.find((n) => n.id === idA) || uniqueNpcs[0]!;
+        const npcB = uniqueNpcs.find((n) => n.id === idB) || uniqueNpcs[1]!;
+
+        const beats = generateBondInterlude(npcA, npcB, ledger.scene?.place);
+        let currentBeatIdx = 0;
+
+        const renderBeat = () => {
+          stageBox.innerHTML = "";
+          const beat = beats[currentBeatIdx]!;
+          const isFinal = currentBeatIdx === beats.length - 1;
+
+          const beatCard = document.createElement("div");
+          beatCard.style.cssText =
+            "background: #1e293b; border: 1px solid #475569; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;";
+
+          beatCard.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 6px;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 14px;">${beat.avatarIcon}</span>
+                <strong style="color: ${beat.type === "action" ? "#a5b4fc" : "#38bdf8"}; font-size: 12px;">${beat.speaker}</strong>
+              </div>
+              <span style="font-size: 10px; color: #94a3b8;">Beat ${currentBeatIdx + 1} of ${beats.length}</span>
+            </div>
+            <div style="font-size: 12px; color: #f8fafc; line-height: 1.5; font-style: ${beat.type === "action" ? "italic" : "normal"};">
+              ${beat.text}
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 6px; border-top: 1px solid #334155;">
+              <button id="vn-prev-beat-btn" style="background: transparent; border: 1px solid #475569; color: #cbd5e1; font-size: 10px; border-radius: 4px; padding: 3px 8px; cursor: ${currentBeatIdx > 0 ? "pointer" : "default"}; opacity: ${currentBeatIdx > 0 ? "1" : "0.4"};" ${currentBeatIdx === 0 ? "disabled" : ""}>
+                ◀ Previous
+              </button>
+              <div style="display: flex; gap: 6px;">
+                ${
+                  isFinal
+                    ? `
+                  <button id="vn-share-intel-btn" style="background: linear-gradient(135deg, #059669, #10b981); border: none; color: #fff; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 4px 10px; cursor: pointer;">
+                    📡 Share Intel to Story
+                  </button>
+                `
+                    : `
+                  <button id="vn-next-beat-btn" style="background: #6366f1; border: none; color: #fff; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 4px 12px; cursor: pointer;">
+                    Next Beat ▶
+                  </button>
+                `
+                }
+              </div>
+            </div>
+          `;
+
+          stageBox.appendChild(beatCard);
+
+          beatCard.querySelector("#vn-prev-beat-btn")?.addEventListener("click", () => {
+            if (currentBeatIdx > 0) {
+              currentBeatIdx -= 1;
+              renderBeat();
+            }
+          });
+
+          beatCard.querySelector("#vn-next-beat-btn")?.addEventListener("click", () => {
+            if (currentBeatIdx < beats.length - 1) {
+              currentBeatIdx += 1;
+              renderBeat();
+            }
+          });
+
+          beatCard.querySelector("#vn-share-intel-btn")?.addEventListener("click", () => {
+            if (this.onAction) {
+              const intelText = `[Bond Theater Intel: Overheard confidential meeting between ${npcA.name} and ${npcB.name} regarding their offscreen coordination.]`;
+              this.onAction(intelText);
+              const shareBtn = beatCard.querySelector("#vn-share-intel-btn") as HTMLButtonElement;
+              if (shareBtn) {
+                shareBtn.textContent = "✓ Intel Shared!";
+                shareBtn.disabled = true;
+              }
+            }
+          });
+        };
+
+        renderBeat();
+      });
+    }
+
+    this.root.appendChild(theaterSec);
 
     // ── 3. Environmental Fronts Section ──
     if (fronts.length > 0) {

@@ -447,7 +447,23 @@ var DEFAULT_RPG_PROMPT = `RPG & COMBAT RULES DIRECTIVE:
 1. STAT & ATTRIBUTE TESTS: When an action has uncertain success, calculate against the actor's combat tier, aptitudes, and relevant stats.
 2. COMBAT ROUNDS: Tactical resolution respects distance, positioning, weapon range, physical stamina/integrity, and environmental hazards.
 3. DICE & CHANCE: D20 checks respect Natural 20 (Critical Success) and Natural 1 (Critical Fumble). Modifiers apply from attributes and situational advantage.
-4. CONSEQUENCES: Wounds reduce physical integrity, cause fatigue, and alter passions and stance. Record status mutations in ledger journal.`;
+4. CONSEQUENCES: Wounds reduce physical integrity, cause fatigue, and alter passions and stance. Record status mutations in ledger journal.
+
+SKILL TREES (Editable; parsed into interactive progression nodes):
+\u3010Tree: Warrior\u3011
+- Strike: tier=1 | cost=1 | requires=[] | type=active | cd=0 | cost_res={mp:0} | formula={ATK}*1.2 | desc=Basic decisive physical blow.
+- Cleave: tier=2 | cost=1 | requires=[Strike] | type=active | cd=2 | cost_res={mp:15} | formula={ATK}*1.8 | desc=Wide sweep dealing damage to targets.
+- Juggernaut: tier=3 | cost=2 | requires=[Cleave] | type=passive | desc=Armor mitigation increased by 20%.
+
+\u3010Tree: Sorcery\u3011
+- Spark: tier=1 | cost=1 | requires=[] | type=active | cd=0 | cost_res={mp:10} | formula={ATK}*1.2 | desc=Crackling bolt of electrical surge.
+- Firebolt: tier=2 | cost=1 | requires=[Spark] | type=active | cd=2 | cost_res={mp:25} | formula={ATK}*2.0+10 | desc=Hurl condensed flame sphere. Burns target.
+- Intense Flames: tier=3 | cost=2 | requires=[Firebolt] | type=passive | desc=Fire damage increased by +25%.
+
+\u3010Tree: Rogue\u3011
+- Shadowstep: tier=1 | cost=1 | requires=[] | type=active | cd=1 | cost_res={mp:10} | formula={ATK}*1.4 | desc=Slip behind opponent to strike.
+- Assassinate: tier=2 | cost=2 | requires=[Shadowstep] | type=active | cd=3 | cost_res={mp:30} | formula={ATK}*2.5 | desc=Lethal ambush attack.
+- Haggling: tier=1 | cost=1 | requires=[] | type=passive | desc=Store trading prices discounted by 15%.`;
 var DEFAULT_STAT_RULES_SETTINGS = {
   statRules: DEFAULT_STAT_RULES,
   ledgerPrompt: DEFAULT_LEDGER_PROMPT,

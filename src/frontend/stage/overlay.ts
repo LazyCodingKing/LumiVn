@@ -664,6 +664,103 @@ export class StageOverlay {
         filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));
       }
 
+      /* Tactile Sprite Touch Reactions */
+      .vn-touch-overlay {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        z-index: 10;
+        pointer-events: auto;
+      }
+      .vn-touch-zone {
+        width: 100%;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .vn-touch-zone:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .vn-touch-head {
+        height: 25%;
+      }
+      .vn-touch-face {
+        height: 25%;
+      }
+      .vn-touch-body {
+        height: 50%;
+      }
+      @keyframes vn-touch-bounce {
+        0% { transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1)); }
+        40% { transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 10px)) scale(calc(var(--char-scale, 1) * 1.05)); }
+        70% { transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) + 2px)) scale(calc(var(--char-scale, 1) * 0.98)); }
+        100% { transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1)); }
+      }
+      .vn-touch-bounce {
+        animation: vn-touch-bounce 0.45s cubic-bezier(0.17, 0.89, 0.32, 1.28) !important;
+      }
+      .vn-touch-bubble {
+        position: absolute;
+        top: -45px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(15, 23, 42, 0.94);
+        border: 1px solid rgba(129, 140, 248, 0.6);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(99, 102, 241, 0.3);
+        color: #f8fafc;
+        padding: 6px 12px;
+        border-radius: 12px;
+        font-size: 11px;
+        line-height: 1.4;
+        white-space: nowrap;
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        z-index: 20;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        animation: vn-bubble-pop 0.25s cubic-bezier(0.17, 0.89, 0.32, 1.28);
+        backdrop-filter: blur(8px);
+      }
+      .vn-touch-bubble::after {
+        content: "";
+        position: absolute;
+        bottom: -6px;
+        left: 50%;
+        transform: translateX(-50%);
+        border-width: 6px 6px 0;
+        border-style: solid;
+        border-color: rgba(15, 23, 42, 0.94) transparent transparent;
+        display: block;
+        width: 0;
+      }
+      .vn-touch-bubble-fade {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-8px);
+        transition: opacity 0.35s ease, transform 0.35s ease;
+      }
+      .vn-touch-bubble-name {
+        font-size: 9px;
+        font-weight: 800;
+        color: #38bdf8;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+      .vn-touch-bubble-text {
+        font-size: 11px;
+        color: #e2e8f0;
+        font-style: italic;
+      }
+      @keyframes vn-bubble-pop {
+        0% { opacity: 0; transform: translateX(-50%) scale(0.7) translateY(8px); }
+        100% { opacity: 1; transform: translateX(-50%) scale(1) translateY(0); }
+      }
+
       /* Classic Ren'Py ADV Lower-Third Dialogue Box */
       .vn-dialogue-box {
         position: absolute;

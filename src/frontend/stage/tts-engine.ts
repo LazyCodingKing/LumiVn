@@ -559,4 +559,13 @@ export class VnTtsEngine {
       cb.onError?.(new Error("No TTS connection selected and Web Speech API unavailable."));
     }
   }
+
+  public prefetchBeats(beats: Array<{ text: string; speaker?: string }>): void {
+    if (!this.settings.enabled || !Array.isArray(beats)) return;
+    for (const b of beats.slice(0, 5)) {
+      if (b.text) {
+        this.prefetch(b.text, b.speaker || "");
+      }
+    }
+  }
 }

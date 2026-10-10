@@ -157,8 +157,82 @@ export class StageRenderer {
       nameTag.textContent = char.name;
       slotEl.appendChild(nameTag);
 
+      // Tactile Touch Zones & Interaction Overlay
+      const touchOverlay = document.createElement("div");
+      touchOverlay.className = "vn-touch-overlay";
+
+      const zones: Array<{ id: "head" | "face" | "body"; label: string }> = [
+        { id: "head", label: "Headpat" },
+        { id: "face", label: "Touch cheek" },
+        { id: "body", label: "Touch hand" },
+      ];
+
+      for (const z of zones) {
+        const zoneEl = document.createElement("div");
+        zoneEl.className = `vn-touch-zone vn-touch-${z.id}`;
+        zoneEl.dataset.zone = z.id;
+        zoneEl.title = `${z.label} (${char.name})`;
+        zoneEl.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.triggerSpriteTouch(slotEl, char, z.id);
+        });
+        touchOverlay.appendChild(zoneEl);
+      }
+      slotEl.appendChild(touchOverlay);
+
       this.charactersContainer.appendChild(slotEl);
     }
+  }
+
+  public triggerSpriteTouch(slotEl: HTMLElement, char: StageCharacter, zone: "head" | "face" | "body"): string {
+    // 1. Play tactile micro-bounce animation
+    slotEl.classList.remove("vn-touch-bounce");
+    void slotEl.offsetWidth; // reflow trigger
+    slotEl.classList.add("vn-touch-bounce");
+
+    // 2. Select contextual dialogue line
+    const reactions: Record<"head" | "face" | "body", string[]> = {
+      head: [
+        "*leans in softly* ...That feels nice.",
+        "*blushes* Hey, don't mess up my hair!",
+        "*giggles softly* You always do that.",
+        "*soft exhale* ...Warm.",
+      ],
+      face: [
+        "*cheeks turn pink* W-what are you staring at?",
+        "*blinks rapidly* Ah! Your hands are warm...",
+        "*smiles playfully* Looking for something?",
+        "*pouts slightly* Hey, no pinching!",
+      ],
+      body: [
+        "*clasps your hand firmly* I'm right here with you.",
+        "*steps a bit closer* Ready whenever you are!",
+        "*gives a confident nod* Let's make today count.",
+        "*chuckles warmly* Always so energetic.",
+      ],
+    };
+
+    const lines = reactions[zone] || reactions.body;
+    const line = lines[Math.floor(Math.random() * lines.length)] || lines[0]!;
+
+    // 3. Render or replace comic speech bubble
+    const oldBubble = slotEl.querySelector(".vn-touch-bubble");
+    if (oldBubble) oldBubble.remove();
+
+    const bubble = document.createElement("div");
+    bubble.className = "vn-touch-bubble";
+    bubble.innerHTML = `
+      <span class="vn-touch-bubble-name">${char.name}</span>
+      <span class="vn-touch-bubble-text">${line}</span>
+    `;
+    slotEl.appendChild(bubble);
+
+    setTimeout(() => {
+      bubble.classList.add("vn-touch-bubble-fade");
+      setTimeout(() => bubble.remove(), 400);
+    }, 2500);
+
+    return line;
   }
 
   public setActiveSpeaker(speakerName: string): void {

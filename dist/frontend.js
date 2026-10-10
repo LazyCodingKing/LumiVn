@@ -937,8 +937,69 @@ class StageRenderer {
       nameTag.className = "vn-char-tag";
       nameTag.textContent = char.name;
       slotEl.appendChild(nameTag);
+      const touchOverlay = document.createElement("div");
+      touchOverlay.className = "vn-touch-overlay";
+      const zones = [
+        { id: "head", label: "Headpat" },
+        { id: "face", label: "Touch cheek" },
+        { id: "body", label: "Touch hand" }
+      ];
+      for (const z of zones) {
+        const zoneEl = document.createElement("div");
+        zoneEl.className = `vn-touch-zone vn-touch-${z.id}`;
+        zoneEl.dataset.zone = z.id;
+        zoneEl.title = `${z.label} (${char.name})`;
+        zoneEl.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.triggerSpriteTouch(slotEl, char, z.id);
+        });
+        touchOverlay.appendChild(zoneEl);
+      }
+      slotEl.appendChild(touchOverlay);
       this.charactersContainer.appendChild(slotEl);
     }
+  }
+  triggerSpriteTouch(slotEl, char, zone) {
+    slotEl.classList.remove("vn-touch-bounce");
+    slotEl.offsetWidth;
+    slotEl.classList.add("vn-touch-bounce");
+    const reactions = {
+      head: [
+        "*leans in softly* ...That feels nice.",
+        "*blushes* Hey, don't mess up my hair!",
+        "*giggles softly* You always do that.",
+        "*soft exhale* ...Warm."
+      ],
+      face: [
+        "*cheeks turn pink* W-what are you staring at?",
+        "*blinks rapidly* Ah! Your hands are warm...",
+        "*smiles playfully* Looking for something?",
+        "*pouts slightly* Hey, no pinching!"
+      ],
+      body: [
+        "*clasps your hand firmly* I'm right here with you.",
+        "*steps a bit closer* Ready whenever you are!",
+        "*gives a confident nod* Let's make today count.",
+        "*chuckles warmly* Always so energetic."
+      ]
+    };
+    const lines = reactions[zone] || reactions.body;
+    const line = lines[Math.floor(Math.random() * lines.length)] || lines[0];
+    const oldBubble = slotEl.querySelector(".vn-touch-bubble");
+    if (oldBubble)
+      oldBubble.remove();
+    const bubble = document.createElement("div");
+    bubble.className = "vn-touch-bubble";
+    bubble.innerHTML = `
+      <span class="vn-touch-bubble-name">${char.name}</span>
+      <span class="vn-touch-bubble-text">${line}</span>
+    `;
+    slotEl.appendChild(bubble);
+    setTimeout(() => {
+      bubble.classList.add("vn-touch-bubble-fade");
+      setTimeout(() => bubble.remove(), 400);
+    }, 2500);
+    return line;
   }
   setActiveSpeaker(speakerName) {
     const normSpeaker = (speakerName || "").trim();
@@ -1586,6 +1647,7 @@ class DialogueBox {
       clearTimeout(this.audioFallbackTimer);
     this.audioFallbackTimer = null;
     this.ttsEngine?.stop();
+    this.audioEngine?.unduckBgm();
     this.isUserTurn = true;
     this.lastUserText = text;
     this.beats = [];
@@ -1614,6 +1676,7 @@ class DialogueBox {
     if (this.skipTimer)
       clearTimeout(this.skipTimer);
     this.ttsEngine?.stop();
+    this.audioEngine?.unduckBgm();
     this.isUserTurn = false;
     this.lastUserText = "";
     this.currentMessageId = messageId;
@@ -1751,8 +1814,10 @@ class DialogueBox {
           startTypewriter();
         }
       }, 3500);
+      this.audioEngine?.duckBgm();
       this.ttsEngine.speak(beat.text, beat.speaker, {
         onStart: (duration) => {
+          this.audioEngine?.duckBgm();
           hasStartedAudio = true;
           if (this.audioFallbackTimer) {
             clearTimeout(this.audioFallbackTimer);
@@ -1767,6 +1832,7 @@ class DialogueBox {
           }
         },
         onEnd: () => {
+          this.audioEngine?.unduckBgm();
           if (this.isTyping) {
             this.textContainer.innerHTML = html;
             this.isTyping = false;
@@ -1776,6 +1842,7 @@ class DialogueBox {
           }
         },
         onError: () => {
+          this.audioEngine?.unduckBgm();
           if (this.audioFallbackTimer) {
             clearTimeout(this.audioFallbackTimer);
             this.audioFallbackTimer = null;
@@ -3424,9 +3491,50 @@ class CharactersTab {
 }
 
 // src/frontend/hud/tab-bplots.ts
+function generateBondInterlude(actorA, actorB, placeName) {
+  const nameA = actorA.name || actorA.id;
+  const nameB = actorB.name || actorB.id;
+  const loc = placeName || actorA.loc || actorB.loc || "the district outskirts";
+  return [
+    {
+      speaker: "Narrator",
+      avatarIcon: "\uD83C\uDFAC",
+      type: "action",
+      text: `[Off-Screen Interlude: Meanwhile, at ${loc}... ${nameA} and ${nameB} meet quietly, away from the spotlight.]`
+    },
+    {
+      speaker: nameA,
+      avatarIcon: "\uD83D\uDC64",
+      type: "dialogue",
+      text: actorA.status ? `"${nameB}, thank you for meeting me here. As you know, ${actorA.status}."` : `"${nameB}, do you have a moment? There is a matter between us that cannot wait."`
+    },
+    {
+      speaker: nameB,
+      avatarIcon: "\uD83D\uDC65",
+      type: "dialogue",
+      text: actorB.want ? `"I hear you clearly. But my own agenda regarding ${actorB.want} remains just as urgent."` : `"I've been keeping an eye on things as well. Let us be plain about what is happening."`
+    },
+    {
+      speaker: nameA,
+      avatarIcon: "\uD83D\uDC64",
+      type: "dialogue",
+      text: `"If we coordinate our moves now, neither of us will be blindsided by whatever comes next."`
+    },
+    {
+      speaker: nameB,
+      avatarIcon: "\uD83D\uDC65",
+      type: "dialogue",
+      text: `"Agreed. Keep this between ourselves until the timing is right."`
+    }
+  ];
+}
+
 class BPlotsTab {
   root;
-  constructor() {
+  onAction;
+  activeCutscene = null;
+  constructor(onAction) {
+    this.onAction = onAction;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-bplots";
   }
@@ -3586,6 +3694,127 @@ class BPlotsTab {
       offSection.appendChild(offGrid);
     }
     this.root.appendChild(offSection);
+    const theaterSec = document.createElement("div");
+    theaterSec.className = "vn-section";
+    theaterSec.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <h4 style="margin: 0;">\uD83C\uDFAC Bond Theater — NPC × NPC Offscreen Interlude</h4>
+        <span style="font-size: 10px; color: #a5b4fc; background: rgba(99,102,241,0.2); padding: 2px 8px; border-radius: 4px;">Emergent Cutscene Player</span>
+      </div>
+    `;
+    const allNpcCandidates = [
+      ...offscreenCast.map((c) => ({ id: c.id, name: c.name || c.id, loc: c.loc, status: c.status, want: "" })),
+      ...bplots.map((b) => ({ id: b.who || b.id || "Unknown", name: b.who || b.id, loc: "district", status: b.doing, want: b.want }))
+    ];
+    const uniqueNpcs = Array.from(new Map(allNpcCandidates.map((n) => [n.id, n])).values());
+    if (uniqueNpcs.length < 2) {
+      theaterSec.innerHTML += `
+        <div class="vn-muted" style="padding: 12px; background: #0f172a; border-radius: 8px; border: 1px dashed #334155; font-size: 11px;">
+          Bond Theater stages confidential side scenes when at least two offscreen actors or B-plot carriers are active in the world.
+        </div>
+      `;
+    } else {
+      const theaterCard = document.createElement("div");
+      theaterCard.style.cssText = "background: #0f172a; border: 1px solid #6366f1; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);";
+      theaterCard.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #1e293b; padding-bottom: 10px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 11px; color: #94a3b8;">Actor 1:</span>
+            <select id="vn-theater-actor-a" style="background: #1e293b; border: 1px solid #475569; color: #38bdf8; font-size: 11px; padding: 3px 8px; border-radius: 4px; outline: none; cursor: pointer;">
+              ${uniqueNpcs.map((n) => `<option value="${n.id}">${n.name}</option>`).join("")}
+            </select>
+            <span style="font-size: 11px; color: #94a3b8;">×</span>
+            <span style="font-size: 11px; color: #94a3b8;">Actor 2:</span>
+            <select id="vn-theater-actor-b" style="background: #1e293b; border: 1px solid #475569; color: #c084fc; font-size: 11px; padding: 3px 8px; border-radius: 4px; outline: none; cursor: pointer;">
+              ${uniqueNpcs.map((n, idx) => `<option value="${n.id}" ${idx === 1 ? "selected" : ""}>${n.name}</option>`).join("")}
+            </select>
+          </div>
+          <button id="vn-start-theater-btn" style="background: linear-gradient(135deg, #4f46e5, #6366f1); border: none; color: #fff; font-size: 11px; font-weight: 700; padding: 5px 14px; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 8px rgba(99,102,241,0.4);">
+            ▶ Watch Interlude
+          </button>
+        </div>
+
+        <div id="vn-theater-stage-box" style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="color: #94a3b8; font-size: 11px; font-style: italic; padding: 10px; text-align: center;">
+            Select two actors above and click "Watch Interlude" to listen into their offscreen conversation.
+          </div>
+        </div>
+      `;
+      theaterSec.appendChild(theaterCard);
+      const stageBox = theaterCard.querySelector("#vn-theater-stage-box");
+      const startBtn = theaterCard.querySelector("#vn-start-theater-btn");
+      const selectA = theaterCard.querySelector("#vn-theater-actor-a");
+      const selectB = theaterCard.querySelector("#vn-theater-actor-b");
+      startBtn?.addEventListener("click", () => {
+        const idA = selectA.value;
+        const idB = selectB.value;
+        const npcA = uniqueNpcs.find((n) => n.id === idA) || uniqueNpcs[0];
+        const npcB = uniqueNpcs.find((n) => n.id === idB) || uniqueNpcs[1];
+        const beats = generateBondInterlude(npcA, npcB, ledger.scene?.place);
+        let currentBeatIdx = 0;
+        const renderBeat = () => {
+          stageBox.innerHTML = "";
+          const beat = beats[currentBeatIdx];
+          const isFinal = currentBeatIdx === beats.length - 1;
+          const beatCard = document.createElement("div");
+          beatCard.style.cssText = "background: #1e293b; border: 1px solid #475569; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;";
+          beatCard.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 6px;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 14px;">${beat.avatarIcon}</span>
+                <strong style="color: ${beat.type === "action" ? "#a5b4fc" : "#38bdf8"}; font-size: 12px;">${beat.speaker}</strong>
+              </div>
+              <span style="font-size: 10px; color: #94a3b8;">Beat ${currentBeatIdx + 1} of ${beats.length}</span>
+            </div>
+            <div style="font-size: 12px; color: #f8fafc; line-height: 1.5; font-style: ${beat.type === "action" ? "italic" : "normal"};">
+              ${beat.text}
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 6px; border-top: 1px solid #334155;">
+              <button id="vn-prev-beat-btn" style="background: transparent; border: 1px solid #475569; color: #cbd5e1; font-size: 10px; border-radius: 4px; padding: 3px 8px; cursor: ${currentBeatIdx > 0 ? "pointer" : "default"}; opacity: ${currentBeatIdx > 0 ? "1" : "0.4"};" ${currentBeatIdx === 0 ? "disabled" : ""}>
+                ◀ Previous
+              </button>
+              <div style="display: flex; gap: 6px;">
+                ${isFinal ? `
+                  <button id="vn-share-intel-btn" style="background: linear-gradient(135deg, #059669, #10b981); border: none; color: #fff; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 4px 10px; cursor: pointer;">
+                    \uD83D\uDCE1 Share Intel to Story
+                  </button>
+                ` : `
+                  <button id="vn-next-beat-btn" style="background: #6366f1; border: none; color: #fff; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 4px 12px; cursor: pointer;">
+                    Next Beat ▶
+                  </button>
+                `}
+              </div>
+            </div>
+          `;
+          stageBox.appendChild(beatCard);
+          beatCard.querySelector("#vn-prev-beat-btn")?.addEventListener("click", () => {
+            if (currentBeatIdx > 0) {
+              currentBeatIdx -= 1;
+              renderBeat();
+            }
+          });
+          beatCard.querySelector("#vn-next-beat-btn")?.addEventListener("click", () => {
+            if (currentBeatIdx < beats.length - 1) {
+              currentBeatIdx += 1;
+              renderBeat();
+            }
+          });
+          beatCard.querySelector("#vn-share-intel-btn")?.addEventListener("click", () => {
+            if (this.onAction) {
+              const intelText = `[Bond Theater Intel: Overheard confidential meeting between ${npcA.name} and ${npcB.name} regarding their offscreen coordination.]`;
+              this.onAction(intelText);
+              const shareBtn = beatCard.querySelector("#vn-share-intel-btn");
+              if (shareBtn) {
+                shareBtn.textContent = "✓ Intel Shared!";
+                shareBtn.disabled = true;
+              }
+            }
+          });
+        };
+        renderBeat();
+      });
+    }
+    this.root.appendChild(theaterSec);
     if (fronts.length > 0) {
       const frontSec = document.createElement("div");
       frontSec.className = "vn-section";
@@ -4131,6 +4360,90 @@ class StatsTab {
 }
 
 // src/frontend/hud/tab-inventory.ts
+function parseClockHour(clockT, phase) {
+  if (clockT) {
+    const match = clockT.match(/(\d{1,2}):(\d{2})/);
+    if (match) {
+      const h = parseInt(match[1], 10);
+      const m = parseInt(match[2], 10);
+      return h + m / 60;
+    }
+  }
+  const p = (phase || "").toLowerCase();
+  if (p.includes("dawn") || p.includes("morning"))
+    return 8;
+  if (p.includes("afternoon") || p.includes("noon"))
+    return 14;
+  if (p.includes("dusk") || p.includes("sunset") || p.includes("evening"))
+    return 18;
+  if (p.includes("night") || p.includes("midnight"))
+    return 22;
+  return 12;
+}
+function isShopOpen(shop, hour) {
+  if (shop.openHour <= shop.closeHour) {
+    return hour >= shop.openHour && hour < shop.closeHour;
+  }
+  return hour >= shop.openHour || hour < shop.closeHour;
+}
+var DEFAULT_DISTRICT_SHOPS = [
+  {
+    id: "alchemist",
+    name: "Apothecary & Alchemist's Emporium",
+    icon: "⚗️",
+    placeKey: "market",
+    openHour: 8,
+    closeHour: 20,
+    shopkeeper: "Master Alchemist Lyra",
+    items: [
+      { id: "hp_potion", name: "Health Draught", icon: "\uD83E\uDDEA", type: "consumable", price: 35, stock: 5, maxStock: 10, desc: "Restores 45 HP immediately." },
+      { id: "mp_elixir", name: "Starlight Elixir", icon: "\uD83D\uDCA7", type: "consumable", price: 45, stock: 4, maxStock: 8, desc: "Restores 35 MP/Energy." },
+      { id: "cure_salve", name: "Herbal Ointment", icon: "\uD83C\uDF3F", type: "consumable", price: 25, stock: 6, maxStock: 12, desc: "Soothes status conditions and fatigue." }
+    ]
+  },
+  {
+    id: "blacksmith",
+    name: "Ironforge Armory & Smithy",
+    icon: "⚒️",
+    placeKey: "forge",
+    openHour: 7,
+    closeHour: 18,
+    shopkeeper: "Goran the Smith",
+    items: [
+      { id: "steel_sword", name: "Tempered Steel Blade", icon: "\uD83D\uDDE1️", type: "equipment", price: 120, stock: 2, maxStock: 3, desc: "+15 Physical ATK in combat." },
+      { id: "leather_armor", name: "Reinforced Leather Vest", icon: "\uD83E\uDD4B", type: "equipment", price: 95, stock: 3, maxStock: 4, desc: "+10 Armor & mitigation." },
+      { id: "whetstone", name: "Dwarven Whetstone", icon: "\uD83E\uDEA8", type: "item", price: 20, stock: 8, maxStock: 10, desc: "Maintains weapon sharpness." }
+    ]
+  },
+  {
+    id: "bakery_inn",
+    name: "The Golden Hearth Bakery & Tavern",
+    icon: "\uD83C\uDF5E",
+    placeKey: "tavern",
+    openHour: 6,
+    closeHour: 23,
+    shopkeeper: "Innkeeper Martha",
+    items: [
+      { id: "fresh_loaf", name: "Warm Honey Bread", icon: "\uD83E\uDD50", type: "consumable", price: 10, stock: 12, maxStock: 15, desc: "Delicious wholesome bread. Heals 15 HP." },
+      { id: "spiced_tea", name: "Fragrant Spiced Tea", icon: "☕", type: "consumable", price: 12, stock: 10, maxStock: 15, desc: "Warms the heart, restores 10 MP." },
+      { id: "tavern_ale", name: "Golden Amber Ale", icon: "\uD83C\uDF7A", type: "consumable", price: 15, stock: 10, maxStock: 20, desc: "Boosts courage and morale." }
+    ]
+  },
+  {
+    id: "night_market",
+    name: "Velvet Crescent Night Bazaar",
+    icon: "\uD83C\uDF19",
+    placeKey: "slums",
+    openHour: 20,
+    closeHour: 5,
+    shopkeeper: "Shrouded Dealer Ren",
+    items: [
+      { id: "lockpick_set", name: "Thief's Tension Tools", icon: "\uD83D\uDDDD️", type: "item", price: 75, stock: 3, maxStock: 5, desc: "Opens locked chests and backdoors." },
+      { id: "smoke_bomb", name: "Shadowflash Smoke Powder", icon: "\uD83D\uDCA8", type: "consumable", price: 50, stock: 4, maxStock: 6, desc: "Guarantees escape or surprise attack." },
+      { id: "spell_tome", name: "Tome of Forgotten Arcana", icon: "\uD83D\uDCD6", type: "book", price: 180, stock: 1, maxStock: 1, desc: "Grants skill progression insight." }
+    ]
+  }
+];
 function getItemIcon(itemName) {
   const norm = itemName.toLowerCase();
   if (norm.includes("sword") || norm.includes("blade") || norm.includes("katana") || norm.includes("knife") || norm.includes("dagger") || norm.includes("weapon") || norm.includes("gun"))
@@ -4139,13 +4452,13 @@ function getItemIcon(itemName) {
     return "\uD83D\uDCF1";
   if (norm.includes("key") || norm.includes("card") || norm.includes("pass"))
     return "\uD83D\uDD11";
-  if (norm.includes("potion") || norm.includes("medicine") || norm.includes("pill") || norm.includes("aid") || norm.includes("bandage"))
-    return "\uD83D\uDC8A";
-  if (norm.includes("book") || norm.includes("letter") || norm.includes("note") || norm.includes("scroll") || norm.includes("diary"))
+  if (norm.includes("potion") || norm.includes("draught") || norm.includes("elixir") || norm.includes("medicine") || norm.includes("pill") || norm.includes("aid") || norm.includes("bandage") || norm.includes("ointment"))
+    return "\uD83E\uDDEA";
+  if (norm.includes("book") || norm.includes("letter") || norm.includes("note") || norm.includes("scroll") || norm.includes("diary") || norm.includes("tome"))
     return "\uD83D\uDCDC";
-  if (norm.includes("food") || norm.includes("apple") || norm.includes("snack") || norm.includes("bento") || norm.includes("bread"))
+  if (norm.includes("food") || norm.includes("apple") || norm.includes("snack") || norm.includes("bento") || norm.includes("bread") || norm.includes("loaf"))
     return "\uD83E\uDD6A";
-  if (norm.includes("drink") || norm.includes("water") || norm.includes("tea") || norm.includes("coffee") || norm.includes("soda") || norm.includes("bottle"))
+  if (norm.includes("drink") || norm.includes("water") || norm.includes("tea") || norm.includes("coffee") || norm.includes("soda") || norm.includes("bottle") || norm.includes("ale"))
     return "☕";
   if (norm.includes("ring") || norm.includes("necklace") || norm.includes("amulet") || norm.includes("badge") || norm.includes("ribbon"))
     return "\uD83D\uDC8D";
@@ -4159,6 +4472,9 @@ function getItemIcon(itemName) {
 class InventoryTab {
   root;
   onAction;
+  currentView = "inventory";
+  playerGold = 200;
+  shops = JSON.parse(JSON.stringify(DEFAULT_DISTRICT_SHOPS));
   constructor(onAction) {
     this.onAction = onAction;
     this.root = document.createElement("div");
@@ -4174,10 +4490,43 @@ class InventoryTab {
       room: [],
       room_location: ""
     };
+    const currentHour = parseClockHour(ledger.clock?.t, ledger.clock?.phase);
     const header = document.createElement("div");
     header.className = "vn-tab-header";
-    header.innerHTML = `<h3>\uD83C\uDF92 Inventory & Containers — ${actor?.name || actorId}</h3>`;
+    header.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div>
+          <h3 style="margin: 0; font-size: 15px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+            <span>\uD83C\uDF92</span> <span>${this.currentView === "inventory" ? `Inventory & Containers — ${actor?.name || actorId}` : "Living District Marketplace & Trading"}</span>
+          </h3>
+          <p class="vn-muted" style="margin: 2px 0 0 0; font-size: 11px;">
+            <span>⏱️ <strong>${ledger.clock?.t || "D1 12:00"}</strong> (${ledger.clock?.phase || "Day"})</span>
+            <span> • \uD83D\uDCB0 <strong style="color: #ffd700;">${this.playerGold} Gold</strong></span>
+          </p>
+        </div>
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 2px; display: flex; gap: 4px;">
+          <button id="vn-inv-tab-btn" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.currentView === "inventory" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+            \uD83C\uDF92 Backpack
+          </button>
+          <button id="vn-market-tab-btn" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.currentView === "marketplace" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+            \uD83C\uDFEA Marketplace
+          </button>
+        </div>
+      </div>
+    `;
     this.root.appendChild(header);
+    header.querySelector("#vn-inv-tab-btn")?.addEventListener("click", () => {
+      this.currentView = "inventory";
+      this.render(ledger, activeActorId);
+    });
+    header.querySelector("#vn-market-tab-btn")?.addEventListener("click", () => {
+      this.currentView = "marketplace";
+      this.render(ledger, activeActorId);
+    });
+    if (this.currentView === "marketplace") {
+      this.renderMarketplaceView(ledger, inv, currentHour, activeActorId);
+      return;
+    }
     const handsSection = document.createElement("div");
     handsSection.className = "vn-section";
     handsSection.innerHTML = `<h4>✋ In Hands</h4>`;
@@ -4275,6 +4624,141 @@ class InventoryTab {
     roomSection.appendChild(roomGrid);
     this.root.appendChild(roomSection);
   }
+  renderMarketplaceView(ledger, inv, currentHour, activeActorId) {
+    const marketWrap = document.createElement("div");
+    marketWrap.style.cssText = "display: flex; flex-direction: column; gap: 14px;";
+    const banner = document.createElement("div");
+    banner.style.cssText = "background: #0f172a; border: 1px solid #3b82f6; border-radius: 8px; padding: 10px 14px; font-size: 11px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;";
+    banner.innerHTML = `
+      <div>
+        <strong style="color: #60a5fa;">Living District Trading Hub:</strong>
+        <span style="color: #cbd5e1;"> Shops follow autonomous diurnal schedules. Visit open stalls to buy equipment or barter surplus carried items.</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="color: #fde047; font-weight: 700;">Wallet: ${this.playerGold}g</span>
+        <button id="vn-market-add-funds" style="background: #1e293b; border: 1px solid #475569; color: #94a3b8; font-size: 10px; border-radius: 4px; padding: 2px 6px; cursor: pointer;">+50g</button>
+      </div>
+    `;
+    marketWrap.appendChild(banner);
+    banner.querySelector("#vn-market-add-funds")?.addEventListener("click", () => {
+      this.playerGold += 50;
+      this.render(ledger, activeActorId);
+    });
+    for (const shop of this.shops) {
+      const open = isShopOpen(shop, currentHour);
+      const shopCard = document.createElement("div");
+      shopCard.style.cssText = `background: #0f172a; border: 1px solid ${open ? "#10b981" : "#334155"}; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; opacity: ${open ? "1" : "0.75"};`;
+      const formatHour = (h) => `${String(Math.floor(h)).padStart(2, "0")}:00`;
+      const hoursText = `${formatHour(shop.openHour)} - ${formatHour(shop.closeHour)}`;
+      shopCard.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 20px;">${shop.icon}</span>
+            <div>
+              <strong style="color: #f8fafc; font-size: 13px;">${shop.name}</strong>
+              <div style="font-size: 10px; color: #94a3b8;">
+                Keeper: ${shop.shopkeeper || "Merchant"} • Location: <span style="color: #38bdf8;">${shop.placeKey}</span>
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 10px; color: #94a3b8;">Hours: ${hoursText}</span>
+            <span style="font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; background: ${open ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)"}; border: 1px solid ${open ? "#22c55e" : "#ef4444"}; color: ${open ? "#86efac" : "#fca5a5"};">
+              ${open ? "\uD83D\uDFE2 OPEN" : "\uD83D\uDD34 CLOSED"}
+            </span>
+          </div>
+        </div>
+
+        ${!open ? `
+          <div style="color: #94a3b8; font-size: 11px; font-style: italic; padding: 6px 0;">
+            The shutters are barred. This merchant operates strictly from ${hoursText}.
+          </div>
+        ` : `
+          <!-- Items Stall Grid -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px;">
+            ${shop.items.map((item) => {
+        const canAfford = this.playerGold >= item.price;
+        const hasStock = item.stock > 0;
+        return `
+                <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between; gap: 6px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      <span style="font-size: 16px;">${item.icon}</span>
+                      <strong style="color: #f8fafc; font-size: 11px;">${item.name}</strong>
+                    </div>
+                    <span style="color: #ffd700; font-weight: 700; font-size: 11px;">${item.price}g</span>
+                  </div>
+                  <div style="font-size: 10px; color: #cbd5e1; line-height: 1.3;">
+                    ${item.desc || "Standard commodity."}
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #2d3748; padding-top: 6px; margin-top: 2px;">
+                    <span style="font-size: 9px; color: #94a3b8;">Stock: ${item.stock}/${item.maxStock}</span>
+                    <button class="vn-buy-item-btn" data-shop-id="${shop.id}" data-item-id="${item.id}" style="background: ${canAfford && hasStock ? "linear-gradient(135deg, #059669, #10b981)" : "#334155"}; border: none; color: ${canAfford && hasStock ? "#fff" : "#94a3b8"}; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 3px 10px; cursor: ${canAfford && hasStock ? "pointer" : "not-allowed"};">
+                      ${!hasStock ? "Out of Stock" : !canAfford ? "Can't Afford" : "Buy"}
+                    </button>
+                  </div>
+                </div>
+              `;
+      }).join("")}
+          </div>
+        `}
+      `;
+      marketWrap.appendChild(shopCard);
+    }
+    if (inv.carried && inv.carried.length > 0) {
+      const sellSection = document.createElement("div");
+      sellSection.style.cssText = "background: #0f172a; border: 1px solid #eab308; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;";
+      sellSection.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <strong style="color: #fde047; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+            <span>\uD83E\uDD1D</span> <span>Merchant Barter & Sell Back (Sell for 15g each)</span>
+          </strong>
+          <span style="font-size: 10px; color: #94a3b8;">Turn carried goods into gold coins</span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+          ${inv.carried.map((cItem, idx) => `
+            <div style="background: #1e293b; border: 1px solid #475569; border-radius: 6px; padding: 4px 10px; display: flex; align-items: center; gap: 8px; font-size: 11px;">
+              <span>${getItemIcon(cItem)} ${cItem}</span>
+              <button class="vn-sell-item-btn" data-item-idx="${idx}" data-item-name="${cItem}" style="background: #eab308; border: none; color: #000; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 2px 6px; cursor: pointer;">
+                Sell (+15g)
+              </button>
+            </div>
+          `).join("")}
+        </div>
+      `;
+      marketWrap.appendChild(sellSection);
+      sellSection.querySelectorAll(".vn-sell-item-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const idx = parseInt(btn.dataset.itemIdx || "-1", 10);
+          const name = btn.dataset.itemName || "";
+          if (idx >= 0 && inv.carried && inv.carried[idx]) {
+            inv.carried.splice(idx, 1);
+            this.playerGold += 15;
+            this.onAction(`[Trade: Sold ${name} to merchant for 15 Gold]`);
+            this.render(ledger, activeActorId);
+          }
+        });
+      });
+    }
+    this.root.appendChild(marketWrap);
+    marketWrap.querySelectorAll(".vn-buy-item-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const shopId = btn.dataset.shopId;
+        const itemId = btn.dataset.itemId;
+        const shop = this.shops.find((s) => s.id === shopId);
+        const item = shop?.items.find((i) => i.id === itemId);
+        if (shop && item && item.stock > 0 && this.playerGold >= item.price) {
+          this.playerGold -= item.price;
+          item.stock -= 1;
+          if (!inv.carried)
+            inv.carried = [];
+          inv.carried.push(item.name);
+          this.onAction(`[Trade: Purchased 1x ${item.name} from ${shop.name} for ${item.price} Gold]`);
+          this.render(ledger, activeActorId);
+        }
+      });
+    });
+  }
 }
 
 // src/frontend/hud/tab-map.ts
@@ -4290,19 +4774,42 @@ class MapTab {
   startPointerX = 0;
   startPointerY = 0;
   selectedNodeId = null;
+  player2d = { x: 6, y: 5 };
+  threeAnimId = null;
+  threeRenderer = null;
+  activeKeydownHandler = null;
   constructor(onAction) {
     this.onAction = onAction;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-map";
   }
+  cleanupInteractiveModes() {
+    if (this.threeAnimId !== null) {
+      cancelAnimationFrame(this.threeAnimId);
+      this.threeAnimId = null;
+    }
+    if (this.threeRenderer) {
+      try {
+        this.threeRenderer.dispose?.();
+      } catch {}
+      this.threeRenderer = null;
+    }
+    if (this.activeKeydownHandler) {
+      window.removeEventListener("keydown", this.activeKeydownHandler);
+      this.activeKeydownHandler = null;
+    }
+  }
   render(ledger, manifest) {
+    this.cleanupInteractiveModes();
     if (manifest)
       this.manifest = manifest;
     this.root.innerHTML = "";
     const currentPlace = (ledger.scene?.place || "default").toLowerCase();
     const isIndoor = currentPlace.includes(":") || currentPlace.includes("residence") || currentPlace.includes("dojo") || currentPlace.includes("room") || currentPlace.includes("foyer");
     if (!this.selectedNodeId) {
-      this.viewMode = isIndoor ? "indoor" : "outdoor";
+      if (this.viewMode !== "tilemap2d" && this.viewMode !== "world3d") {
+        this.viewMode = isIndoor ? "indoor" : "outdoor";
+      }
       this.selectedNodeId = currentPlace;
     }
     const header = document.createElement("div");
@@ -4319,13 +4826,19 @@ class MapTab {
             <span> • \uD83D\uDCCD <span style="color:#38bdf8; font-weight: 600;">${currentPlace}</span></span>
           </p>
         </div>
-        <div style="display: flex; gap: 6px; align-items: center;">
-          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 2px; display: flex;">
+        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 2px; display: flex; gap: 2px;">
             <button id="vn-map-indoor-btn" class="vn-btn vn-btn-sm" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.viewMode === "indoor" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
               \uD83C\uDFE0 Blueprint
             </button>
             <button id="vn-map-outdoor-btn" class="vn-btn vn-btn-sm" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.viewMode === "outdoor" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
               \uD83C\uDF10 District
+            </button>
+            <button id="vn-map-2d-btn" class="vn-btn vn-btn-sm" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.viewMode === "tilemap2d" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+              \uD83D\uDD79️ 2D Tilemap
+            </button>
+            <button id="vn-map-3d-btn" class="vn-btn vn-btn-sm" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.viewMode === "world3d" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+              \uD83C\uDFAE 3D View
             </button>
           </div>
           <div style="display: flex; gap: 3px;">
@@ -4347,6 +4860,14 @@ class MapTab {
       this.resetView();
       this.render(ledger);
     });
+    header.querySelector("#vn-map-2d-btn")?.addEventListener("click", () => {
+      this.viewMode = "tilemap2d";
+      this.render(ledger);
+    });
+    header.querySelector("#vn-map-3d-btn")?.addEventListener("click", () => {
+      this.viewMode = "world3d";
+      this.render(ledger);
+    });
     header.querySelector("#vn-map-zoom-in")?.addEventListener("click", () => this.adjustZoom(1.25));
     header.querySelector("#vn-map-zoom-out")?.addEventListener("click", () => this.adjustZoom(0.8));
     header.querySelector("#vn-map-zoom-reset")?.addEventListener("click", () => {
@@ -4357,16 +4878,23 @@ class MapTab {
     mainLayout.style.cssText = "display: flex; gap: 12px; height: 420px; min-height: 400px; position: relative;";
     const viewportWrap = document.createElement("div");
     viewportWrap.id = "vn-map-viewport";
-    viewportWrap.style.cssText = "flex: 1; background: #070d19; border: 1px solid #1e293b; border-radius: 10px; overflow: hidden; position: relative; cursor: grab; user-select: none;";
+    viewportWrap.style.cssText = "flex: 1; background: #070d19; border: 1px solid #1e293b; border-radius: 10px; overflow: hidden; position: relative; user-select: none;";
     const sidebar = document.createElement("div");
     sidebar.id = "vn-map-sidebar";
     sidebar.style.cssText = "width: 280px; background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;";
     mainLayout.appendChild(viewportWrap);
     mainLayout.appendChild(sidebar);
     this.root.appendChild(mainLayout);
-    this.renderGraph(viewportWrap, ledger, currentPlace);
-    this.renderSidebar(sidebar, ledger, currentPlace);
-    this.setupPanZoom(viewportWrap);
+    if (this.viewMode === "tilemap2d") {
+      this.renderTilemap2D(viewportWrap, sidebar, ledger, currentPlace);
+    } else if (this.viewMode === "world3d") {
+      this.renderWorld3D(viewportWrap, sidebar, ledger, currentPlace);
+    } else {
+      viewportWrap.style.cursor = "grab";
+      this.renderGraph(viewportWrap, ledger, currentPlace);
+      this.renderSidebar(sidebar, ledger, currentPlace);
+      this.setupPanZoom(viewportWrap);
+    }
   }
   resetView() {
     this.zoom = 1;
@@ -4880,6 +5408,341 @@ class MapTab {
           this.onAction(`*Interacts with the ${aff.toLowerCase()} in the ${cleanName.replace(/_/g, " ")}*`);
       });
     });
+  }
+  renderTilemap2D(viewport, sidebar, _ledger, _currentPlace) {
+    viewport.innerHTML = "";
+    sidebar.innerHTML = "";
+    const canvas = document.createElement("canvas");
+    canvas.width = 560;
+    canvas.height = 400;
+    canvas.style.cssText = "width: 100%; height: 100%; display: block; background: #070d19; cursor: crosshair;";
+    viewport.appendChild(canvas);
+    const banner = document.createElement("div");
+    banner.style.cssText = "position: absolute; top: 10px; left: 10px; background: rgba(15,23,42,0.85); backdrop-filter: blur(8px); border: 1px solid rgba(99,102,241,0.4); padding: 5px 10px; border-radius: 6px; font-size: 11px; color: #cbd5e1; z-index: 5; pointer-events: none;";
+    banner.innerHTML = `\uD83C\uDFAE <strong>WASD / Arrow keys</strong> or click grid to walk • Enter buildings to travel`;
+    viewport.appendChild(banner);
+    const ctx = canvas.getContext("2d");
+    const cols = 14;
+    const rows = 10;
+    const tileW = canvas.width / cols;
+    const tileH = canvas.height / rows;
+    const buildings = [
+      { id: "apothecary", name: "Apothecary & Alchemist", x: 2, y: 2, w: 2, h: 2, color: "#065f46", icon: "⚗️", place: "market" },
+      { id: "blacksmith", name: "Ironforge Smithy", x: 10, y: 2, w: 2, h: 2, color: "#7c2d12", icon: "⚒️", place: "forge" },
+      { id: "tavern", name: "Golden Hearth Tavern", x: 2, y: 6, w: 2, h: 2, color: "#78350f", icon: "\uD83C\uDF7A", place: "tavern" },
+      { id: "dojo", name: "Tendo Martial Dojo", x: 10, y: 6, w: 2, h: 2, color: "#831843", icon: "\uD83E\uDD4B", place: "dojo" },
+      { id: "residence", name: "Town Residence", x: 6, y: 1, w: 2, h: 2, color: "#1e1b4b", icon: "\uD83C\uDFE0", place: "residence" },
+      { id: "plaza", name: "Central Fountain Plaza", x: 5, y: 4, w: 4, h: 2, color: "#0c4a6e", icon: "⛲", place: "district_square" }
+    ];
+    let selectedBuilding = null;
+    const updateSidebarForBuilding = (b) => {
+      sidebar.innerHTML = "";
+      if (!b) {
+        sidebar.innerHTML = `
+          <div style="color: #94a3b8; font-size: 12px; font-style: italic; padding: 20px 10px; text-align: center;">
+            Walk your avatar onto a building doorway or click any structure on the map to inspect.
+          </div>
+        `;
+        return;
+      }
+      sidebar.innerHTML = `
+        <div style="border-bottom: 1px solid #334155; padding-bottom: 8px;">
+          <h4 style="margin: 0; font-size: 14px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+            <span>${b.icon}</span> <span>${b.name}</span>
+          </h4>
+          <span style="font-size: 11px; color: #38bdf8;">Zone: ${b.place}</span>
+        </div>
+        <div style="font-size: 11px; color: #cbd5e1; line-height: 1.4;">
+          A bustling district landmark. Step through the entrance to explore inside and engage with characters.
+        </div>
+        <div style="margin-top: auto; padding-top: 10px; border-top: 1px solid #1e293b;">
+          <button id="vn-tilemap-enter-btn" style="width: 100%; background: linear-gradient(135deg, #4f46e5, #6366f1); border: none; color: #fff; font-size: 12px; font-weight: 700; padding: 8px; border-radius: 6px; cursor: pointer;">
+            \uD83D\uDEAA Travel / Enter ${b.name}
+          </button>
+        </div>
+      `;
+      sidebar.querySelector("#vn-tilemap-enter-btn")?.addEventListener("click", () => {
+        this.onAction(`*Travels to ${b.name}*`);
+      });
+    };
+    const draw = () => {
+      if (!ctx)
+        return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let c = 0;c < cols; c++) {
+        for (let r = 0;r < rows; r++) {
+          const isRoad = c === 6 || c === 7 || r === 4 || r === 5 || c >= 2 && c <= 4 && (r === 4 || r === 5) || c >= 9 && c <= 11 && (r === 4 || r === 5);
+          if (isRoad) {
+            ctx.fillStyle = "#1e293b";
+            ctx.fillRect(c * tileW, r * tileH, tileW, tileH);
+            ctx.strokeStyle = "#334155";
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(c * tileW, r * tileH, tileW, tileH);
+          } else {
+            ctx.fillStyle = "#064e3b";
+            ctx.fillRect(c * tileW, r * tileH, tileW, tileH);
+            ctx.strokeStyle = "#047857";
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(c * tileW, r * tileH, tileW, tileH);
+          }
+        }
+      }
+      for (const b of buildings) {
+        const bx = b.x * tileW;
+        const by = b.y * tileH;
+        const bw = b.w * tileW;
+        const bh = b.h * tileH;
+        ctx.fillStyle = b.color;
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = b === selectedBuilding ? "#38bdf8" : "rgba(255,255,255,0.2)";
+        ctx.lineWidth = b === selectedBuilding ? 2 : 1;
+        ctx.strokeRect(bx, by, bw, bh);
+        ctx.font = "16px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(b.icon, bx + bw / 2, by + bh / 2 - 2);
+        ctx.font = "9px system-ui";
+        ctx.fillStyle = "#f8fafc";
+        ctx.fillText(b.name.split(" ")[0] || "", bx + bw / 2, by + bh / 2 + 12);
+      }
+      const px = this.player2d.x * tileW + tileW / 2;
+      const py = this.player2d.y * tileH + tileH / 2;
+      const grad = ctx.createRadialGradient(px, py, 2, px, py, 16);
+      grad.addColorStop(0, "rgba(56, 189, 248, 0.8)");
+      grad.addColorStop(1, "rgba(56, 189, 248, 0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(px, py, 16, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#38bdf8";
+      ctx.beginPath();
+      ctx.arc(px, py, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = "9px system-ui";
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "center";
+      ctx.fillText("You", px, py - 12);
+    };
+    draw();
+    updateSidebarForBuilding(selectedBuilding);
+    const movePlayer = (dx, dy) => {
+      this.player2d.x = Math.max(0, Math.min(cols - 1, this.player2d.x + dx));
+      this.player2d.y = Math.max(0, Math.min(rows - 1, this.player2d.y + dy));
+      const hit = buildings.find((b) => this.player2d.x >= b.x && this.player2d.x < b.x + b.w && this.player2d.y >= b.y && this.player2d.y < b.y + b.h);
+      if (hit) {
+        selectedBuilding = hit;
+        updateSidebarForBuilding(hit);
+      }
+      draw();
+    };
+    this.activeKeydownHandler = (e) => {
+      if (["ArrowUp", "KeyW", "w", "W"].includes(e.code) || ["ArrowUp", "w", "W"].includes(e.key)) {
+        e.preventDefault();
+        movePlayer(0, -1);
+      } else if (["ArrowDown", "KeyS", "s", "S"].includes(e.code) || ["ArrowDown", "s", "S"].includes(e.key)) {
+        e.preventDefault();
+        movePlayer(0, 1);
+      } else if (["ArrowLeft", "KeyA", "a", "A"].includes(e.code) || ["ArrowLeft", "a", "A"].includes(e.key)) {
+        e.preventDefault();
+        movePlayer(-1, 0);
+      } else if (["ArrowRight", "KeyD", "d", "D"].includes(e.code) || ["ArrowRight", "d", "D"].includes(e.key)) {
+        e.preventDefault();
+        movePlayer(1, 0);
+      }
+    };
+    window.addEventListener("keydown", this.activeKeydownHandler);
+    canvas.addEventListener("click", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const clickX = Math.floor((e.clientX - rect.left) / rect.width * cols);
+      const clickY = Math.floor((e.clientY - rect.top) / rect.height * rows);
+      const hit = buildings.find((b) => clickX >= b.x && clickX < b.x + b.w && clickY >= b.y && clickY < b.y + b.h);
+      if (hit) {
+        selectedBuilding = hit;
+        updateSidebarForBuilding(hit);
+      }
+      this.player2d.x = Math.max(0, Math.min(cols - 1, clickX));
+      this.player2d.y = Math.max(0, Math.min(rows - 1, clickY));
+      draw();
+    });
+  }
+  renderWorld3D(viewport, sidebar, ledger, _currentPlace) {
+    viewport.innerHTML = "";
+    sidebar.innerHTML = "";
+    const container = document.createElement("div");
+    container.style.cssText = "width: 100%; height: 100%; position: relative; overflow: hidden; background: #070d19;";
+    viewport.appendChild(container);
+    const banner = document.createElement("div");
+    banner.style.cssText = "position: absolute; top: 10px; left: 10px; background: rgba(15,23,42,0.85); backdrop-filter: blur(8px); border: 1px solid rgba(99,102,241,0.4); padding: 5px 10px; border-radius: 6px; font-size: 11px; color: #cbd5e1; z-index: 5; pointer-events: none;";
+    banner.innerHTML = `\uD83C\uDFAE <strong>Over-the-Shoulder 3D District</strong> • WASD to move • Q/E to turn camera`;
+    container.appendChild(banner);
+    const proxPrompt = document.createElement("div");
+    proxPrompt.style.cssText = "position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); background: rgba(15,23,42,0.95); border: 1px solid #38bdf8; border-radius: 8px; padding: 6px 16px; font-size: 12px; font-weight: 700; color: #38bdf8; z-index: 5; display: none; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.5);";
+    container.appendChild(proxPrompt);
+    sidebar.innerHTML = `
+      <div style="border-bottom: 1px solid #334155; padding-bottom: 8px;">
+        <h4 style="margin: 0; font-size: 14px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+          <span>\uD83C\uDFAE</span> <span>3D Walkable District</span>
+        </h4>
+        <span style="font-size: 11px; color: #38bdf8;">Diurnal Diode Lighting: ${ledger.clock?.phase || "Day"}</span>
+      </div>
+      <div style="font-size: 11px; color: #cbd5e1; line-height: 1.4;">
+        Explore the district from a third-person over-the-shoulder perspective. Turn the camera using Q and E, walk with WASD, and step up to buildings to enter.
+      </div>
+      <div id="vn-3d-sidebar-target" style="margin-top: 10px;"></div>
+    `;
+    const THREE = window.THREE;
+    if (!THREE) {
+      const loaderDiv = document.createElement("div");
+      loaderDiv.style.cssText = "display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px; color: #94a3b8; font-size: 12px;";
+      loaderDiv.innerHTML = `
+        <div style="font-size: 24px;">\uD83C\uDFAE</div>
+        <div>Three.js District 3D Viewport</div>
+        <button id="vn-load-three-btn" style="background: #4f46e5; border: none; color: #fff; font-size: 11px; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer;">
+          Launch 3D Engine
+        </button>
+      `;
+      container.appendChild(loaderDiv);
+      const loadScript = () => {
+        loaderDiv.innerHTML = `<div>Loading 3D renderer...</div>`;
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js";
+        script.onload = () => {
+          this.renderWorld3D(viewport, sidebar, ledger, _currentPlace);
+        };
+        script.onerror = () => {
+          loaderDiv.innerHTML = `<div style="color: #f87171;">WebGL/Three.js failed to load. Use 2D Tilemap for full district exploration.</div>`;
+        };
+        document.head.appendChild(script);
+      };
+      container.querySelector("#vn-load-three-btn")?.addEventListener("click", loadScript);
+      return;
+    }
+    try {
+      const width = viewport.clientWidth || 560;
+      const height = viewport.clientHeight || 400;
+      const scene = new THREE.Scene;
+      const phase = (ledger.clock?.phase || "day").toLowerCase();
+      const isNight = phase.includes("night") || phase.includes("midnight");
+      const isSunset = phase.includes("sunset") || phase.includes("dusk") || phase.includes("evening");
+      scene.background = new THREE.Color(isNight ? 132631 : isSunset ? 4850766 : 988970);
+      const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(width, height);
+      this.threeRenderer = renderer;
+      container.appendChild(renderer.domElement);
+      const ambientLight = new THREE.AmbientLight(isNight ? 1976635 : isSunset ? 16096779 : 16777215, isNight ? 0.4 : 0.8);
+      scene.add(ambientLight);
+      const sunLight = new THREE.DirectionalLight(isNight ? 9684477 : isSunset ? 16347926 : 16777215, isNight ? 0.3 : 1);
+      sunLight.position.set(15, 30, 20);
+      scene.add(sunLight);
+      const planeGeo = new THREE.PlaneGeometry(80, 80);
+      const planeMat = new THREE.MeshStandardMaterial({ color: 725801, roughness: 0.8 });
+      const plane = new THREE.Mesh(planeGeo, planeMat);
+      plane.rotation.x = -Math.PI / 2;
+      scene.add(plane);
+      const grid = new THREE.GridHelper(80, 40, 6514417, 1976635);
+      grid.position.y = 0.01;
+      scene.add(grid);
+      const landmarks = [
+        { id: "apothecary", name: "Apothecary & Alchemist", x: -16, z: -16, color: 366185 },
+        { id: "blacksmith", name: "Ironforge Armory", x: 16, z: -16, color: 11817737 },
+        { id: "tavern", name: "The Golden Hearth", x: -16, z: 16, color: 14251782 },
+        { id: "dojo", name: "Tendo Martial Dojo", x: 16, z: 16, color: 14427686 },
+        { id: "plaza", name: "District Fountain Plaza", x: 0, z: 0, color: 165063 }
+      ];
+      for (const lm of landmarks) {
+        const boxGeo = new THREE.BoxGeometry(8, 7, 8);
+        const boxMat = new THREE.MeshStandardMaterial({ color: lm.color, roughness: 0.5 });
+        const box = new THREE.Mesh(boxGeo, boxMat);
+        box.position.set(lm.x, 3.5, lm.z);
+        scene.add(box);
+        const roofGeo = new THREE.ConeGeometry(6, 4, 4);
+        const roofMat = new THREE.MeshStandardMaterial({ color: 3359061 });
+        const roof = new THREE.Mesh(roofGeo, roofMat);
+        roof.position.set(lm.x, 9, lm.z);
+        roof.rotation.y = Math.PI / 4;
+        scene.add(roof);
+        const ringGeo = new THREE.TorusGeometry(1.2, 0.15, 8, 24);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 3718648 });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.position.set(lm.x, 1.2, lm.z + 4.1);
+        scene.add(ring);
+      }
+      const playerMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.8, 16), new THREE.MeshStandardMaterial({ color: 3718648, roughness: 0.3 }));
+      playerMesh.position.set(0, 0.9, 8);
+      scene.add(playerMesh);
+      let px = 0;
+      let pz = 8;
+      let playerRot = 0;
+      const speed = 0.6;
+      const updateCamera = () => {
+        playerMesh.position.set(px, 0.9, pz);
+        playerMesh.rotation.y = playerRot;
+        const camDist = 6;
+        const camHeight = 3.2;
+        camera.position.set(px - Math.sin(playerRot) * camDist, camHeight, pz - Math.cos(playerRot) * camDist);
+        camera.lookAt(px, 1.4, pz);
+        let closest = null;
+        let minDist = 999;
+        for (const lm of landmarks) {
+          const d = Math.hypot(px - lm.x, pz - lm.z);
+          if (d < minDist) {
+            minDist = d;
+            closest = lm;
+          }
+        }
+        if (closest && minDist < 8) {
+          proxPrompt.style.display = "block";
+          proxPrompt.textContent = `\uD83D\uDEAA Near ${closest.name} • [Click to Enter]`;
+          proxPrompt.onclick = () => {
+            this.onAction(`*Enters ${closest.name}*`);
+          };
+          const targetBox = sidebar.querySelector("#vn-3d-sidebar-target");
+          if (targetBox) {
+            targetBox.innerHTML = `
+              <div style="background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 10px;">
+                <strong style="color: #38bdf8; font-size: 12px;">\uD83D\uDCCD ${closest.name}</strong>
+                <p style="font-size: 11px; color: #cbd5e1; margin: 4px 0 8px 0;">You are standing right outside the entrance.</p>
+                <button id="vn-3d-enter-building-btn" style="width: 100%; background: #0284c7; color: #fff; border: none; font-size: 11px; font-weight: 700; padding: 6px; border-radius: 4px; cursor: pointer;">
+                  Enter Landmark
+                </button>
+              </div>
+            `;
+            targetBox.querySelector("#vn-3d-enter-building-btn")?.addEventListener("click", () => {
+              this.onAction(`*Enters ${closest.name}*`);
+            });
+          }
+        } else {
+          proxPrompt.style.display = "none";
+        }
+      };
+      this.activeKeydownHandler = (e) => {
+        if (["KeyW", "w", "W", "ArrowUp"].includes(e.code) || ["w", "W", "ArrowUp"].includes(e.key)) {
+          px += Math.sin(playerRot) * speed;
+          pz += Math.cos(playerRot) * speed;
+        } else if (["KeyS", "s", "S", "ArrowDown"].includes(e.code) || ["s", "S", "ArrowDown"].includes(e.key)) {
+          px -= Math.sin(playerRot) * speed;
+          pz -= Math.cos(playerRot) * speed;
+        } else if (["KeyA", "a", "A", "ArrowLeft"].includes(e.code) || ["a", "A", "ArrowLeft"].includes(e.key)) {
+          playerRot += 0.08;
+        } else if (["KeyD", "d", "D", "ArrowRight"].includes(e.code) || ["d", "D", "ArrowRight"].includes(e.key)) {
+          playerRot -= 0.08;
+        } else if (["KeyQ", "q", "Q"].includes(e.code) || ["q", "Q"].includes(e.key)) {
+          playerRot += 0.12;
+        } else if (["KeyE", "e", "E"].includes(e.code) || ["e", "E"].includes(e.key)) {
+          playerRot -= 0.12;
+        }
+        updateCamera();
+      };
+      window.addEventListener("keydown", this.activeKeydownHandler);
+      const animate = () => {
+        this.threeAnimId = requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+      };
+      animate();
+      updateCamera();
+    } catch (err) {
+      console.error("[LumiVN] 3D World initialization error:", err);
+    }
   }
 }
 
@@ -10183,9 +11046,118 @@ var DEFAULT_RPG_PROMPT = `RPG & COMBAT RULES DIRECTIVE:
 1. STAT & ATTRIBUTE TESTS: When an action has uncertain success, calculate against the actor's combat tier, aptitudes, and relevant stats.
 2. COMBAT ROUNDS: Tactical resolution respects distance, positioning, weapon range, physical stamina/integrity, and environmental hazards.
 3. DICE & CHANCE: D20 checks respect Natural 20 (Critical Success) and Natural 1 (Critical Fumble). Modifiers apply from attributes and situational advantage.
-4. CONSEQUENCES: Wounds reduce physical integrity, cause fatigue, and alter passions and stance. Record status mutations in ledger journal.`;
+4. CONSEQUENCES: Wounds reduce physical integrity, cause fatigue, and alter passions and stance. Record status mutations in ledger journal.
+
+SKILL TREES (Editable; parsed into interactive progression nodes):
+【Tree: Warrior】
+- Strike: tier=1 | cost=1 | requires=[] | type=active | cd=0 | cost_res={mp:0} | formula={ATK}*1.2 | desc=Basic decisive physical blow.
+- Cleave: tier=2 | cost=1 | requires=[Strike] | type=active | cd=2 | cost_res={mp:15} | formula={ATK}*1.8 | desc=Wide sweep dealing damage to targets.
+- Juggernaut: tier=3 | cost=2 | requires=[Cleave] | type=passive | desc=Armor mitigation increased by 20%.
+
+【Tree: Sorcery】
+- Spark: tier=1 | cost=1 | requires=[] | type=active | cd=0 | cost_res={mp:10} | formula={ATK}*1.2 | desc=Crackling bolt of electrical surge.
+- Firebolt: tier=2 | cost=1 | requires=[Spark] | type=active | cd=2 | cost_res={mp:25} | formula={ATK}*2.0+10 | desc=Hurl condensed flame sphere. Burns target.
+- Intense Flames: tier=3 | cost=2 | requires=[Firebolt] | type=passive | desc=Fire damage increased by +25%.
+
+【Tree: Rogue】
+- Shadowstep: tier=1 | cost=1 | requires=[] | type=active | cd=1 | cost_res={mp:10} | formula={ATK}*1.4 | desc=Slip behind opponent to strike.
+- Assassinate: tier=2 | cost=2 | requires=[Shadowstep] | type=active | cd=3 | cost_res={mp:30} | formula={ATK}*2.5 | desc=Lethal ambush attack.
+- Haggling: tier=1 | cost=1 | requires=[] | type=passive | desc=Store trading prices discounted by 15%.`;
 
 // src/frontend/hud/tab-rpg.ts
+function parseSkillTreesFromPrompt(prompt2) {
+  if (!prompt2)
+    return [];
+  const categories = [];
+  const treeRegex = /(?:【Tree:\s*([^】]+)】|\[Tree:\s*([^\]]+)\]|##?\s*Tree:\s*([^\n]+))/gi;
+  const matches = [];
+  let m;
+  while ((m = treeRegex.exec(prompt2)) !== null) {
+    const name = (m[1] || m[2] || m[3] || "").trim();
+    if (name)
+      matches.push({ name, index: m.index });
+  }
+  for (let i = 0;i < matches.length; i++) {
+    const current = matches[i];
+    const nextIndex = i + 1 < matches.length ? matches[i + 1].index : prompt2.length;
+    const chunk = prompt2.slice(current.index, nextIndex);
+    const nodes = [];
+    const lines = chunk.split(`
+`);
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line.startsWith("- "))
+        continue;
+      const colonIdx = line.indexOf(":");
+      if (colonIdx === -1)
+        continue;
+      const skillName = line.slice(2, colonIdx).trim();
+      const paramsStr = line.slice(colonIdx + 1).trim();
+      const parts = paramsStr.split("|").map((p) => p.trim());
+      let tier = 1;
+      let cost = 1;
+      let requires = [];
+      let type = "active";
+      let cd = 0;
+      let cost_res = {};
+      let formula = "";
+      let desc = "";
+      for (const part of parts) {
+        const eqIdx = part.indexOf("=");
+        if (eqIdx === -1)
+          continue;
+        const key = part.slice(0, eqIdx).trim().toLowerCase();
+        const val = part.slice(eqIdx + 1).trim();
+        if (key === "tier")
+          tier = parseInt(val, 10) || 1;
+        else if (key === "cost")
+          cost = parseInt(val, 10) || 1;
+        else if (key === "requires") {
+          const clean = val.replace(/^\[|\]$/g, "").trim();
+          requires = clean ? clean.split(",").map((s) => s.trim()).filter(Boolean) : [];
+        } else if (key === "type") {
+          type = val.toLowerCase() === "passive" ? "passive" : "active";
+        } else if (key === "cd") {
+          cd = parseInt(val, 10) || 0;
+        } else if (key === "cost_res") {
+          try {
+            const jsonStr = val.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
+            cost_res = JSON.parse(jsonStr);
+          } catch {
+            const pair = val.replace(/[{}]/g, "").split(":");
+            if (pair.length === 2)
+              cost_res[pair[0].trim()] = parseInt(pair[1], 10) || 0;
+          }
+        } else if (key === "formula") {
+          formula = val;
+        } else if (key === "desc") {
+          desc = val;
+        }
+      }
+      nodes.push({
+        id: skillName.toLowerCase().replace(/\s+/g, "_"),
+        name: skillName,
+        tree: current.name,
+        tier,
+        cost,
+        requires,
+        type,
+        cd,
+        cost_res,
+        formula,
+        desc
+      });
+    }
+    if (nodes.length > 0) {
+      categories.push({
+        name: current.name,
+        nodes
+      });
+    }
+  }
+  return categories;
+}
+
 class RpgTab {
   root;
   ctx;
@@ -10197,11 +11169,82 @@ class RpgTab {
   modifier = 0;
   lastRoll = null;
   statRulesSettings = null;
+  progression = {
+    level: 1,
+    exp: 0,
+    maxExp: 100,
+    skillPoints: 3,
+    unlockedSkills: ["Strike"],
+    cooldowns: {}
+  };
+  selectedTreeTab = "";
   constructor(ctx, onAction) {
     this.ctx = ctx;
     this.onAction = onAction;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-rpg";
+  }
+  addExp(amount) {
+    this.progression.exp += amount;
+    while (this.progression.exp >= this.progression.maxExp) {
+      this.progression.exp -= this.progression.maxExp;
+      this.progression.level += 1;
+      this.progression.skillPoints += 1;
+      this.progression.maxExp = Math.round(this.progression.maxExp * 1.5);
+    }
+  }
+  levelUp() {
+    this.progression.level += 1;
+    this.progression.skillPoints += 1;
+  }
+  unlockSkill(node) {
+    if (this.progression.unlockedSkills.includes(node.name))
+      return false;
+    if (this.progression.skillPoints < node.cost)
+      return false;
+    const hasPrereqs = (node.requires || []).every((req) => this.progression.unlockedSkills.includes(req));
+    if (!hasPrereqs)
+      return false;
+    this.progression.skillPoints -= node.cost;
+    this.progression.unlockedSkills.push(node.name);
+    return true;
+  }
+  tickCooldowns() {
+    for (const key of Object.keys(this.progression.cooldowns)) {
+      if ((this.progression.cooldowns[key] || 0) > 0) {
+        this.progression.cooldowns[key] -= 1;
+      }
+    }
+  }
+  triggerSkillAction(skill, currentActor) {
+    if (skill.type !== "active")
+      return "";
+    const cd = this.progression.cooldowns[skill.name] || 0;
+    if (cd > 0)
+      return "";
+    const atk = typeof currentActor?.combat?.atk === "number" ? currentActor.combat.atk : 14;
+    const matk = typeof currentActor?.combat?.matk === "number" ? currentActor.combat.matk : 16;
+    let dmg = Math.round(atk * 1.2);
+    if (skill.formula) {
+      try {
+        const expr = skill.formula.replace(/{ATK}/gi, String(atk)).replace(/{MATK}/gi, String(matk)).replace(/[^0-9\+\-\*\/\.\(\)]/g, "");
+        const evalRes = Number(Function(`return (${expr})`)());
+        if (!isNaN(evalRes) && evalRes > 0) {
+          dmg = Math.round(evalRes);
+        }
+      } catch {
+        dmg = Math.round(atk * 1.2);
+      }
+    }
+    if (skill.cd && skill.cd > 0) {
+      this.progression.cooldowns[skill.name] = skill.cd;
+    }
+    const mpCost = skill.cost_res?.mp ?? 0;
+    const actionText = `[Combat Action: ${skill.name}! Dealt ${dmg} damage. ${skill.desc ? `(${skill.desc}) ` : ""}(Cost: ${mpCost} MP | CD: ${skill.cd || 0} turns)]`;
+    if (this.onAction) {
+      this.onAction(actionText);
+    }
+    return actionText;
   }
   setStatRulesSettings(settings) {
     this.statRulesSettings = settings;
@@ -10294,6 +11337,202 @@ class RpgTab {
       </div>
     `;
     this.root.appendChild(vitalsCard);
+    const progCard = document.createElement("div");
+    progCard.style.cssText = "background: #0f172a; border: 1px solid #10b981; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);";
+    const expPct = Math.min(100, Math.max(0, Math.round(this.progression.exp / this.progression.maxExp * 100)));
+    progCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <strong style="color: #34d399; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+            <span>⭐</span> <span>Level Progression & Skill Points</span>
+          </strong>
+          <span style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #6ee7b7; font-weight: 800; font-size: 11px; padding: 2px 8px; border-radius: 9999px;">
+            Level ${this.progression.level}
+          </span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="background: rgba(245, 158, 11, 0.2); border: 1px solid #f59e0b; color: #fde68a; font-weight: 700; font-size: 11px; padding: 2px 8px; border-radius: 6px;">
+            ✨ Available SP: ${this.progression.skillPoints}
+          </span>
+          <button id="vn-rpg-add-exp-btn" style="background: #1e293b; border: 1px solid #334155; color: #6ee7b7; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 3px 8px; cursor: pointer;">
+            +50 EXP
+          </button>
+          <button id="vn-rpg-level-up-btn" style="background: linear-gradient(135deg, #059669, #10b981); border: none; color: #fff; font-size: 10px; font-weight: 800; border-radius: 4px; padding: 3px 8px; cursor: pointer;">
+            ▲ Level Up
+          </button>
+          <button id="vn-rpg-reset-sp-btn" style="background: transparent; border: 1px solid #475569; color: #94a3b8; font-size: 10px; border-radius: 4px; padding: 3px 6px; cursor: pointer;" title="Reset SP to 5">
+            Reset
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+          <span style="color: #94a3b8;">Experience Points</span>
+          <span style="color: #6ee7b7; font-weight: 700;">${this.progression.exp} / ${this.progression.maxExp} EXP (${expPct}%)</span>
+        </div>
+        <div style="background: #020617; height: 8px; border-radius: 4px; overflow: hidden;">
+          <div style="width: ${expPct}%; height: 100%; background: linear-gradient(90deg, #059669, #34d399); transition: width 0.3s ease;"></div>
+        </div>
+      </div>
+    `;
+    this.root.appendChild(progCard);
+    progCard.querySelector("#vn-rpg-add-exp-btn")?.addEventListener("click", () => {
+      this.addExp(50);
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    progCard.querySelector("#vn-rpg-level-up-btn")?.addEventListener("click", () => {
+      this.levelUp();
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    progCard.querySelector("#vn-rpg-reset-sp-btn")?.addEventListener("click", () => {
+      this.progression.skillPoints += 3;
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    const promptText = this.statRulesSettings?.rpgPrompt || DEFAULT_RPG_PROMPT;
+    const categories = parseSkillTreesFromPrompt(promptText);
+    const allParsedNodes = categories.flatMap((c) => c.nodes);
+    const activeUnlockedNodes = allParsedNodes.filter((n) => n.type === "active" && this.progression.unlockedSkills.includes(n.name));
+    const actionCard = document.createElement("div");
+    actionCard.style.cssText = "background: #0f172a; border: 1px solid #f59e0b; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);";
+    actionCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+        <strong style="color: #fbbf24; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+          <span>⚡</span> <span>Combat Action Bar & Turn Cooldowns</span>
+        </strong>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button id="vn-rpg-tick-cd-btn" style="background: #1e293b; border: 1px solid #f59e0b; color: #fde68a; font-size: 11px; font-weight: 700; border-radius: 6px; padding: 4px 10px; cursor: pointer;">
+            ⏳ Next Turn / Tick CD
+          </button>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 8px;" id="vn-rpg-action-buttons">
+        ${activeUnlockedNodes.length === 0 ? `
+          <div style="color: #94a3b8; font-size: 11px; font-style: italic;">
+            No active skills learned yet. Unlock active skills in the skill tree below to use them in combat.
+          </div>
+        ` : activeUnlockedNodes.map((n) => {
+      const cd = this.progression.cooldowns[n.name] || 0;
+      const isReady = cd === 0;
+      const mp = n.cost_res?.mp ?? 0;
+      return `
+            <button class="vn-combat-skill-btn" data-skill-name="${n.name}" style="background: ${isReady ? "#1e293b" : "#0f172a"}; border: 1px solid ${isReady ? "#38bdf8" : "#475569"}; border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; text-align: left; cursor: ${isReady ? "pointer" : "not-allowed"}; opacity: ${isReady ? "1" : "0.6"}; transition: all 0.2s ease;">
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                <strong style="color: ${isReady ? "#f8fafc" : "#94a3b8"}; font-size: 12px;">${n.name}</strong>
+                <span style="font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px; background: ${isReady ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)"}; color: ${isReady ? "#4ade80" : "#fca5a5"};">
+                  ${isReady ? "⚡ READY" : `⏳ CD: ${cd}T`}
+                </span>
+              </div>
+              <div style="font-size: 10px; color: #94a3b8; display: flex; gap: 6px;">
+                ${mp > 0 ? `<span>\uD83D\uDCA7 ${mp} MP</span>` : `<span>Cost: 0 MP</span>`}
+                ${n.formula ? `<span>⚔️ ${n.formula}</span>` : ""}
+              </div>
+            </button>
+          `;
+    }).join("")}
+      </div>
+    `;
+    this.root.appendChild(actionCard);
+    actionCard.querySelector("#vn-rpg-tick-cd-btn")?.addEventListener("click", () => {
+      this.tickCooldowns();
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    actionCard.querySelectorAll(".vn-combat-skill-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const name = btn.dataset.skillName || "";
+        const node = activeUnlockedNodes.find((x) => x.name === name);
+        if (node) {
+          this.triggerSkillAction(node, currentActor);
+          this.render(this.currentLedger, this.currentManifest);
+        }
+      });
+    });
+    const treeCard = document.createElement("div");
+    treeCard.style.cssText = "background: #0f172a; border: 1px solid #6366f1; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);";
+    if (!this.selectedTreeTab && categories.length > 0) {
+      this.selectedTreeTab = categories[0].name;
+    }
+    const activeCat = categories.find((c) => c.name === this.selectedTreeTab) || categories[0];
+    treeCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+        <strong style="color: #a5b4fc; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+          <span>\uD83C\uDF33</span> <span>Skill Trees (Prompt-Driven & Customizable)</span>
+        </strong>
+        <span style="font-size: 10px; color: #94a3b8;">
+          Earn SP upon leveling up. Unlock prerequisites to advance.
+        </span>
+      </div>
+
+      <!-- Category Tabs -->
+      <div style="display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
+        ${categories.map((c) => `
+          <button class="vn-tree-tab-btn" data-tree-name="${c.name}" style="background: ${c.name === this.selectedTreeTab ? "#4f46e5" : "#1e293b"}; color: ${c.name === this.selectedTreeTab ? "#fff" : "#94a3b8"}; border: 1px solid ${c.name === this.selectedTreeTab ? "#6366f1" : "#334155"}; border-radius: 6px; padding: 4px 12px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.15s ease;">
+            ${c.name} (${c.nodes.length})
+          </button>
+        `).join("")}
+      </div>
+
+      <!-- Nodes Grid -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px;">
+        ${activeCat ? activeCat.nodes.map((node) => {
+      const isUnlocked = this.progression.unlockedSkills.includes(node.name);
+      const hasPrereqs = (node.requires || []).every((req) => this.progression.unlockedSkills.includes(req));
+      const canUnlock = !isUnlocked && hasPrereqs && this.progression.skillPoints >= node.cost;
+      let statusHtml = "";
+      if (isUnlocked) {
+        statusHtml = `<span style="color: #4ade80; font-size: 11px; font-weight: 800;">✓ Learned</span>`;
+      } else if (canUnlock) {
+        statusHtml = `
+              <button class="vn-unlock-skill-btn" data-skill-id="${node.id}" style="background: linear-gradient(135deg, #4f46e5, #6366f1); border: none; color: #fff; font-size: 11px; font-weight: 800; border-radius: 6px; padding: 4px 12px; cursor: pointer; box-shadow: 0 2px 6px rgba(99,102,241,0.4);">
+                ✨ Unlock (${node.cost} SP)
+              </button>
+            `;
+      } else if (!hasPrereqs) {
+        statusHtml = `<span style="color: #f87171; font-size: 10px;">\uD83D\uDD12 Requires: [${node.requires.join(", ")}]</span>`;
+      } else {
+        statusHtml = `<span style="color: #f59e0b; font-size: 10px;">\uD83D\uDD12 Needs ${node.cost} SP</span>`;
+      }
+      return `
+            <div style="background: #1e293b; border: 1px solid ${isUnlocked ? "#10b981" : canUnlock ? "#6366f1" : "#334155"}; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <strong style="color: ${isUnlocked ? "#6ee7b7" : "#f8fafc"}; font-size: 12px;">${node.name}</strong>
+                  <span style="font-size: 9px; padding: 1px 5px; border-radius: 4px; background: ${node.type === "active" ? "rgba(56,189,248,0.2)" : "rgba(168,85,247,0.2)"}; color: ${node.type === "active" ? "#7dd3fc" : "#d8b4fe"}; font-weight: 700;">
+                    ${node.type.toUpperCase()}
+                  </span>
+                </div>
+                <span style="font-size: 10px; color: #94a3b8; font-weight: 600;">T${node.tier}</span>
+              </div>
+              <div style="font-size: 11px; color: #cbd5e1; line-height: 1.3;">
+                ${node.desc || "A specialized skill."}
+              </div>
+              ${node.formula ? `<div style="font-size: 10px; color: #f59e0b;">Formula: ${node.formula}</div>` : ""}
+              <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #334155; padding-top: 6px; margin-top: 2px;">
+                <span style="font-size: 10px; color: #94a3b8;">Cost: ${node.cost} SP</span>
+                <div>${statusHtml}</div>
+              </div>
+            </div>
+          `;
+    }).join("") : `<div style="color: #94a3b8; font-size: 11px;">No skills in this category.</div>`}
+      </div>
+    `;
+    this.root.appendChild(treeCard);
+    treeCard.querySelectorAll(".vn-tree-tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this.selectedTreeTab = btn.dataset.treeName || "";
+        this.render(this.currentLedger, this.currentManifest);
+      });
+    });
+    treeCard.querySelectorAll(".vn-unlock-skill-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.skillId || "";
+        const node = activeCat?.nodes.find((n) => n.id === id);
+        if (node && this.unlockSkill(node)) {
+          this.render(this.currentLedger, this.currentManifest);
+        }
+      });
+    });
     const diceCard = document.createElement("div");
     diceCard.style.cssText = "background: #0f172a; border: 1px solid #8b5cf6; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);";
     diceCard.innerHTML = `
@@ -10411,6 +11650,7 @@ class RpgTab {
         type: "vn_save_stat_rules_settings",
         settings: updated
       });
+      this.render(this.currentLedger, this.currentManifest);
       if (saveBtn) {
         const orig = saveBtn.textContent;
         saveBtn.textContent = "✓ Saved & Injected!";
@@ -10546,7 +11786,7 @@ class MenuBar {
         this.closeTab();
     });
     this.charactersTab = new CharactersTab(opts.ttsEngine, opts.ctx);
-    this.bplotsTab = new BPlotsTab;
+    this.bplotsTab = new BPlotsTab(opts.onAction);
     this.wardrobeTab = new WardrobeTab(opts.onAction);
     this.statsTab = new StatsTab;
     this.inventoryTab = new InventoryTab(opts.onAction);
@@ -10933,10 +12173,25 @@ class VnAudioEngine {
   getCurrentBgm() {
     return this.currentBgmTrack;
   }
+  isDucked = false;
+  duckBgm(factor = 0.35) {
+    if (this.isDucked || !this.bgmAudio)
+      return;
+    this.isDucked = true;
+    this.bgmAudio.volume = this.bgmVolume * Math.max(0.05, Math.min(1, factor));
+  }
+  unduckBgm() {
+    if (!this.isDucked)
+      return;
+    this.isDucked = false;
+    if (this.bgmAudio) {
+      this.bgmAudio.volume = this.bgmVolume;
+    }
+  }
   setBgmVolume(volume) {
     this.bgmVolume = Math.max(0, Math.min(1, volume));
     if (this.bgmAudio) {
-      this.bgmAudio.volume = this.bgmVolume;
+      this.bgmAudio.volume = this.isDucked ? this.bgmVolume * 0.35 : this.bgmVolume;
     }
   }
   getBgmVolume() {
@@ -11437,6 +12692,15 @@ class VnTtsEngine {
       window.speechSynthesis.speak(utterance);
     } else {
       cb.onError?.(new Error("No TTS connection selected and Web Speech API unavailable."));
+    }
+  }
+  prefetchBeats(beats) {
+    if (!this.settings.enabled || !Array.isArray(beats))
+      return;
+    for (const b of beats.slice(0, 5)) {
+      if (b.text) {
+        this.prefetch(b.text, b.speaker || "");
+      }
     }
   }
 }
@@ -11991,6 +13255,103 @@ class StageOverlay {
         width: auto;
         object-fit: contain;
         filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));
+      }
+
+      /* Tactile Sprite Touch Reactions */
+      .vn-touch-overlay {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        z-index: 10;
+        pointer-events: auto;
+      }
+      .vn-touch-zone {
+        width: 100%;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .vn-touch-zone:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .vn-touch-head {
+        height: 25%;
+      }
+      .vn-touch-face {
+        height: 25%;
+      }
+      .vn-touch-body {
+        height: 50%;
+      }
+      @keyframes vn-touch-bounce {
+        0% { transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1)); }
+        40% { transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 10px)) scale(calc(var(--char-scale, 1) * 1.05)); }
+        70% { transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) + 2px)) scale(calc(var(--char-scale, 1) * 0.98)); }
+        100% { transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1)); }
+      }
+      .vn-touch-bounce {
+        animation: vn-touch-bounce 0.45s cubic-bezier(0.17, 0.89, 0.32, 1.28) !important;
+      }
+      .vn-touch-bubble {
+        position: absolute;
+        top: -45px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(15, 23, 42, 0.94);
+        border: 1px solid rgba(129, 140, 248, 0.6);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(99, 102, 241, 0.3);
+        color: #f8fafc;
+        padding: 6px 12px;
+        border-radius: 12px;
+        font-size: 11px;
+        line-height: 1.4;
+        white-space: nowrap;
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        z-index: 20;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        animation: vn-bubble-pop 0.25s cubic-bezier(0.17, 0.89, 0.32, 1.28);
+        backdrop-filter: blur(8px);
+      }
+      .vn-touch-bubble::after {
+        content: "";
+        position: absolute;
+        bottom: -6px;
+        left: 50%;
+        transform: translateX(-50%);
+        border-width: 6px 6px 0;
+        border-style: solid;
+        border-color: rgba(15, 23, 42, 0.94) transparent transparent;
+        display: block;
+        width: 0;
+      }
+      .vn-touch-bubble-fade {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-8px);
+        transition: opacity 0.35s ease, transform 0.35s ease;
+      }
+      .vn-touch-bubble-name {
+        font-size: 9px;
+        font-weight: 800;
+        color: #38bdf8;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+      .vn-touch-bubble-text {
+        font-size: 11px;
+        color: #e2e8f0;
+        font-style: italic;
+      }
+      @keyframes vn-bubble-pop {
+        0% { opacity: 0; transform: translateX(-50%) scale(0.7) translateY(8px); }
+        100% { opacity: 1; transform: translateX(-50%) scale(1) translateY(0); }
       }
 
       /* Classic Ren'Py ADV Lower-Third Dialogue Box */

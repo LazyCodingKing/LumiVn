@@ -14,17 +14,18 @@ globalThis.customElements = window.customElements as any;
 import { parseLedgerYaml } from "../src/backend/ledger-parser.js";
 import { CharactersTab } from "../src/frontend/hud/tab-characters.js";
 import { StatsTab } from "../src/frontend/hud/tab-stats.js";
-import { InventoryTab } from "../src/frontend/hud/tab-inventory.js";
+import { InventoryTab, parseClockHour, isShopOpen, DEFAULT_DISTRICT_SHOPS } from "../src/frontend/hud/tab-inventory.js";
 import { WardrobeTab } from "../src/frontend/hud/tab-wardrobe.js";
 import { MapTab } from "../src/frontend/hud/tab-map.js";
 import { PhoneTab, parsePhoneGameKey } from "../src/frontend/hud/tab-phone.js";
 import { JournalTab } from "../src/frontend/hud/tab-journal.js";
 import { SceneTab } from "../src/frontend/hud/tab-scene.js";
-import { BPlotsTab } from "../src/frontend/hud/tab-bplots.js";
+import { BPlotsTab, generateBondInterlude } from "../src/frontend/hud/tab-bplots.js";
 import { MenuBar } from "../src/frontend/hud/menu-bar.js";
 import { DiagnosticsTab } from "../src/frontend/hud/tab-diagnostics.js";
-import { RpgTab } from "../src/frontend/hud/tab-rpg.js";
+import { RpgTab, parseSkillTreesFromPrompt } from "../src/frontend/hud/tab-rpg.js";
 import { VnAudioEngine } from "../src/frontend/stage/audio-player.js";
+import { StageRenderer } from "../src/frontend/stage/staging.js";
 import { diagBus } from "../src/frontend/utils/diag-bus.js";
 import { syncManifestLibrary } from "../src/backend/storage.js";
 
@@ -707,6 +708,259 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
     // Stop BGM
     engine.stopBgm();
     expect(engine.getCurrentBgm()).toBeNull();
+  });
+
+  test("18. Prompt-driven Skill Tree parser & Level-up progression mechanics", () => {
+    const samplePrompt = `
+【Tree: Warrior】
+- Strike: tier=1 | cost=1 | requires=[] | type=active | cd=0 | cost_res={mp:0} | formula={ATK}*1.2 | desc=Basic decisive physical blow.
+- Cleave: tier=2 | cost=1 | requires=[Strike] | type=active | cd=2 | cost_res={mp:15} | formula={ATK}*1.8 | desc=Wide sweep dealing damage to targets.
+- Juggernaut: tier=3 | cost=2 | requires=[Cleave] | type=passive | desc=Armor mitigation increased by 20%.
+
+【Tree: Sorcery】
+- Spark: tier=1 | cost=1 | requires=[] | type=active | cd=0 | cost_res={mp:10} | formula={ATK}*1.5 | desc=Crackling bolt of electrical surge.
+    `;
+
+    const categories = parseSkillTreesFromPrompt(samplePrompt);
+    expect(categories.length).toBe(2);
+    expect(categories[0]?.name).toBe("Warrior");
+    expect(categories[0]?.nodes.length).toBe(3);
+
+    const cleave = categories[0]?.nodes.find((n) => n.name === "Cleave");
+    expect(cleave).toBeDefined();
+    expect(cleave?.tier).toBe(2);
+    expect(cleave?.cost).toBe(1);
+    expect(cleave?.requires).toEqual(["Strike"]);
+    expect(cleave?.cd).toBe(2);
+    expect(cleave?.cost_res).toEqual({ mp: 15 });
+    expect(cleave?.formula).toBe("{ATK}*1.8");
+
+    // Progression Engine
+    let actionEmitted = "";
+    const tab = new RpgTab(undefined, (act) => {
+      actionEmitted = act;
+    });
+    tab.setStatRulesSettings({
+      statRules: "",
+      ledgerPrompt: "",
+      rpgPrompt: samplePrompt,
+      enabled: true,
+      mode: "mvu_quiet",
+    });
+
+    // 1. Initial state
+    expect(tab.progression.level).toBe(1);
+    expect(tab.progression.skillPoints).toBe(3);
+    expect(tab.progression.unlockedSkills).toContain("Strike");
+
+    // 2. EXP & Level Up rollover
+    tab.addExp(150);
+    expect(tab.progression.level).toBe(2);
+    expect(tab.progression.skillPoints).toBe(4);
+
+    // 3. Unlocking Cleave with Strike requirement met
+    const unlockedCleave = tab.unlockSkill(cleave!);
+    expect(unlockedCleave).toBe(true);
+    expect(tab.progression.unlockedSkills).toContain("Cleave");
+    expect(tab.progression.skillPoints).toBe(3);
+
+    // 4. Juggernaut unlock (cost=2, requires=[Cleave])
+    const juggernaut = categories[0]?.nodes.find((n) => n.name === "Juggernaut");
+    expect(tab.unlockSkill(juggernaut!)).toBe(true);
+    expect(tab.progression.skillPoints).toBe(1);
+
+    // 5. Trying to unlock with insufficient SP fails
+    const spark = categories[1]?.nodes.find((n) => n.name === "Spark");
+    tab.progression.skillPoints = 0;
+    expect(tab.unlockSkill(spark!)).toBe(false);
+
+    // 6. Combat Action Bar & formula calculation
+    tab.progression.skillPoints = 5;
+    const actorCombat = { combat: { atk: 20 } };
+    const combatResult = tab.triggerSkillAction(cleave!, actorCombat);
+    expect(combatResult).toContain("Cleave!");
+    expect(combatResult).toContain("Dealt 36 damage");
+    expect(combatResult).toContain("Cost: 15 MP");
+    expect(tab.progression.cooldowns["Cleave"]).toBe(2);
+    expect(actionEmitted).toBe(combatResult);
+
+    // Skill is on cooldown, cannot trigger again
+    const onCooldownResult = tab.triggerSkillAction(cleave!, actorCombat);
+    expect(onCooldownResult).toBe("");
+
+    // Tick cooldowns
+    tab.tickCooldowns();
+    expect(tab.progression.cooldowns["Cleave"]).toBe(1);
+    tab.tickCooldowns();
+    expect(tab.progression.cooldowns["Cleave"]).toBe(0);
+
+    // Render verification
+    tab.render(parsedLedger);
+    const html = tab.root.innerHTML;
+    expect(html).toContain("Level Progression &amp; Skill Points");
+    expect(html).toContain("Combat Action Bar &amp; Turn Cooldowns");
+    expect(html).toContain("Skill Trees (Prompt-Driven &amp; Customizable)");
+  });
+
+  test("19. Living District Clock Schedule & Marketplace Economy", () => {
+    // 1. Clock parsing
+    expect(parseClockHour("D1 16:30", "Afternoon")).toBe(16.5);
+    expect(parseClockHour(undefined, "Morning")).toBe(8);
+    expect(parseClockHour(undefined, "Night")).toBe(22);
+
+    // 2. Shop open/close check
+    const alchemist = DEFAULT_DISTRICT_SHOPS.find((s) => s.id === "alchemist")!;
+    expect(isShopOpen(alchemist, 12)).toBe(true);
+    expect(isShopOpen(alchemist, 22)).toBe(false);
+
+    // Night market (20 to 5)
+    const nightMarket = DEFAULT_DISTRICT_SHOPS.find((s) => s.id === "night_market")!;
+    expect(isShopOpen(nightMarket, 23)).toBe(true);
+    expect(isShopOpen(nightMarket, 3)).toBe(true);
+    expect(isShopOpen(nightMarket, 14)).toBe(false);
+
+    // 3. InventoryTab Marketplace rendering and trading
+    let tradeAction = "";
+    const tab = new InventoryTab((act) => {
+      tradeAction = act;
+    });
+    tab.playerGold = 100;
+
+    // Switch to marketplace view
+    (tab as any).currentView = "marketplace";
+    tab.render(parsedLedger, "user");
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("Living District Marketplace &amp; Trading");
+    expect(html).toContain("Health Draught");
+
+    // Buy item
+    const buyBtn = tab.root.querySelector('.vn-buy-item-btn[data-item-id="hp_potion"]') as HTMLButtonElement;
+    expect(buyBtn).toBeDefined();
+    buyBtn?.click();
+
+    expect(tab.playerGold).toBe(65);
+    expect(tradeAction).toContain("Purchased 1x Health Draught");
+    expect(parsedLedger.actors?.user.inventory.carried).toContain("Health Draught");
+
+    // Sell item
+    const sellBtn = tab.root.querySelector(".vn-sell-item-btn") as HTMLButtonElement;
+    if (sellBtn) {
+      sellBtn.click();
+      expect(tradeAction).toContain("Sold");
+      expect(tab.playerGold).toBe(80);
+    }
+  });
+
+  test("20. Tactile Sprite Touch Reactions on Stage Characters", () => {
+    const stage = new StageRenderer();
+    stage.setCharacters([
+      {
+        slot: "center",
+        actorId: "akane",
+        name: "Akane",
+        spriteUrl: "/sprites/akane_neutral.png",
+      },
+    ]);
+
+    const slotEl = stage.root.querySelector(".vn-char-slot") as HTMLElement;
+    expect(slotEl).toBeDefined();
+
+    // Check touch zones
+    const touchOverlay = slotEl.querySelector(".vn-touch-overlay");
+    expect(touchOverlay).toBeDefined();
+    const headZone = slotEl.querySelector(".vn-touch-head") as HTMLElement;
+    const faceZone = slotEl.querySelector(".vn-touch-face") as HTMLElement;
+    const bodyZone = slotEl.querySelector(".vn-touch-body") as HTMLElement;
+    expect(headZone).toBeDefined();
+    expect(faceZone).toBeDefined();
+    expect(bodyZone).toBeDefined();
+
+    // Trigger touch reaction
+    const reactionLine = stage.triggerSpriteTouch(
+      slotEl,
+      { slot: "center", actorId: "akane", name: "Akane", spriteUrl: "/sprites/akane.png" },
+      "head"
+    );
+    expect(reactionLine).toBeDefined();
+    expect(typeof reactionLine).toBe("string");
+
+    // Check comic speech bubble
+    const bubble = slotEl.querySelector(".vn-touch-bubble");
+    expect(bubble).toBeDefined();
+    expect(bubble?.textContent).toContain("Akane");
+  });
+
+  test("21. Dual 2D Tilemap and 3D Over-the-Shoulder District Map", () => {
+    let travelAction = "";
+    const tab = new MapTab((act) => {
+      travelAction = act;
+    });
+
+    // 1. Switch to 2D Tilemap
+    (tab as any).viewMode = "tilemap2d";
+    tab.render(parsedLedger);
+
+    const canvas = tab.root.querySelector("canvas");
+    expect(canvas).toBeDefined();
+    expect(tab.player2d).toEqual({ x: 6, y: 5 });
+
+    // Move player using activeKeydownHandler
+    (tab as any).activeKeydownHandler?.({ code: "ArrowRight", key: "ArrowRight", preventDefault() {} } as any);
+    expect(tab.player2d.x).toBe(7);
+
+    // 2. Switch to 3D Viewport
+    (tab as any).viewMode = "world3d";
+    tab.render(parsedLedger);
+
+    const viewHtml = tab.root.innerHTML;
+    expect(viewHtml).toContain("3D Walkable District");
+
+    tab.cleanupInteractiveModes();
+  });
+
+  test("22. Off-Screen Bond Theater Interlude generation & intel sharing", () => {
+    let intelEmitted = "";
+    const tab = new BPlotsTab((act) => {
+      intelEmitted = act;
+    });
+
+    // Generate interlude
+    const beats = generateBondInterlude(
+      { id: "kasumi", name: "Kasumi", loc: "Tendo Dojo", status: "Arranging tea" },
+      { id: "akane", name: "Akane", loc: "Dojo Veranda", want: "Protect martial legacy" }
+    );
+
+    expect(beats.length).toBe(5);
+    expect(beats[0]?.speaker).toBe("Narrator");
+    expect(beats[1]?.speaker).toBe("Kasumi");
+    expect(beats[2]?.speaker).toBe("Akane");
+
+    // Render BPlotsTab with Bond Theater (using ledger with at least 2 offscreen cast members)
+    const ledgerWithCast: any = {
+      ...parsedLedger,
+      roster: [
+        { id: "kasumi", name: "Kasumi", lod: 1, loc: "dames_mansion:garden", status: "Arranging tea" },
+        { id: "akane", name: "Akane", lod: 1, loc: "dames_mansion:dojo", status: "Practicing katas" },
+      ],
+    };
+    tab.render(ledgerWithCast);
+    const html = tab.root.innerHTML;
+    expect(html).toContain("Bond Theater — NPC × NPC Offscreen Interlude");
+
+    const startBtn = tab.root.querySelector("#vn-start-theater-btn") as HTMLButtonElement;
+    expect(startBtn).toBeDefined();
+    startBtn?.click();
+
+    // Verify stage box rendered first beat
+    const stageBox = tab.root.querySelector("#vn-theater-stage-box");
+    expect(stageBox?.textContent).toContain("Beat 1 of");
+
+    // Click through to next beat
+    const nextBtn = tab.root.querySelector("#vn-next-beat-btn") as HTMLButtonElement;
+    expect(nextBtn).toBeDefined();
+    nextBtn?.click();
+    expect(stageBox?.textContent).toContain("Beat 2 of");
   });
 });
 

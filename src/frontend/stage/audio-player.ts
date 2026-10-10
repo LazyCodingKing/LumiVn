@@ -173,10 +173,26 @@ export class VnAudioEngine {
     return this.currentBgmTrack;
   }
 
+  private isDucked = false;
+
+  public duckBgm(factor = 0.35): void {
+    if (this.isDucked || !this.bgmAudio) return;
+    this.isDucked = true;
+    this.bgmAudio.volume = this.bgmVolume * Math.max(0.05, Math.min(1, factor));
+  }
+
+  public unduckBgm(): void {
+    if (!this.isDucked) return;
+    this.isDucked = false;
+    if (this.bgmAudio) {
+      this.bgmAudio.volume = this.bgmVolume;
+    }
+  }
+
   public setBgmVolume(volume: number): void {
     this.bgmVolume = Math.max(0, Math.min(1, volume));
     if (this.bgmAudio) {
-      this.bgmAudio.volume = this.bgmVolume;
+      this.bgmAudio.volume = this.isDucked ? this.bgmVolume * 0.35 : this.bgmVolume;
     }
   }
 

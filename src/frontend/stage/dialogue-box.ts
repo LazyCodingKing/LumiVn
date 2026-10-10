@@ -355,6 +355,7 @@ export class DialogueBox {
     if (this.audioFallbackTimer) clearTimeout(this.audioFallbackTimer);
     this.audioFallbackTimer = null;
     this.ttsEngine?.stop();
+    this.audioEngine?.unduckBgm();
 
     this.isUserTurn = true;
     this.lastUserText = text;
@@ -388,6 +389,7 @@ export class DialogueBox {
     if (this.autoTimer) clearTimeout(this.autoTimer);
     if (this.skipTimer) clearTimeout(this.skipTimer);
     this.ttsEngine?.stop();
+    this.audioEngine?.unduckBgm();
 
     this.isUserTurn = false;
     this.lastUserText = "";
@@ -544,8 +546,11 @@ export class DialogueBox {
         }
       }, 3500);
 
+      this.audioEngine?.duckBgm();
+
       this.ttsEngine.speak(beat.text, beat.speaker, {
         onStart: (duration) => {
+          this.audioEngine?.duckBgm();
           hasStartedAudio = true;
           if (this.audioFallbackTimer) {
             clearTimeout(this.audioFallbackTimer);
@@ -560,6 +565,7 @@ export class DialogueBox {
           }
         },
         onEnd: () => {
+          this.audioEngine?.unduckBgm();
           if (this.isTyping) {
             this.textContainer.innerHTML = html;
             this.isTyping = false;
@@ -569,6 +575,7 @@ export class DialogueBox {
           }
         },
         onError: () => {
+          this.audioEngine?.unduckBgm();
           if (this.audioFallbackTimer) {
             clearTimeout(this.audioFallbackTimer);
             this.audioFallbackTimer = null;

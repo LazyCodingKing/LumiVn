@@ -421,4 +421,57 @@ export interface StatRulesSettingsPayload {
   settings: StatRulesSettings;
 }
 
+export interface SkillTreeNode {
+  id: string;
+  name: string;
+  tree: string;
+  tier: number;
+  cost: number;
+  requires: string[];
+  type: "active" | "passive";
+  cd?: number;
+  cost_res?: Record<string, number>;
+  formula?: string;
+  desc?: string;
+}
+
+export interface SkillTreeCategory {
+  name: string;
+  icon?: string;
+  nodes: SkillTreeNode[];
+}
+
+export interface PlayerProgression {
+  level: number;
+  exp: number;
+  maxExp: number;
+  skillPoints: number;
+  unlockedSkills: string[];
+  cooldowns: Record<string, number>;
+}
+
+export interface DistrictShopItem {
+  id: string;
+  name: string;
+  icon: string;
+  type: "item" | "equipment" | "book" | "consumable";
+  price: number;
+  stock: number;
+  maxStock: number;
+  desc?: string;
+  effect?: string;
+  grantSkill?: string;
+}
+
+export interface DistrictShop {
+  id: string;
+  name: string;
+  icon: string;
+  placeKey: string;
+  openHour: number;
+  closeHour: number;
+  items: DistrictShopItem[];
+  shopkeeper?: string;
+}
+
 

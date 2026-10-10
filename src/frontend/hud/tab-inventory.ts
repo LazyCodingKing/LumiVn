@@ -1,14 +1,97 @@
-import type { LedgerData, ActorInventory } from "../../shared/types.js";
+import type { LedgerData, ActorInventory, DistrictShop, DistrictShopItem } from "../../shared/types.js";
+
+export function parseClockHour(clockT?: string, phase?: string): number {
+  if (clockT) {
+    const match = clockT.match(/(\d{1,2}):(\d{2})/);
+    if (match) {
+      const h = parseInt(match[1]!, 10);
+      const m = parseInt(match[2]!, 10);
+      return h + m / 60;
+    }
+  }
+  const p = (phase || "").toLowerCase();
+  if (p.includes("dawn") || p.includes("morning")) return 8;
+  if (p.includes("afternoon") || p.includes("noon")) return 14;
+  if (p.includes("dusk") || p.includes("sunset") || p.includes("evening")) return 18;
+  if (p.includes("night") || p.includes("midnight")) return 22;
+  return 12;
+}
+
+export function isShopOpen(shop: DistrictShop, hour: number): boolean {
+  if (shop.openHour <= shop.closeHour) {
+    return hour >= shop.openHour && hour < shop.closeHour;
+  }
+  return hour >= shop.openHour || hour < shop.closeHour;
+}
+
+export const DEFAULT_DISTRICT_SHOPS: DistrictShop[] = [
+  {
+    id: "alchemist",
+    name: "Apothecary & Alchemist's Emporium",
+    icon: "⚗️",
+    placeKey: "market",
+    openHour: 8,
+    closeHour: 20,
+    shopkeeper: "Master Alchemist Lyra",
+    items: [
+      { id: "hp_potion", name: "Health Draught", icon: "🧪", type: "consumable", price: 35, stock: 5, maxStock: 10, desc: "Restores 45 HP immediately." },
+      { id: "mp_elixir", name: "Starlight Elixir", icon: "💧", type: "consumable", price: 45, stock: 4, maxStock: 8, desc: "Restores 35 MP/Energy." },
+      { id: "cure_salve", name: "Herbal Ointment", icon: "🌿", type: "consumable", price: 25, stock: 6, maxStock: 12, desc: "Soothes status conditions and fatigue." },
+    ],
+  },
+  {
+    id: "blacksmith",
+    name: "Ironforge Armory & Smithy",
+    icon: "⚒️",
+    placeKey: "forge",
+    openHour: 7,
+    closeHour: 18,
+    shopkeeper: "Goran the Smith",
+    items: [
+      { id: "steel_sword", name: "Tempered Steel Blade", icon: "🗡️", type: "equipment", price: 120, stock: 2, maxStock: 3, desc: "+15 Physical ATK in combat." },
+      { id: "leather_armor", name: "Reinforced Leather Vest", icon: "🥋", type: "equipment", price: 95, stock: 3, maxStock: 4, desc: "+10 Armor & mitigation." },
+      { id: "whetstone", name: "Dwarven Whetstone", icon: "🪨", type: "item", price: 20, stock: 8, maxStock: 10, desc: "Maintains weapon sharpness." },
+    ],
+  },
+  {
+    id: "bakery_inn",
+    name: "The Golden Hearth Bakery & Tavern",
+    icon: "🍞",
+    placeKey: "tavern",
+    openHour: 6,
+    closeHour: 23,
+    shopkeeper: "Innkeeper Martha",
+    items: [
+      { id: "fresh_loaf", name: "Warm Honey Bread", icon: "🥐", type: "consumable", price: 10, stock: 12, maxStock: 15, desc: "Delicious wholesome bread. Heals 15 HP." },
+      { id: "spiced_tea", name: "Fragrant Spiced Tea", icon: "☕", type: "consumable", price: 12, stock: 10, maxStock: 15, desc: "Warms the heart, restores 10 MP." },
+      { id: "tavern_ale", name: "Golden Amber Ale", icon: "🍺", type: "consumable", price: 15, stock: 10, maxStock: 20, desc: "Boosts courage and morale." },
+    ],
+  },
+  {
+    id: "night_market",
+    name: "Velvet Crescent Night Bazaar",
+    icon: "🌙",
+    placeKey: "slums",
+    openHour: 20,
+    closeHour: 5,
+    shopkeeper: "Shrouded Dealer Ren",
+    items: [
+      { id: "lockpick_set", name: "Thief's Tension Tools", icon: "🗝️", type: "item", price: 75, stock: 3, maxStock: 5, desc: "Opens locked chests and backdoors." },
+      { id: "smoke_bomb", name: "Shadowflash Smoke Powder", icon: "💨", type: "consumable", price: 50, stock: 4, maxStock: 6, desc: "Guarantees escape or surprise attack." },
+      { id: "spell_tome", name: "Tome of Forgotten Arcana", icon: "📖", type: "book", price: 180, stock: 1, maxStock: 1, desc: "Grants skill progression insight." },
+    ],
+  },
+];
 
 function getItemIcon(itemName: string): string {
   const norm = itemName.toLowerCase();
   if (norm.includes("sword") || norm.includes("blade") || norm.includes("katana") || norm.includes("knife") || norm.includes("dagger") || norm.includes("weapon") || norm.includes("gun")) return "🗡️";
   if (norm.includes("phone") || norm.includes("smartphone") || norm.includes("device") || norm.includes("terminal")) return "📱";
   if (norm.includes("key") || norm.includes("card") || norm.includes("pass")) return "🔑";
-  if (norm.includes("potion") || norm.includes("medicine") || norm.includes("pill") || norm.includes("aid") || norm.includes("bandage")) return "💊";
-  if (norm.includes("book") || norm.includes("letter") || norm.includes("note") || norm.includes("scroll") || norm.includes("diary")) return "📜";
-  if (norm.includes("food") || norm.includes("apple") || norm.includes("snack") || norm.includes("bento") || norm.includes("bread")) return "🥪";
-  if (norm.includes("drink") || norm.includes("water") || norm.includes("tea") || norm.includes("coffee") || norm.includes("soda") || norm.includes("bottle")) return "☕";
+  if (norm.includes("potion") || norm.includes("draught") || norm.includes("elixir") || norm.includes("medicine") || norm.includes("pill") || norm.includes("aid") || norm.includes("bandage") || norm.includes("ointment")) return "🧪";
+  if (norm.includes("book") || norm.includes("letter") || norm.includes("note") || norm.includes("scroll") || norm.includes("diary") || norm.includes("tome")) return "📜";
+  if (norm.includes("food") || norm.includes("apple") || norm.includes("snack") || norm.includes("bento") || norm.includes("bread") || norm.includes("loaf")) return "🥪";
+  if (norm.includes("drink") || norm.includes("water") || norm.includes("tea") || norm.includes("coffee") || norm.includes("soda") || norm.includes("bottle") || norm.includes("ale")) return "☕";
   if (norm.includes("ring") || norm.includes("necklace") || norm.includes("amulet") || norm.includes("badge") || norm.includes("ribbon")) return "💍";
   if (norm.includes("wallet") || norm.includes("money") || norm.includes("coin") || norm.includes("cash") || norm.includes("gold")) return "💰";
   if (norm.includes("bag") || norm.includes("backpack") || norm.includes("case") || norm.includes("pouch")) return "🎒";
@@ -18,6 +101,9 @@ function getItemIcon(itemName: string): string {
 export class InventoryTab {
   public root: HTMLElement;
   private onAction: (actionText: string) => void;
+  private currentView: "inventory" | "marketplace" = "inventory";
+  public playerGold: number = 200;
+  public shops: DistrictShop[] = JSON.parse(JSON.stringify(DEFAULT_DISTRICT_SHOPS));
 
   constructor(onAction: (actionText: string) => void) {
     this.onAction = onAction;
@@ -37,10 +123,46 @@ export class InventoryTab {
       room_location: "",
     };
 
+    const currentHour = parseClockHour(ledger.clock?.t, ledger.clock?.phase);
+
     const header = document.createElement("div");
     header.className = "vn-tab-header";
-    header.innerHTML = `<h3>🎒 Inventory & Containers — ${actor?.name || actorId}</h3>`;
+    header.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div>
+          <h3 style="margin: 0; font-size: 15px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+            <span>🎒</span> <span>${this.currentView === "inventory" ? `Inventory & Containers — ${actor?.name || actorId}` : "Living District Marketplace & Trading"}</span>
+          </h3>
+          <p class="vn-muted" style="margin: 2px 0 0 0; font-size: 11px;">
+            <span>⏱️ <strong>${ledger.clock?.t || "D1 12:00"}</strong> (${ledger.clock?.phase || "Day"})</span>
+            <span> • 💰 <strong style="color: #ffd700;">${this.playerGold} Gold</strong></span>
+          </p>
+        </div>
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 2px; display: flex; gap: 4px;">
+          <button id="vn-inv-tab-btn" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.currentView === "inventory" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+            🎒 Backpack
+          </button>
+          <button id="vn-market-tab-btn" style="border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; ${this.currentView === "marketplace" ? "background: #6366f1; color: #fff; font-weight: 600;" : "background: transparent; color: #94a3b8;"}">
+            🏪 Marketplace
+          </button>
+        </div>
+      </div>
+    `;
     this.root.appendChild(header);
+
+    header.querySelector("#vn-inv-tab-btn")?.addEventListener("click", () => {
+      this.currentView = "inventory";
+      this.render(ledger, activeActorId);
+    });
+    header.querySelector("#vn-market-tab-btn")?.addEventListener("click", () => {
+      this.currentView = "marketplace";
+      this.render(ledger, activeActorId);
+    });
+
+    if (this.currentView === "marketplace") {
+      this.renderMarketplaceView(ledger, inv, currentHour, activeActorId);
+      return;
+    }
 
     // 1. In Hands (Hero Slots)
     const handsSection = document.createElement("div");
@@ -150,5 +272,152 @@ export class InventoryTab {
     }
     roomSection.appendChild(roomGrid);
     this.root.appendChild(roomSection);
+  }
+
+  private renderMarketplaceView(ledger: LedgerData, inv: ActorInventory, currentHour: number, activeActorId?: string): void {
+    const marketWrap = document.createElement("div");
+    marketWrap.style.cssText = "display: flex; flex-direction: column; gap: 14px;";
+
+    // Info Banner
+    const banner = document.createElement("div");
+    banner.style.cssText = "background: #0f172a; border: 1px solid #3b82f6; border-radius: 8px; padding: 10px 14px; font-size: 11px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;";
+    banner.innerHTML = `
+      <div>
+        <strong style="color: #60a5fa;">Living District Trading Hub:</strong>
+        <span style="color: #cbd5e1;"> Shops follow autonomous diurnal schedules. Visit open stalls to buy equipment or barter surplus carried items.</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="color: #fde047; font-weight: 700;">Wallet: ${this.playerGold}g</span>
+        <button id="vn-market-add-funds" style="background: #1e293b; border: 1px solid #475569; color: #94a3b8; font-size: 10px; border-radius: 4px; padding: 2px 6px; cursor: pointer;">+50g</button>
+      </div>
+    `;
+    marketWrap.appendChild(banner);
+
+    banner.querySelector("#vn-market-add-funds")?.addEventListener("click", () => {
+      this.playerGold += 50;
+      this.render(ledger, activeActorId);
+    });
+
+    // Shops List
+    for (const shop of this.shops) {
+      const open = isShopOpen(shop, currentHour);
+      const shopCard = document.createElement("div");
+      shopCard.style.cssText = `background: #0f172a; border: 1px solid ${open ? "#10b981" : "#334155"}; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; opacity: ${open ? "1" : "0.75"};`;
+
+      const formatHour = (h: number) => `${String(Math.floor(h)).padStart(2, "0")}:00`;
+      const hoursText = `${formatHour(shop.openHour)} - ${formatHour(shop.closeHour)}`;
+
+      shopCard.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 20px;">${shop.icon}</span>
+            <div>
+              <strong style="color: #f8fafc; font-size: 13px;">${shop.name}</strong>
+              <div style="font-size: 10px; color: #94a3b8;">
+                Keeper: ${shop.shopkeeper || "Merchant"} • Location: <span style="color: #38bdf8;">${shop.placeKey}</span>
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 10px; color: #94a3b8;">Hours: ${hoursText}</span>
+            <span style="font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; background: ${open ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)"}; border: 1px solid ${open ? "#22c55e" : "#ef4444"}; color: ${open ? "#86efac" : "#fca5a5"};">
+              ${open ? "🟢 OPEN" : "🔴 CLOSED"}
+            </span>
+          </div>
+        </div>
+
+        ${!open ? `
+          <div style="color: #94a3b8; font-size: 11px; font-style: italic; padding: 6px 0;">
+            The shutters are barred. This merchant operates strictly from ${hoursText}.
+          </div>
+        ` : `
+          <!-- Items Stall Grid -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px;">
+            ${shop.items.map((item) => {
+              const canAfford = this.playerGold >= item.price;
+              const hasStock = item.stock > 0;
+              return `
+                <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between; gap: 6px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      <span style="font-size: 16px;">${item.icon}</span>
+                      <strong style="color: #f8fafc; font-size: 11px;">${item.name}</strong>
+                    </div>
+                    <span style="color: #ffd700; font-weight: 700; font-size: 11px;">${item.price}g</span>
+                  </div>
+                  <div style="font-size: 10px; color: #cbd5e1; line-height: 1.3;">
+                    ${item.desc || "Standard commodity."}
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #2d3748; padding-top: 6px; margin-top: 2px;">
+                    <span style="font-size: 9px; color: #94a3b8;">Stock: ${item.stock}/${item.maxStock}</span>
+                    <button class="vn-buy-item-btn" data-shop-id="${shop.id}" data-item-id="${item.id}" style="background: ${canAfford && hasStock ? "linear-gradient(135deg, #059669, #10b981)" : "#334155"}; border: none; color: ${canAfford && hasStock ? "#fff" : "#94a3b8"}; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 3px 10px; cursor: ${canAfford && hasStock ? "pointer" : "not-allowed"};">
+                      ${!hasStock ? "Out of Stock" : !canAfford ? "Can't Afford" : "Buy"}
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        `}
+      `;
+      marketWrap.appendChild(shopCard);
+    }
+
+    // Sell Surplus Section
+    if (inv.carried && inv.carried.length > 0) {
+      const sellSection = document.createElement("div");
+      sellSection.style.cssText = "background: #0f172a; border: 1px solid #eab308; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;";
+      sellSection.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <strong style="color: #fde047; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+            <span>🤝</span> <span>Merchant Barter & Sell Back (Sell for 15g each)</span>
+          </strong>
+          <span style="font-size: 10px; color: #94a3b8;">Turn carried goods into gold coins</span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+          ${inv.carried.map((cItem, idx) => `
+            <div style="background: #1e293b; border: 1px solid #475569; border-radius: 6px; padding: 4px 10px; display: flex; align-items: center; gap: 8px; font-size: 11px;">
+              <span>${getItemIcon(cItem)} ${cItem}</span>
+              <button class="vn-sell-item-btn" data-item-idx="${idx}" data-item-name="${cItem}" style="background: #eab308; border: none; color: #000; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 2px 6px; cursor: pointer;">
+                Sell (+15g)
+              </button>
+            </div>
+          `).join("")}
+        </div>
+      `;
+      marketWrap.appendChild(sellSection);
+
+      sellSection.querySelectorAll(".vn-sell-item-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const idx = parseInt((btn as HTMLElement).dataset.itemIdx || "-1", 10);
+          const name = (btn as HTMLElement).dataset.itemName || "";
+          if (idx >= 0 && inv.carried && inv.carried[idx]) {
+            inv.carried.splice(idx, 1);
+            this.playerGold += 15;
+            this.onAction(`[Trade: Sold ${name} to merchant for 15 Gold]`);
+            this.render(ledger, activeActorId);
+          }
+        });
+      });
+    }
+
+    this.root.appendChild(marketWrap);
+
+    marketWrap.querySelectorAll(".vn-buy-item-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const shopId = (btn as HTMLElement).dataset.shopId;
+        const itemId = (btn as HTMLElement).dataset.itemId;
+        const shop = this.shops.find((s) => s.id === shopId);
+        const item = shop?.items.find((i) => i.id === itemId);
+        if (shop && item && item.stock > 0 && this.playerGold >= item.price) {
+          this.playerGold -= item.price;
+          item.stock -= 1;
+          if (!inv.carried) inv.carried = [];
+          inv.carried.push(item.name);
+          this.onAction(`[Trade: Purchased 1x ${item.name} from ${shop.name} for ${item.price} Gold]`);
+          this.render(ledger, activeActorId);
+        }
+      });
+    });
   }
 }
