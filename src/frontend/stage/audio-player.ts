@@ -36,6 +36,27 @@ export class VnAudioEngine {
     return this.isMuted;
   }
 
+  public isBgmActive(): boolean {
+    return Boolean(this.bgmAudio && !this.bgmAudio.paused && !this.bgmAudio.muted && !this.isMuted);
+  }
+
+  public toggleBgm(): boolean {
+    if (this.isBgmActive()) {
+      if (this.bgmAudio) this.bgmAudio.pause();
+      return false;
+    }
+    this.isMuted = false;
+    if (this.bgmAudio) {
+      this.bgmAudio.muted = false;
+      this.bgmAudio.play().catch(() => {});
+      return true;
+    }
+    const defaultTrack = this.currentBgmTrack || "peaceful";
+    const url = this.customBgmMap[defaultTrack] || defaultTrack;
+    this.playBgm(url, defaultTrack);
+    return true;
+  }
+
   public playSfx(typeOrUrl: SoundEffectType | string): void {
     if (this.isMuted) return;
 

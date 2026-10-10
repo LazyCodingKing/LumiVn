@@ -27,12 +27,15 @@ export type HudTabId =
   | "rpg"
   | "diagnostics";
 
+import type { VnAudioEngine } from "../stage/audio-player.js";
+
 export interface MenuBarOptions {
   ctx: SpindleFrontendContext;
   onAction: (actionText: string) => void;
   onTransformChange?: (actorId: string, transform: SpriteTransform) => void;
   isOverlayActive?: () => boolean;
   ttsEngine?: VnTtsEngine;
+  audioEngine?: VnAudioEngine;
 }
 
 export class MenuBar {
@@ -98,7 +101,7 @@ export class MenuBar {
     this.journalTab = new JournalTab();
     this.sceneTab = new SceneTab(opts.ctx, opts.onTransformChange);
     this.rpgTab = new RpgTab(opts.ctx, opts.onAction);
-    this.diagnosticsTab = new DiagnosticsTab(opts.ctx);
+    this.diagnosticsTab = new DiagnosticsTab(opts.ctx, opts.audioEngine);
 
     // Render bar buttons
     const barItems: Array<{ id: HudTabId; icon: string; label: string }> = [

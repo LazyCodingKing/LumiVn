@@ -26,6 +26,7 @@ export class DialogueBox {
   private autoBtn: HTMLButtonElement;
   private skipBtn: HTMLButtonElement;
   private voiceBtn: HTMLButtonElement;
+  private bgmBtn: HTMLButtonElement;
   private prevBtn: HTMLButtonElement;
   private nextBtn: HTMLButtonElement;
   private choicesContainer: HTMLElement;
@@ -128,6 +129,19 @@ export class DialogueBox {
       }
     });
 
+    this.bgmBtn = document.createElement("button");
+    this.bgmBtn.className = "vn-nav-btn vn-bgm-btn";
+    const bgmOn = this.audioEngine?.isBgmActive() ?? false;
+    this.bgmBtn.innerHTML = bgmOn ? "🎵 Music" : "🔇 Music";
+    this.bgmBtn.title = "Toggle Background Music (BGM)";
+    this.bgmBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.audioEngine?.playSfx("click");
+      const active = this.audioEngine?.toggleBgm() ?? false;
+      this.bgmBtn.innerHTML = active ? "🎵 Music" : "🔇 Music";
+      this.bgmBtn.style.color = active ? "var(--vn-accent, #38bdf8)" : "#cbd5e1";
+    });
+
     this.prevBtn = document.createElement("button");
     this.prevBtn.className = "vn-nav-btn vn-prev-btn";
     this.prevBtn.innerHTML = "◀ Back";
@@ -152,6 +166,7 @@ export class DialogueBox {
     this.controlsContainer.appendChild(this.autoBtn);
     this.controlsContainer.appendChild(this.skipBtn);
     this.controlsContainer.appendChild(this.voiceBtn);
+    this.controlsContainer.appendChild(this.bgmBtn);
     this.controlsContainer.appendChild(this.prevBtn);
     this.controlsContainer.appendChild(this.nextBtn);
 
@@ -222,6 +237,13 @@ export class DialogueBox {
 
   public setKnownActors(actors: string[]): void {
     this.knownActors = actors;
+  }
+
+  public updateBgmIndicator(active: boolean): void {
+    if (this.bgmBtn) {
+      this.bgmBtn.innerHTML = active ? "🎵 Music" : "🔇 Music";
+      this.bgmBtn.style.color = active ? "var(--vn-accent, #38bdf8)" : "#cbd5e1";
+    }
   }
 
   private bindEvents(): void {

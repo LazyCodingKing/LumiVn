@@ -328,7 +328,14 @@ export class StorageManager {
     try {
       if (await this.spindle.storage.exists("stat_rules_settings.json")) {
         const raw = await this.spindle.storage.read("stat_rules_settings.json");
-        const loaded: StatRulesSettings = { ...DEFAULT_STAT_RULES_SETTINGS, ...JSON.parse(raw) };
+        const parsed = JSON.parse(raw);
+        const loaded: StatRulesSettings = {
+          mode: parsed.mode || DEFAULT_STAT_RULES_SETTINGS.mode,
+          statRules: parsed.statRules?.trim() ? parsed.statRules : DEFAULT_STAT_RULES,
+          ledgerPrompt: parsed.ledgerPrompt?.trim() ? parsed.ledgerPrompt : DEFAULT_LEDGER_PROMPT,
+          rpgPrompt: parsed.rpgPrompt?.trim() ? parsed.rpgPrompt : DEFAULT_RPG_PROMPT,
+          enabled: parsed.enabled ?? true,
+        };
         this.statRulesSettingsCache = loaded;
         return loaded;
       }

@@ -2,20 +2,29 @@ import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { LedgerData, AssetManifest, StatRulesSettings } from "../../shared/types.js";
 import { diagBus, type LogEntry } from "../utils/diag-bus.js";
 import { PROP_TEMPLATES_CATALOG, formatDialogueHtml } from "../stage/rich-text.js";
+import { DEFAULT_STAT_RULES, DEFAULT_LEDGER_PROMPT } from "../../backend/default-rules.js";
+import { DEFAULT_RPG_PROMPT } from "../../backend/storage.js";
+import type { VnAudioEngine } from "../stage/audio-player.js";
 
 export class DiagnosticsTab {
   public root: HTMLElement;
   private ctx?: SpindleFrontendContext;
+  private audioEngine?: VnAudioEngine;
   private currentLedger: LedgerData = {};
   private currentManifest?: AssetManifest;
   private activeFilter: "all" | "info" | "warn" | "error" = "all";
   private unsubscribeBus?: () => void;
   private statRulesSettings: StatRulesSettings | null = null;
 
-  constructor(ctx?: SpindleFrontendContext) {
+  constructor(ctx?: SpindleFrontendContext, audioEngine?: VnAudioEngine) {
     this.ctx = ctx;
+    this.audioEngine = audioEngine;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-diagnostics";
+  }
+
+  public setAudioEngine(engine: VnAudioEngine): void {
+    this.audioEngine = engine;
   }
 
   public setStatRulesSettings(settings: StatRulesSettings): void {
@@ -24,10 +33,10 @@ export class DiagnosticsTab {
     const rulesInput = this.root.querySelector("#vn-stat-rules-input") as HTMLTextAreaElement | null;
     const ledgerInput = this.root.querySelector("#vn-ledger-prompt-input") as HTMLTextAreaElement | null;
     const rpgInput = this.root.querySelector("#vn-rpg-rules-input") as HTMLTextAreaElement | null;
-    if (modeSelect) modeSelect.value = settings.mode;
-    if (rulesInput) rulesInput.value = settings.statRules;
-    if (ledgerInput) ledgerInput.value = settings.ledgerPrompt;
-    if (rpgInput) rpgInput.value = settings.rpgPrompt || "";
+    if (modeSelect) modeSelect.value = settings.mode || "mvu_quiet";
+    if (rulesInput) rulesInput.value = settings.statRules?.trim() ? settings.statRules : DEFAULT_STAT_RULES;
+    if (ledgerInput) ledgerInput.value = settings.ledgerPrompt?.trim() ? settings.ledgerPrompt : DEFAULT_LEDGER_PROMPT;
+    if (rpgInput) rpgInput.value = settings.rpgPrompt?.trim() ? settings.rpgPrompt : DEFAULT_RPG_PROMPT;
   }
 
   public render(ledger: LedgerData, manifest?: AssetManifest): void {
@@ -239,21 +248,26 @@ export class DiagnosticsTab {
     const rpgInput = rulesCard.querySelector("#vn-rpg-rules-input") as HTMLTextAreaElement | null;
     const saveRulesBtn = rulesCard.querySelector("#vn-save-rules-btn") as HTMLButtonElement | null;
 
-    if (this.statRulesSettings) {
-      if (modeSelect) modeSelect.value = this.statRulesSettings.mode;
-      if (rulesInput) rulesInput.value = this.statRulesSettings.statRules;
-      if (ledgerInput) ledgerInput.value = this.statRulesSettings.ledgerPrompt;
-      if (rpgInput) rpgInput.value = this.statRulesSettings.rpgPrompt || "";
-    } else {
+    const activeMode = this.statRulesSettings?.mode || "mvu_quiet";
+    const activeRules = this.statRulesSettings?.statRules?.trim() || DEFAULT_STAT_RULES;
+    const activeLedger = this.statRulesSettings?.ledgerPrompt?.trim() || DEFAULT_LEDGER_PROMPT;
+    const activeRpg = this.statRulesSettings?.rpgPrompt?.trim() || DEFAULT_RPG_PROMPT;
+
+    if (modeSelect) modeSelect.value = activeMode;
+    if (rulesInput) rulesInput.value = activeRules;
+    if (ledgerInput) ledgerInput.value = activeLedger;
+    if (rpgInput) rpgInput.value = activeRpg;
+
+    if (!this.statRulesSettings) {
       this.ctx?.sendToBackend?.({ type: "vn_get_stat_rules_settings" });
     }
 
     saveRulesBtn?.addEventListener("click", () => {
       const updated: StatRulesSettings = {
         mode: (modeSelect?.value as any) || "mvu_quiet",
-        statRules: rulesInput?.value || "",
-        ledgerPrompt: ledgerInput?.value || "",
-        rpgPrompt: rpgInput?.value || "",
+        statRules: rulesInput?.value?.trim() || DEFAULT_STAT_RULES,
+        ledgerPrompt: ledgerInput?.value?.trim() || DEFAULT_LEDGER_PROMPT,
+        rpgPrompt: rpgInput?.value?.trim() || DEFAULT_RPG_PROMPT,
         enabled: true,
       };
       this.statRulesSettings = updated;
@@ -268,6 +282,59 @@ export class DiagnosticsTab {
           saveRulesBtn.textContent = orig;
         }, 1500);
       }
+    });
+
+    // Dedicated Background Music (BGM) & Audio Engine Controls Card
+    const audioCard = document.createElement("div");
+    audioCard.style.cssText = "background: #0f172a; border: 1px solid #10b981; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px;";
+    const isBgmActive = this.audioEngine?.isBgmActive() ?? false;
+    const bgmVol = Math.round((this.audioEngine?.getBgmVolume() ?? 0.4) * 100);
+    const currTrack = this.audioEngine?.getCurrentBgm() || "idle / adaptive";
+
+    audioCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 15px;">🎵</span>
+          <strong style="color: #34d399; font-size: 12px; text-transform: uppercase;">Background Music (BGM) & Audio Controls</strong>
+        </div>
+        <button id="vn-diag-toggle-bgm" style="background: ${isBgmActive ? "linear-gradient(135deg, #059669, #10b981)" : "#334155"}; border: none; color: #fff; border-radius: 6px; padding: 4px 12px; font-size: 11px; font-weight: 700; cursor: pointer;">
+          ${isBgmActive ? "🟢 BGM: Playing (Click to Pause)" : "▶ BGM: Turn On / Play"}
+        </button>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; font-size: 11px;">
+        <div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <label style="color: #94a3b8; font-weight: 600;">BGM Volume</label>
+            <span id="vn-diag-bgm-val" style="color: #34d399; font-weight: 700;">${bgmVol}%</span>
+          </div>
+          <input type="range" id="vn-diag-bgm-slider" min="0" max="100" value="${bgmVol}" style="width: 100%; cursor: pointer;" />
+        </div>
+        <div>
+          <label style="color: #94a3b8; font-weight: 600; display: block; margin-bottom: 4px;">Active Track / Scene Ambience</label>
+          <span id="vn-diag-curr-track" style="color: #38bdf8; font-weight: 600; font-family: monospace;">${currTrack}</span>
+        </div>
+      </div>
+    `;
+    this.root.appendChild(audioCard);
+
+    const toggleBgmBtn = audioCard.querySelector("#vn-diag-toggle-bgm") as HTMLButtonElement | null;
+    const bgmSlider = audioCard.querySelector("#vn-diag-bgm-slider") as HTMLInputElement | null;
+    const bgmVal = audioCard.querySelector("#vn-diag-bgm-val") as HTMLElement | null;
+
+    toggleBgmBtn?.addEventListener("click", () => {
+      if (this.audioEngine) {
+        const active = this.audioEngine.toggleBgm();
+        toggleBgmBtn.innerHTML = active ? "🟢 BGM: Playing (Click to Pause)" : "▶ BGM: Turn On / Play";
+        toggleBgmBtn.style.background = active ? "linear-gradient(135deg, #059669, #10b981)" : "#334155";
+        const trackEl = audioCard.querySelector("#vn-diag-curr-track") as HTMLElement | null;
+        if (trackEl) trackEl.textContent = this.audioEngine.getCurrentBgm() || "peaceful";
+      }
+    });
+
+    bgmSlider?.addEventListener("input", () => {
+      const vol = Number(bgmSlider.value);
+      if (bgmVal) bgmVal.textContent = `${vol}%`;
+      this.audioEngine?.setBgmVolume(vol / 100);
     });
 
     // Dedicated Roleplay Prop & UI Templates Card

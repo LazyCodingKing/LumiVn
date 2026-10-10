@@ -92,6 +92,7 @@ export class StageOverlay {
       },
       isOverlayActive: () => this.isActive(),
       ttsEngine: this.ttsEngine,
+      audioEngine: this.audioEngine,
     });
 
     // Toast Container
@@ -295,6 +296,7 @@ export class StageOverlay {
         this.manifest?.places
       );
     }
+    this.dialogueBox.updateBgmIndicator(this.audioEngine.isBgmActive());
 
     // Extract known actors for robust dialogue speaker resolution
     const actorNames = state.characters.map((c) => c.name);
