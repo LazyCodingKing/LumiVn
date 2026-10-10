@@ -292,6 +292,7 @@ export class StageOverlay {
     this.dialogueBox.setContent(state.speakerName, state.paragraphs, state.messageId);
     this.menuBar.setLedger(state.ledger, state.hasBPlotNotification);
     this.updateStatusPill(state.ledger);
+    this.ttsEngine.setLedgerVoices(state.ledger?.actors);
 
     const newEvts = state.ledger?.journal || [];
     if (newEvts.length > 0) {

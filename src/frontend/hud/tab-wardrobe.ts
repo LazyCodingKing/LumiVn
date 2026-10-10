@@ -108,12 +108,15 @@ export class WardrobeTab {
       const actions = document.createElement("div");
       actions.className = "vn-slot-actions";
 
+      const isUser = actorId === "user";
+      const targetName = actor?.name || actorId;
+
       if (isEquipped) {
         const takeOffBtn = document.createElement("button");
         takeOffBtn.className = "vn-btn vn-btn-sm vn-btn-danger";
         takeOffBtn.textContent = "Take off";
         takeOffBtn.addEventListener("click", () => {
-          this.onAction(`*Takes off ${slot.label.toLowerCase()}*`);
+          this.onAction(isUser ? `*Takes off ${slot.label.toLowerCase()}*` : `*Takes off ${targetName}'s ${slot.label.toLowerCase()}*`);
         });
         actions.appendChild(takeOffBtn);
       } else {
@@ -121,7 +124,7 @@ export class WardrobeTab {
         wearBtn.className = "vn-btn vn-btn-sm vn-btn-primary";
         wearBtn.textContent = "Wear";
         wearBtn.addEventListener("click", () => {
-          this.onAction(`*Puts on ${slot.label.toLowerCase()}*`);
+          this.onAction(isUser ? `*Puts on ${slot.label.toLowerCase()}*` : `*Helps ${targetName} put on ${slot.label.toLowerCase()}*`);
         });
         actions.appendChild(wearBtn);
       }
@@ -135,33 +138,35 @@ export class WardrobeTab {
     // Bulk actions
     const footer = document.createElement("div");
     footer.className = "vn-tab-footer";
+    const isUser = actorId === "user";
+    const targetName = actor?.name || actorId;
 
     const cleanBtn = document.createElement("button");
     cleanBtn.className = "vn-btn vn-btn-primary";
     cleanBtn.textContent = "Clean Clothes";
     cleanBtn.addEventListener("click", () => {
-      this.onAction(`*Cleans and washes garments*`);
+      this.onAction(isUser ? `*Cleans and washes garments*` : `*Cleans and washes ${targetName}'s garments*`);
     });
 
     const repairBtn = document.createElement("button");
     repairBtn.className = "vn-btn vn-btn-primary";
     repairBtn.textContent = "Repair Garments";
     repairBtn.addEventListener("click", () => {
-      this.onAction(`*Mends and repairs clothing tears*`);
+      this.onAction(isUser ? `*Mends and repairs clothing tears*` : `*Mends and repairs ${targetName}'s clothing tears*`);
     });
 
     const undressBtn = document.createElement("button");
     undressBtn.className = "vn-btn vn-btn-warning";
     undressBtn.textContent = "Undress to Underwear";
     undressBtn.addEventListener("click", () => {
-      this.onAction(`*Undresses down to underwear*`);
+      this.onAction(isUser ? `*Undresses down to underwear*` : `*Undresses ${targetName} down to underwear*`);
     });
 
     const stripBtn = document.createElement("button");
     stripBtn.className = "vn-btn vn-btn-danger";
     stripBtn.textContent = "Completely Undress";
     stripBtn.addEventListener("click", () => {
-      this.onAction(`*Completely strips clothes*`);
+      this.onAction(isUser ? `*Completely strips clothes*` : `*Completely strips ${targetName}'s clothes*`);
     });
 
     footer.appendChild(cleanBtn);

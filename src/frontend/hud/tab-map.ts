@@ -527,6 +527,27 @@ export class MapTab {
       );
     });
 
+    const inv: any = (ledger as any).inventory || ledger.actors?.["user"]?.inventory;
+    const invRoomLoc = inv?.room_location?.toLowerCase();
+    const isMatchingRoom = isHere || (invRoomLoc && (invRoomLoc === selected.toLowerCase() || invRoomLoc.includes(cleanName.toLowerCase())));
+    const roomItems: string[] = [
+      ...(Array.isArray((placeConfig as any).items) ? ((placeConfig as any).items as string[]) : []),
+      ...(Array.isArray((placeConfig as any).objects) ? ((placeConfig as any).objects as string[]) : []),
+      ...(isMatchingRoom && Array.isArray(inv?.room) ? (inv.room as string[]) : []),
+    ];
+    const uniqueRoomItems = [...new Set(roomItems)];
+
+    const getRoomItemIcon = (name: string): string => {
+      const n = name.toLowerCase();
+      if (n.includes("key") || n.includes("card") || n.includes("pass")) return "🔑";
+      if (n.includes("knife") || n.includes("blade") || n.includes("sword") || n.includes("gun")) return "🗡️";
+      if (n.includes("phone") || n.includes("pager") || n.includes("radio")) return "📱";
+      if (n.includes("note") || n.includes("paper") || n.includes("book") || n.includes("file") || n.includes("journal")) return "📜";
+      if (n.includes("food") || n.includes("bread") || n.includes("ration")) return "🥪";
+      if (n.includes("drink") || n.includes("coffee") || n.includes("tea") || n.includes("water") || n.includes("bottle")) return "☕";
+      return "📦";
+    };
+
     sidebar.innerHTML = `
       ${placeThumbnail ? `
         <div style="width: 100%; height: 110px; border-radius: 8px; overflow: hidden; margin-bottom: 8px; border: 1px solid #334155; position: relative; background: #070d19;">
@@ -569,9 +590,37 @@ export class MapTab {
 
       ${Array.isArray(placeConfig.affordances) && placeConfig.affordances.length > 0 ? `
         <div>
-          <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px;">Affordances</div>
+          <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px;">Affordances ${isHere ? '<span style="color: #38bdf8;">(Click to interact)</span>' : ''}</div>
           <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-            ${placeConfig.affordances.map((a: string) => `<span style="background: #1e293b; border: 1px solid #475569; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${a}</span>`).join("")}
+            ${placeConfig.affordances.map((a: string) => `
+              <span class="${isHere ? "vn-affordance-interactive" : ""}" data-affordance="${a}" style="background: #1e293b; border: 1px solid ${isHere ? "#38bdf8" : "#475569"}; padding: 2px 6px; border-radius: 4px; font-size: 10px; ${isHere ? "cursor: pointer; color: #93c5fd;" : ""}">${a}</span>
+            `).join("")}
+          </div>
+        </div>
+      ` : ''}
+
+      ${isHere || uniqueRoomItems.length > 0 ? `
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <span style="font-size: 10px; color: #38bdf8; text-transform: uppercase; font-weight: 700;">📦 Room Objects (${uniqueRoomItems.length})</span>
+            ${isHere ? `<button class="vn-search-room-btn" style="background: rgba(56, 189, 248, 0.15); border: 1px solid #38bdf8; color: #38bdf8; font-size: 10px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">🔍 Search Room</button>` : ''}
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            ${uniqueRoomItems.length > 0
+              ? uniqueRoomItems.map((item) => `
+                <div style="background: #1e293b; padding: 4px 8px; border-radius: 6px; font-size: 11px; display: flex; align-items: center; justify-content: space-between; gap: 6px; border: 1px solid #334155;">
+                  <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
+                    <span>${getRoomItemIcon(item)}</span>
+                    <span style="color: #f8fafc; font-weight: 600; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${item}</span>
+                  </div>
+                  <div style="display: flex; gap: 4px; flex-shrink: 0;">
+                    <button class="vn-take-item-btn" data-item="${item}" style="background: #059669; border: none; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">Take</button>
+                    <button class="vn-inspect-item-btn" data-item="${item}" style="background: #334155; border: 1px solid #475569; color: #cbd5e1; font-size: 10px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">Examine</button>
+                  </div>
+                </div>
+              `).join("")
+              : '<span style="color: #64748b; font-size: 11px; font-style: italic;">No loose items seen here.</span>'
+            }
           </div>
         </div>
       ` : ''}
@@ -626,6 +675,31 @@ export class MapTab {
     sidebar.querySelector("#vn-sidebar-navigate-btn")?.addEventListener("click", () => {
       if (isGated) return;
       this.onAction(`*Travels to the ${cleanName.replace(/_/g, " ")}*`);
+    });
+
+    sidebar.querySelectorAll<HTMLButtonElement>(".vn-take-item-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const item = btn.dataset.item;
+        if (item) this.onAction(`*Picks up ${item} from the ${cleanName.replace(/_/g, " ")}*`);
+      });
+    });
+
+    sidebar.querySelectorAll<HTMLButtonElement>(".vn-inspect-item-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const item = btn.dataset.item;
+        if (item) this.onAction(`*Examines ${item} in the ${cleanName.replace(/_/g, " ")}*`);
+      });
+    });
+
+    sidebar.querySelector(".vn-search-room-btn")?.addEventListener("click", () => {
+      this.onAction(`*Searches the ${cleanName.replace(/_/g, " ")} for items and clues*`);
+    });
+
+    sidebar.querySelectorAll<HTMLElement>(".vn-affordance-interactive").forEach((el) => {
+      el.addEventListener("click", () => {
+        const aff = el.dataset.affordance;
+        if (aff) this.onAction(`*Interacts with the ${aff.toLowerCase()} in the ${cleanName.replace(/_/g, " ")}*`);
+      });
     });
   }
 }

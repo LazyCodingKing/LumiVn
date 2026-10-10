@@ -144,6 +144,8 @@ export interface ActorDossier {
   agency?: Record<string, unknown>;
   knowledge?: Record<string, unknown>;
   stats?: Record<string, number | unknown>;
+  voice?: string | { connectionId?: string; voice?: string; speed?: number };
+  speech_style?: string;
   [key: string]: unknown;
 }
 

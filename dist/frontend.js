@@ -871,6 +871,7 @@ class DialogueBox {
   autoTimer = null;
   isSkipping = false;
   skipTimer = null;
+  audioFallbackTimer = null;
   backlogModal;
   choiceModal;
   backlogHistory = [];
@@ -1086,6 +1087,9 @@ class DialogueBox {
       clearTimeout(this.autoTimer);
     if (this.skipTimer)
       clearTimeout(this.skipTimer);
+    if (this.audioFallbackTimer)
+      clearTimeout(this.audioFallbackTimer);
+    this.audioFallbackTimer = null;
     this.ttsEngine?.stop();
     this.isUserTurn = false;
     this.lastUserText = "";
@@ -1107,6 +1111,9 @@ class DialogueBox {
       clearTimeout(this.autoTimer);
     if (this.skipTimer)
       clearTimeout(this.skipTimer);
+    if (this.audioFallbackTimer)
+      clearTimeout(this.audioFallbackTimer);
+    this.audioFallbackTimer = null;
     this.ttsEngine?.stop();
     if (this.isUserTurn && this.lastUserText) {
       if (!this.textContainer.querySelector(".vn-generating-indicator")) {
@@ -1132,6 +1139,9 @@ class DialogueBox {
       clearTimeout(this.autoTimer);
     if (this.skipTimer)
       clearTimeout(this.skipTimer);
+    if (this.audioFallbackTimer)
+      clearTimeout(this.audioFallbackTimer);
+    this.audioFallbackTimer = null;
     this.ttsEngine?.stop();
     this.isUserTurn = true;
     this.lastUserText = text;
@@ -1183,9 +1193,19 @@ class DialogueBox {
         isUser: b.speaker.toLowerCase() === "user"
       });
     }
+    if (this.ttsEngine?.isEnabled()) {
+      for (const b of this.beats) {
+        if (b.text)
+          this.ttsEngine.prefetch(b.text, b.speaker).catch(() => {});
+      }
+    }
     this.renderCurrentBeat();
   }
   advance() {
+    if (this.audioFallbackTimer) {
+      clearTimeout(this.audioFallbackTimer);
+      this.audioFallbackTimer = null;
+    }
     if (this.isTyping) {
       if (this.typeTimer)
         clearTimeout(this.typeTimer);
@@ -1209,6 +1229,10 @@ class DialogueBox {
         clearTimeout(this.autoTimer);
       if (this.skipTimer)
         clearTimeout(this.skipTimer);
+      if (this.audioFallbackTimer) {
+        clearTimeout(this.audioFallbackTimer);
+        this.audioFallbackTimer = null;
+      }
       this.ttsEngine?.stop();
       this.isTyping = false;
       this.currentBeatIndex--;
@@ -1272,12 +1296,22 @@ class DialogueBox {
       }
     };
     if (this.ttsEngine?.isEnabled()) {
-      const fallbackTimer = window.setTimeout(() => {
-        startTypewriter();
-      }, 1200);
+      if (this.audioFallbackTimer)
+        clearTimeout(this.audioFallbackTimer);
+      let hasStartedAudio = false;
+      this.audioFallbackTimer = window.setTimeout(() => {
+        this.audioFallbackTimer = null;
+        if (!hasStartedAudio) {
+          startTypewriter();
+        }
+      }, 3500);
       this.ttsEngine.speak(beat.text, beat.speaker, {
         onStart: (duration) => {
-          clearTimeout(fallbackTimer);
+          hasStartedAudio = true;
+          if (this.audioFallbackTimer) {
+            clearTimeout(this.audioFallbackTimer);
+            this.audioFallbackTimer = null;
+          }
           startTypewriter(duration);
         },
         onBoundary: (wordCharIdx) => {
@@ -1296,7 +1330,10 @@ class DialogueBox {
           }
         },
         onError: () => {
-          clearTimeout(fallbackTimer);
+          if (this.audioFallbackTimer) {
+            clearTimeout(this.audioFallbackTimer);
+            this.audioFallbackTimer = null;
+          }
           startTypewriter();
         }
       });
@@ -2667,12 +2704,14 @@ class WardrobeTab {
       `;
       const actions = document.createElement("div");
       actions.className = "vn-slot-actions";
+      const isUser = actorId === "user";
+      const targetName = actor?.name || actorId;
       if (isEquipped) {
         const takeOffBtn = document.createElement("button");
         takeOffBtn.className = "vn-btn vn-btn-sm vn-btn-danger";
         takeOffBtn.textContent = "Take off";
         takeOffBtn.addEventListener("click", () => {
-          this.onAction(`*Takes off ${slot.label.toLowerCase()}*`);
+          this.onAction(isUser ? `*Takes off ${slot.label.toLowerCase()}*` : `*Takes off ${targetName}'s ${slot.label.toLowerCase()}*`);
         });
         actions.appendChild(takeOffBtn);
       } else {
@@ -2680,7 +2719,7 @@ class WardrobeTab {
         wearBtn.className = "vn-btn vn-btn-sm vn-btn-primary";
         wearBtn.textContent = "Wear";
         wearBtn.addEventListener("click", () => {
-          this.onAction(`*Puts on ${slot.label.toLowerCase()}*`);
+          this.onAction(isUser ? `*Puts on ${slot.label.toLowerCase()}*` : `*Helps ${targetName} put on ${slot.label.toLowerCase()}*`);
         });
         actions.appendChild(wearBtn);
       }
@@ -2690,29 +2729,31 @@ class WardrobeTab {
     this.root.appendChild(slotsGrid);
     const footer = document.createElement("div");
     footer.className = "vn-tab-footer";
+    const isUser = actorId === "user";
+    const targetName = actor?.name || actorId;
     const cleanBtn = document.createElement("button");
     cleanBtn.className = "vn-btn vn-btn-primary";
     cleanBtn.textContent = "Clean Clothes";
     cleanBtn.addEventListener("click", () => {
-      this.onAction(`*Cleans and washes garments*`);
+      this.onAction(isUser ? `*Cleans and washes garments*` : `*Cleans and washes ${targetName}'s garments*`);
     });
     const repairBtn = document.createElement("button");
     repairBtn.className = "vn-btn vn-btn-primary";
     repairBtn.textContent = "Repair Garments";
     repairBtn.addEventListener("click", () => {
-      this.onAction(`*Mends and repairs clothing tears*`);
+      this.onAction(isUser ? `*Mends and repairs clothing tears*` : `*Mends and repairs ${targetName}'s clothing tears*`);
     });
     const undressBtn = document.createElement("button");
     undressBtn.className = "vn-btn vn-btn-warning";
     undressBtn.textContent = "Undress to Underwear";
     undressBtn.addEventListener("click", () => {
-      this.onAction(`*Undresses down to underwear*`);
+      this.onAction(isUser ? `*Undresses down to underwear*` : `*Undresses ${targetName} down to underwear*`);
     });
     const stripBtn = document.createElement("button");
     stripBtn.className = "vn-btn vn-btn-danger";
     stripBtn.textContent = "Completely Undress";
     stripBtn.addEventListener("click", () => {
-      this.onAction(`*Completely strips clothes*`);
+      this.onAction(isUser ? `*Completely strips clothes*` : `*Completely strips ${targetName}'s clothes*`);
     });
     footer.appendChild(cleanBtn);
     footer.appendChild(repairBtn);
@@ -3654,6 +3695,31 @@ class MapTab {
       const loc = (r.loc || "").toLowerCase();
       return loc === selected.toLowerCase() || loc === cleanName.toLowerCase() || loc.includes(cleanName.toLowerCase());
     });
+    const inv = ledger.inventory || ledger.actors?.["user"]?.inventory;
+    const invRoomLoc = inv?.room_location?.toLowerCase();
+    const isMatchingRoom = isHere || invRoomLoc && (invRoomLoc === selected.toLowerCase() || invRoomLoc.includes(cleanName.toLowerCase()));
+    const roomItems = [
+      ...Array.isArray(placeConfig.items) ? placeConfig.items : [],
+      ...Array.isArray(placeConfig.objects) ? placeConfig.objects : [],
+      ...isMatchingRoom && Array.isArray(inv?.room) ? inv.room : []
+    ];
+    const uniqueRoomItems = [...new Set(roomItems)];
+    const getRoomItemIcon = (name) => {
+      const n = name.toLowerCase();
+      if (n.includes("key") || n.includes("card") || n.includes("pass"))
+        return "\uD83D\uDD11";
+      if (n.includes("knife") || n.includes("blade") || n.includes("sword") || n.includes("gun"))
+        return "\uD83D\uDDE1️";
+      if (n.includes("phone") || n.includes("pager") || n.includes("radio"))
+        return "\uD83D\uDCF1";
+      if (n.includes("note") || n.includes("paper") || n.includes("book") || n.includes("file") || n.includes("journal"))
+        return "\uD83D\uDCDC";
+      if (n.includes("food") || n.includes("bread") || n.includes("ration"))
+        return "\uD83E\uDD6A";
+      if (n.includes("drink") || n.includes("coffee") || n.includes("tea") || n.includes("water") || n.includes("bottle"))
+        return "☕";
+      return "\uD83D\uDCE6";
+    };
     sidebar.innerHTML = `
       ${placeThumbnail ? `
         <div style="width: 100%; height: 110px; border-radius: 8px; overflow: hidden; margin-bottom: 8px; border: 1px solid #334155; position: relative; background: #070d19;">
@@ -3696,9 +3762,34 @@ class MapTab {
 
       ${Array.isArray(placeConfig.affordances) && placeConfig.affordances.length > 0 ? `
         <div>
-          <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px;">Affordances</div>
+          <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px;">Affordances ${isHere ? '<span style="color: #38bdf8;">(Click to interact)</span>' : ""}</div>
           <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-            ${placeConfig.affordances.map((a) => `<span style="background: #1e293b; border: 1px solid #475569; padding: 2px 6px; border-radius: 4px; font-size: 10px;">${a}</span>`).join("")}
+            ${placeConfig.affordances.map((a) => `
+              <span class="${isHere ? "vn-affordance-interactive" : ""}" data-affordance="${a}" style="background: #1e293b; border: 1px solid ${isHere ? "#38bdf8" : "#475569"}; padding: 2px 6px; border-radius: 4px; font-size: 10px; ${isHere ? "cursor: pointer; color: #93c5fd;" : ""}">${a}</span>
+            `).join("")}
+          </div>
+        </div>
+      ` : ""}
+
+      ${isHere || uniqueRoomItems.length > 0 ? `
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <span style="font-size: 10px; color: #38bdf8; text-transform: uppercase; font-weight: 700;">\uD83D\uDCE6 Room Objects (${uniqueRoomItems.length})</span>
+            ${isHere ? `<button class="vn-search-room-btn" style="background: rgba(56, 189, 248, 0.15); border: 1px solid #38bdf8; color: #38bdf8; font-size: 10px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">\uD83D\uDD0D Search Room</button>` : ""}
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            ${uniqueRoomItems.length > 0 ? uniqueRoomItems.map((item) => `
+                <div style="background: #1e293b; padding: 4px 8px; border-radius: 6px; font-size: 11px; display: flex; align-items: center; justify-content: space-between; gap: 6px; border: 1px solid #334155;">
+                  <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
+                    <span>${getRoomItemIcon(item)}</span>
+                    <span style="color: #f8fafc; font-weight: 600; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${item}</span>
+                  </div>
+                  <div style="display: flex; gap: 4px; flex-shrink: 0;">
+                    <button class="vn-take-item-btn" data-item="${item}" style="background: #059669; border: none; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">Take</button>
+                    <button class="vn-inspect-item-btn" data-item="${item}" style="background: #334155; border: 1px solid #475569; color: #cbd5e1; font-size: 10px; padding: 2px 6px; border-radius: 4px; cursor: pointer;">Examine</button>
+                  </div>
+                </div>
+              `).join("") : '<span style="color: #64748b; font-size: 11px; font-style: italic;">No loose items seen here.</span>'}
           </div>
         </div>
       ` : ""}
@@ -3750,6 +3841,30 @@ class MapTab {
       if (isGated)
         return;
       this.onAction(`*Travels to the ${cleanName.replace(/_/g, " ")}*`);
+    });
+    sidebar.querySelectorAll(".vn-take-item-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const item = btn.dataset.item;
+        if (item)
+          this.onAction(`*Picks up ${item} from the ${cleanName.replace(/_/g, " ")}*`);
+      });
+    });
+    sidebar.querySelectorAll(".vn-inspect-item-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const item = btn.dataset.item;
+        if (item)
+          this.onAction(`*Examines ${item} in the ${cleanName.replace(/_/g, " ")}*`);
+      });
+    });
+    sidebar.querySelector(".vn-search-room-btn")?.addEventListener("click", () => {
+      this.onAction(`*Searches the ${cleanName.replace(/_/g, " ")} for items and clues*`);
+    });
+    sidebar.querySelectorAll(".vn-affordance-interactive").forEach((el) => {
+      el.addEventListener("click", () => {
+        const aff = el.dataset.affordance;
+        if (aff)
+          this.onAction(`*Interacts with the ${aff.toLowerCase()} in the ${cleanName.replace(/_/g, " ")}*`);
+      });
     });
   }
 }
@@ -9194,11 +9309,48 @@ class VnTtsEngine {
   settings = { ...DEFAULT_VOICE_SETTINGS };
   activeChatId = "";
   cachedDefaultConnection = null;
+  ledgerVoices = new Map;
+  audioCache = new Map;
+  pendingFetches = new Map;
   constructor() {
     this.loadLocalSettings();
   }
   setChatId(chatId) {
+    if (this.activeChatId !== chatId) {
+      this.clearAudioCache();
+    }
     this.activeChatId = chatId;
+  }
+  setLedgerVoices(actors) {
+    this.ledgerVoices.clear();
+    if (!actors)
+      return;
+    for (const [id, dossier] of Object.entries(actors)) {
+      const v = dossier.voice || dossier?.profile?.voice;
+      if (v) {
+        let speed;
+        if (typeof dossier.speech_style === "string") {
+          const style = dossier.speech_style.toLowerCase();
+          if (style.includes("fast") || style.includes("hurried") || style.includes("excited"))
+            speed = 1.15;
+          if (style.includes("slow") || style.includes("deliberate") || style.includes("calm"))
+            speed = 0.88;
+        }
+        const ref = typeof v === "string" ? { connectionId: "", voice: v, speed } : { connectionId: v.connectionId || "", voice: v.voice || "", speed: v.speed ?? speed };
+        this.ledgerVoices.set(speakerKey(id), ref);
+        if (dossier.name)
+          this.ledgerVoices.set(speakerKey(dossier.name), ref);
+      }
+    }
+  }
+  clearAudioCache() {
+    for (const cached of this.audioCache.values()) {
+      try {
+        URL.revokeObjectURL(cached.url);
+      } catch {}
+    }
+    this.audioCache.clear();
+    this.pendingFetches.clear();
   }
   getSettings() {
     return this.settings;
@@ -9305,7 +9457,80 @@ class VnTtsEngine {
       return this.settings.narrator || this.settings.characterDefault || null;
     }
     const scopedKey = characterVoiceKey(this.activeChatId, clean);
-    return this.settings.characters[scopedKey] || this.settings.characters[clean] || this.settings.characterDefault || this.settings.narrator || null;
+    const manualRef = this.settings.characters[scopedKey] || this.settings.characters[clean];
+    if (manualRef)
+      return manualRef;
+    const ledgerRef = this.ledgerVoices.get(clean);
+    if (ledgerRef)
+      return ledgerRef;
+    return this.settings.characterDefault || this.settings.narrator || null;
+  }
+  async prefetch(text, speakerName = "") {
+    if (!this.settings.enabled || !text.trim())
+      return;
+    const cleanText = this.cleanDialogueText(text);
+    if (!cleanText)
+      return;
+    const key = `${speakerKey(speakerName)}::${cleanText}`;
+    if (this.audioCache.has(key) || this.pendingFetches.has(key))
+      return;
+    const fetchPromise = (async () => {
+      let voiceRef = this.resolveVoice(speakerName);
+      if (!voiceRef?.connectionId) {
+        const defaultConn = await this.resolveDefaultConnection();
+        if (defaultConn) {
+          voiceRef = {
+            connectionId: defaultConn.id,
+            voice: voiceRef?.voice || defaultConn.voice || "",
+            speed: voiceRef?.speed
+          };
+        }
+      }
+      if (!voiceRef?.connectionId)
+        return null;
+      try {
+        const payload = {
+          connectionId: voiceRef.connectionId,
+          text: cleanText,
+          outputFormat: "mp3"
+        };
+        if (voiceRef.voice)
+          payload.voice = voiceRef.voice;
+        if (voiceRef.speed)
+          payload.parameters = { speed: voiceRef.speed };
+        const resp = await fetch("/api/v1/tts/synthesize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(payload)
+        });
+        if (resp.ok) {
+          const blob = await resp.blob();
+          if (typeof URL !== "undefined") {
+            const url = URL.createObjectURL(blob);
+            const entry = { blob, url };
+            this.audioCache.set(key, entry);
+            if (this.audioCache.size > 20) {
+              const firstKey = this.audioCache.keys().next().value;
+              if (firstKey) {
+                const old = this.audioCache.get(firstKey);
+                if (old)
+                  URL.revokeObjectURL(old.url);
+                this.audioCache.delete(firstKey);
+              }
+            }
+            return entry;
+          }
+        }
+      } catch {}
+      return null;
+    })();
+    this.pendingFetches.set(key, fetchPromise);
+    try {
+      await fetchPromise;
+    } finally {
+      this.pendingFetches.delete(key);
+    }
   }
   async speak(text, speakerName = "", callbacks) {
     if (!this.settings.enabled || !text.trim()) {
@@ -9322,13 +9547,39 @@ class VnTtsEngine {
       cb.onEnd?.();
       return;
     }
+    const cacheKey = `${speakerKey(speakerName)}::${cleanText}`;
+    let cached = this.audioCache.get(cacheKey);
+    if (!cached && this.pendingFetches.has(cacheKey)) {
+      cached = await this.pendingFetches.get(cacheKey) || undefined;
+    }
+    if (cached && typeof Audio !== "undefined") {
+      const audio = new Audio(cached.url);
+      this.currentAudio = audio;
+      audio.volume = Math.max(0, Math.min(1, this.settings.volume));
+      audio.addEventListener("play", () => {
+        cb.onStart?.(audio.duration || undefined);
+      });
+      audio.addEventListener("ended", () => {
+        this.currentAudio = null;
+        cb.onEnd?.();
+      });
+      audio.addEventListener("error", (e) => {
+        this.currentAudio = null;
+        cb.onError?.(e);
+      });
+      try {
+        await audio.play();
+        return;
+      } catch {}
+    }
     let voiceRef = this.resolveVoice(speakerName);
     if (!voiceRef?.connectionId) {
       const defaultConn = await this.resolveDefaultConnection();
       if (defaultConn) {
         voiceRef = {
           connectionId: defaultConn.id,
-          voice: defaultConn.voice || ""
+          voice: voiceRef?.voice || defaultConn.voice || "",
+          speed: voiceRef?.speed
         };
       }
     }
@@ -9353,6 +9604,7 @@ class VnTtsEngine {
           const blob = await resp.blob();
           if (typeof Audio !== "undefined" && typeof URL !== "undefined") {
             const url = URL.createObjectURL(blob);
+            this.audioCache.set(cacheKey, { blob, url });
             const audio = new Audio(url);
             this.currentAudio = audio;
             audio.volume = Math.max(0, Math.min(1, this.settings.volume));
@@ -9360,12 +9612,10 @@ class VnTtsEngine {
               cb.onStart?.(audio.duration || undefined);
             });
             audio.addEventListener("ended", () => {
-              URL.revokeObjectURL(url);
               this.currentAudio = null;
               cb.onEnd?.();
             });
             audio.addEventListener("error", (e) => {
-              URL.revokeObjectURL(url);
               this.currentAudio = null;
               cb.onError?.(e);
             });
@@ -9688,6 +9938,7 @@ class StageOverlay {
     this.dialogueBox.setContent(state.speakerName, state.paragraphs, state.messageId);
     this.menuBar.setLedger(state.ledger, state.hasBPlotNotification);
     this.updateStatusPill(state.ledger);
+    this.ttsEngine.setLedgerVoices(state.ledger?.actors);
     const newEvts = state.ledger?.journal || [];
     if (newEvts.length > 0) {
       const latestEvt = newEvts[newEvts.length - 1];

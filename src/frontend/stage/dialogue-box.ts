@@ -38,6 +38,7 @@ export class DialogueBox {
   private autoTimer: number | null = null;
   private isSkipping = false;
   private skipTimer: number | null = null;
+  private audioFallbackTimer: number | null = null;
   private backlogModal: BacklogModal;
   private choiceModal: ChoiceModal;
   private backlogHistory: BacklogEntry[] = [];
@@ -302,6 +303,8 @@ export class DialogueBox {
     if (this.typeTimer) clearTimeout(this.typeTimer);
     if (this.autoTimer) clearTimeout(this.autoTimer);
     if (this.skipTimer) clearTimeout(this.skipTimer);
+    if (this.audioFallbackTimer) clearTimeout(this.audioFallbackTimer);
+    this.audioFallbackTimer = null;
     this.ttsEngine?.stop();
 
     this.isUserTurn = false;
@@ -322,6 +325,8 @@ export class DialogueBox {
     if (this.typeTimer) clearTimeout(this.typeTimer);
     if (this.autoTimer) clearTimeout(this.autoTimer);
     if (this.skipTimer) clearTimeout(this.skipTimer);
+    if (this.audioFallbackTimer) clearTimeout(this.audioFallbackTimer);
+    this.audioFallbackTimer = null;
     this.ttsEngine?.stop();
 
     if (this.isUserTurn && this.lastUserText) {
@@ -347,6 +352,8 @@ export class DialogueBox {
     if (this.typeTimer) clearTimeout(this.typeTimer);
     if (this.autoTimer) clearTimeout(this.autoTimer);
     if (this.skipTimer) clearTimeout(this.skipTimer);
+    if (this.audioFallbackTimer) clearTimeout(this.audioFallbackTimer);
+    this.audioFallbackTimer = null;
     this.ttsEngine?.stop();
 
     this.isUserTurn = true;
@@ -408,10 +415,22 @@ export class DialogueBox {
       });
     }
 
+    // Eagerly prefetch synthesized audio for all beats so playback starts instantly on word 1
+    if (this.ttsEngine?.isEnabled()) {
+      for (const b of this.beats) {
+        if (b.text) this.ttsEngine.prefetch(b.text, b.speaker).catch(() => {});
+      }
+    }
+
     this.renderCurrentBeat();
   }
 
   public advance(): void {
+    if (this.audioFallbackTimer) {
+      clearTimeout(this.audioFallbackTimer);
+      this.audioFallbackTimer = null;
+    }
+
     if (this.isTyping) {
       if (this.typeTimer) clearTimeout(this.typeTimer);
       this.isTyping = false;
@@ -432,6 +451,10 @@ export class DialogueBox {
       if (this.typeTimer) clearTimeout(this.typeTimer);
       if (this.autoTimer) clearTimeout(this.autoTimer);
       if (this.skipTimer) clearTimeout(this.skipTimer);
+      if (this.audioFallbackTimer) {
+        clearTimeout(this.audioFallbackTimer);
+        this.audioFallbackTimer = null;
+      }
       this.ttsEngine?.stop();
       this.isTyping = false;
       this.currentBeatIndex--;
@@ -507,14 +530,24 @@ export class DialogueBox {
     };
 
     if (this.ttsEngine?.isEnabled()) {
-      // 1.2s fallback timer in case browser autoplay policy blocks audio
-      const fallbackTimer = window.setTimeout(() => {
-        startTypewriter();
-      }, 1200);
+      if (this.audioFallbackTimer) clearTimeout(this.audioFallbackTimer);
+      let hasStartedAudio = false;
+
+      // Realistic fallback window (3.5s) if network is slow or browser blocks audio
+      this.audioFallbackTimer = window.setTimeout(() => {
+        this.audioFallbackTimer = null;
+        if (!hasStartedAudio) {
+          startTypewriter();
+        }
+      }, 3500);
 
       this.ttsEngine.speak(beat.text, beat.speaker, {
         onStart: (duration) => {
-          clearTimeout(fallbackTimer);
+          hasStartedAudio = true;
+          if (this.audioFallbackTimer) {
+            clearTimeout(this.audioFallbackTimer);
+            this.audioFallbackTimer = null;
+          }
           startTypewriter(duration);
         },
         onBoundary: (wordCharIdx) => {
@@ -533,7 +566,10 @@ export class DialogueBox {
           }
         },
         onError: () => {
-          clearTimeout(fallbackTimer);
+          if (this.audioFallbackTimer) {
+            clearTimeout(this.audioFallbackTimer);
+            this.audioFallbackTimer = null;
+          }
           startTypewriter();
         },
       });

@@ -1,3 +1,5 @@
+import type { ActorDossier } from "../../shared/types.js";
+
 export interface SpeechVoiceRef {
   connectionId: string;
   voice: string;
@@ -55,13 +57,52 @@ export class VnTtsEngine {
   private settings: VnVoiceSettings = { ...DEFAULT_VOICE_SETTINGS };
   private activeChatId = "";
   private cachedDefaultConnection: SafeTtsProfile | null = null;
+  private ledgerVoices = new Map<string, SpeechVoiceRef>();
+  private audioCache = new Map<string, { blob: Blob; url: string; duration?: number }>();
+  private pendingFetches = new Map<string, Promise<{ blob: Blob; url: string; duration?: number } | null>>();
 
   constructor() {
     this.loadLocalSettings();
   }
 
   public setChatId(chatId: string): void {
+    if (this.activeChatId !== chatId) {
+      this.clearAudioCache();
+    }
     this.activeChatId = chatId;
+  }
+
+  public setLedgerVoices(actors?: Record<string, ActorDossier>): void {
+    this.ledgerVoices.clear();
+    if (!actors) return;
+    for (const [id, dossier] of Object.entries(actors)) {
+      const v = (dossier as any).voice || (dossier?.profile as any)?.voice;
+      if (v) {
+        let speed: number | undefined;
+        if (typeof (dossier as any).speech_style === "string") {
+          const style = (dossier as any).speech_style.toLowerCase();
+          if (style.includes("fast") || style.includes("hurried") || style.includes("excited")) speed = 1.15;
+          if (style.includes("slow") || style.includes("deliberate") || style.includes("calm")) speed = 0.88;
+        }
+        const ref: SpeechVoiceRef =
+          typeof v === "string"
+            ? { connectionId: "", voice: v, speed }
+            : { connectionId: v.connectionId || "", voice: v.voice || "", speed: v.speed ?? speed };
+
+        this.ledgerVoices.set(speakerKey(id), ref);
+        if (dossier.name) this.ledgerVoices.set(speakerKey(dossier.name), ref);
+      }
+    }
+  }
+
+  public clearAudioCache(): void {
+    for (const cached of this.audioCache.values()) {
+      try {
+        URL.revokeObjectURL(cached.url);
+      } catch {}
+    }
+    this.audioCache.clear();
+    this.pendingFetches.clear();
   }
 
   public getSettings(): VnVoiceSettings {
@@ -187,7 +228,7 @@ export class VnTtsEngine {
   }
 
   /**
-   * Resolves voice ref: override -> character default -> narrator -> host default -> null
+   * Resolves voice ref: manual override -> ledger actor voice tag -> characterDefault -> narrator -> null
    */
   public resolveVoice(speakerName = ""): SpeechVoiceRef | null {
     const clean = speakerKey(speakerName);
@@ -197,15 +238,90 @@ export class VnTtsEngine {
       return this.settings.narrator || this.settings.characterDefault || null;
     }
 
-    // Check chat-scoped override, then global character name, then characterDefault, then narrator
+    // 1. Manual user override for this character
     const scopedKey = characterVoiceKey(this.activeChatId, clean);
+    const manualRef = this.settings.characters[scopedKey] || this.settings.characters[clean];
+    if (manualRef) return manualRef;
+
+    // 2. Character ledger voice tag / speech style
+    const ledgerRef = this.ledgerVoices.get(clean);
+    if (ledgerRef) return ledgerRef;
+
+    // 3. Fallbacks
     return (
-      this.settings.characters[scopedKey] ||
-      this.settings.characters[clean] ||
       this.settings.characterDefault ||
       this.settings.narrator ||
       null
     );
+  }
+
+  /**
+   * Asynchronously prefetches and caches synthesized audio so dialogue plays instantly at word 1.
+   */
+  public async prefetch(text: string, speakerName = ""): Promise<void> {
+    if (!this.settings.enabled || !text.trim()) return;
+    const cleanText = this.cleanDialogueText(text);
+    if (!cleanText) return;
+    const key = `${speakerKey(speakerName)}::${cleanText}`;
+    if (this.audioCache.has(key) || this.pendingFetches.has(key)) return;
+
+    const fetchPromise = (async () => {
+      let voiceRef = this.resolveVoice(speakerName);
+      if (!voiceRef?.connectionId) {
+        const defaultConn = await this.resolveDefaultConnection();
+        if (defaultConn) {
+          voiceRef = {
+            connectionId: defaultConn.id,
+            voice: voiceRef?.voice || defaultConn.voice || "",
+            speed: voiceRef?.speed,
+          };
+        }
+      }
+      if (!voiceRef?.connectionId) return null;
+
+      try {
+        const payload: Record<string, unknown> = {
+          connectionId: voiceRef.connectionId,
+          text: cleanText,
+          outputFormat: "mp3",
+        };
+        if (voiceRef.voice) payload.voice = voiceRef.voice;
+        if (voiceRef.speed) payload.parameters = { speed: voiceRef.speed };
+
+        const resp = await fetch("/api/v1/tts/synthesize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(payload),
+        });
+
+        if (resp.ok) {
+          const blob = await resp.blob();
+          if (typeof URL !== "undefined") {
+            const url = URL.createObjectURL(blob);
+            const entry = { blob, url };
+            this.audioCache.set(key, entry);
+            if (this.audioCache.size > 20) {
+              const firstKey = this.audioCache.keys().next().value;
+              if (firstKey) {
+                const old = this.audioCache.get(firstKey);
+                if (old) URL.revokeObjectURL(old.url);
+                this.audioCache.delete(firstKey);
+              }
+            }
+            return entry;
+          }
+        }
+      } catch {}
+      return null;
+    })();
+
+    this.pendingFetches.set(key, fetchPromise);
+    try {
+      await fetchPromise;
+    } finally {
+      this.pendingFetches.delete(key);
+    }
   }
 
   public async speak(
@@ -229,6 +345,40 @@ export class VnTtsEngine {
       return;
     }
 
+    const cacheKey = `${speakerKey(speakerName)}::${cleanText}`;
+    let cached = this.audioCache.get(cacheKey);
+    if (!cached && this.pendingFetches.has(cacheKey)) {
+      cached = (await this.pendingFetches.get(cacheKey)) || undefined;
+    }
+
+    // Fast-path: audio is already cached in memory!
+    if (cached && typeof Audio !== "undefined") {
+      const audio = new Audio(cached.url);
+      this.currentAudio = audio;
+      audio.volume = Math.max(0, Math.min(1, this.settings.volume));
+
+      audio.addEventListener("play", () => {
+        cb.onStart?.(audio.duration || undefined);
+      });
+
+      audio.addEventListener("ended", () => {
+        this.currentAudio = null;
+        cb.onEnd?.();
+      });
+
+      audio.addEventListener("error", (e) => {
+        this.currentAudio = null;
+        cb.onError?.(e);
+      });
+
+      try {
+        await audio.play();
+        return;
+      } catch {
+        // Autoplay policy or error, fall through
+      }
+    }
+
     let voiceRef = this.resolveVoice(speakerName);
 
     // Fall back to host default connection if no explicit voice configured
@@ -237,7 +387,8 @@ export class VnTtsEngine {
       if (defaultConn) {
         voiceRef = {
           connectionId: defaultConn.id,
-          voice: defaultConn.voice || "",
+          voice: voiceRef?.voice || defaultConn.voice || "",
+          speed: voiceRef?.speed,
         };
       }
     }
@@ -264,6 +415,7 @@ export class VnTtsEngine {
           const blob = await resp.blob();
           if (typeof Audio !== "undefined" && typeof URL !== "undefined") {
             const url = URL.createObjectURL(blob);
+            this.audioCache.set(cacheKey, { blob, url });
             const audio = new Audio(url);
             this.currentAudio = audio;
             audio.volume = Math.max(0, Math.min(1, this.settings.volume));
@@ -273,13 +425,11 @@ export class VnTtsEngine {
             });
 
             audio.addEventListener("ended", () => {
-              URL.revokeObjectURL(url);
               this.currentAudio = null;
               cb.onEnd?.();
             });
 
             audio.addEventListener("error", (e) => {
-              URL.revokeObjectURL(url);
               this.currentAudio = null;
               cb.onError?.(e);
             });
