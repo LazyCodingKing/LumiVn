@@ -144,6 +144,10 @@ export class StageOverlay {
     return this.currentChatId || undefined;
   }
 
+  public getManifest(): any {
+    return this.manifest;
+  }
+
   public resetStage(targetChatId?: string): void {
     this.currentChatId = targetChatId || this.resolveChatId() || null;
     this.ttsEngine.setChatId(this.currentChatId || "");

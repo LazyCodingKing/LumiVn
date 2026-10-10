@@ -40,6 +40,7 @@ let lastActiveChatId: string | null = null;
 
 // View Registry: Track active visual novel stage presence per chat
 const activeVnChats = new Set<string>();
+const mvuEvaluatingChats = new Set<string>();
 
 // LumiWorld Two-Stage Commit Lifecycle & Injected Directives Tracking
 const activeGenerationIds = new Map<string, string>(); // chatId -> generationId
@@ -72,7 +73,8 @@ async function handleInterceptor(
       return (await storage.getChatState(cid)) || { scene: { place: "default" }, actors: {} };
     },
     async () => storage.getDirectorSettings(),
-    (key, directive) => injectedDirectives.set(key, directive)
+    (key, directive) => injectedDirectives.set(key, directive),
+    async () => storage.getStatRulesSettings()
   );
 }
 
@@ -174,8 +176,8 @@ async function processChatTurn(
 ): Promise<void> {
   if (!chatId) return;
 
-  // View-Gating: Guard background chats when VN stage is not active for this chat
-  if (!activeVnChats.has(chatId) && !force) return;
+  const statRulesSettings = await storage.getStatRulesSettings();
+  if (!activeVnChats.has(chatId) && !statRulesSettings.enabled && !force) return;
 
   lastActiveChatId = chatId;
 
@@ -273,13 +275,20 @@ async function processChatTurn(
     } else if (rawToon) {
       delta = parseToonDelta(rawToon);
     } else if (statRulesSettings.enabled && statRulesSettings.mode === "mvu_quiet") {
-      delta = await evaluateMvuLedgerDelta(
-        spindle,
-        chatId,
-        extractProse(targetMessage.content),
-        cumulativeLedger || { scene: { place: "default" }, actors: {} },
-        statRulesSettings
-      );
+      if (!mvuEvaluatingChats.has(chatId)) {
+        mvuEvaluatingChats.add(chatId);
+        try {
+          delta = await evaluateMvuLedgerDelta(
+            spindle,
+            chatId,
+            extractProse(targetMessage.content),
+            cumulativeLedger || { scene: { place: "default" }, actors: {} },
+            statRulesSettings
+          );
+        } finally {
+          mvuEvaluatingChats.delete(chatId);
+        }
+      }
     } else {
       const prose = extractProse(targetMessage.content);
       delta = inferProseEmotionDelta(prose, characterId || "char");
@@ -477,8 +486,9 @@ spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
     activeGenerationIds.delete(chatId);
   }
 
-  // View-Gating: abort in < 1ms if stage not open for this chat
-  if (!activeVnChats.has(chatId)) return;
+  // View-Gating: abort in < 1ms if stage not open for this chat and stat rules not enabled
+  const settings = await storage.getStatRulesSettings();
+  if (!activeVnChats.has(chatId) && !settings.enabled) return;
   await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
 });
 

@@ -181,14 +181,14 @@ Rules: underwear: underwear_top, underwear_bottom (or \`none\`).
 
 \`\`\`yaml
 user:
-  appearance: {age: , traits: , appeal: 0-100, style: , condition: }
-  money: {in_hand: 0, in_bank: 0, currency: "$"}
-  combat: {tier: 1-10, lv: 0-10, exp: "0/100", hp: "cur/max", mp: "cur/max", eff_pwr: , eff_agi: , pwr: , agi: , int: , talent: []}
+  appearance: { age: 18, traits: "athletic", appeal: 65, style: "casual", condition: "normal" }
+  money: { in_hand: 50, in_bank: 500, currency: "$" }
+  combat: { tier: 1, lv: 1, exp: "0/100", hp: "100/100", mp: "50/50", eff_pwr: 15, eff_agi: 15, pwr: 15, agi: 15, int: 10, talent: [] }
   passions: { anger: 0, shame: 0, arousal: 0, fear: 0, stress: 0, pain: 0, exhaustion: 0, suspicion: 0, disgust: 0, sadness: 0, guilt: 0, joy: 10 }
-  outfit: {top: , bottom: , underwear_top: , underwear_bottom: , shoes: , accessories: [], state: }
-  inventory: {in_hand: {L: "Empty", R: "Empty"}, carried: [], room: [], room_location: ""}
+  outfit: { top: "t-shirt", bottom: "jeans", underwear_top: "none", underwear_bottom: "boxers", shoes: "sneakers", accessories: [], state: "clean" }
+  inventory: { in_hand: { L: "Empty", R: "Empty" }, carried: [], room: [], room_location: "user_residence:bedroom" }
+  agency:
     want_now: "explore area"
-    
 
 actor_id:
   name: "Actor Name"
@@ -222,22 +222,19 @@ actor_id:
     commitments: []
     want_now: want (source, cost)
   relations:
-    other_id: {affinity: 0, trust: 0, respect: 0, attraction: 0, grudge: 0, fear: 0, familiarity: 0, attachment: 0, loyalty: 0-100, sacrifice_willingness: 0-100, betrayal_threshold: 50, shared_secrets: [], leverage: [], grievances: [], obligations: []}
-  knowledge:(Emit towards {{user}} and any newly introduced npcs when they are present in the scene)
-    beliefs: [p, conf, source, basis, t]
+    user: { affinity: 0, trust: 0, respect: 0, attraction: 0, grudge: 0, fear: 0, familiarity: 0, attachment: 0, loyalty: 0, sacrifice_willingness: 0, betrayal_threshold: 50, shared_secrets: [], leverage: [], grievances: [], obligations: [] }
+  knowledge:
+    beliefs: [["user is new visitor", 80, "direct", "observed", "D1 12:00"]]
     Opinion: []
-    memories: [evt, interpretation, salience, imprint, with]
-    expectations: [situation, expect, conf]
-    grudges: [Any grudge or grievances towards them]
-    secrets: [truth, knows, suspects, exposure, cover]
-    Promises: [Any promises between each other]
+    memories: []
+    expectations: []
+    grudges: []
+    secrets: []
+    Promises: []
     held_leverage: []
-    presents_as: {audience: face}
-    Recent Interaction:[]
-Trigger:(Important memory from the past)
-Current Status: []
-Relationship Network:
-  stats: {T, A, R, F, Fam, G, Integ, Stress, CAU, GRD, PRD, EMP, STB, BLD, RX, RC, Rig, Mask, MIS, WV, COMP}
+    presents_as: { audience: "composed" }
+    Recent Interaction: []
+  stats: { T: 0, A: 0, R: 0, F: 0, Fam: 0, G: 0, Integ: 80, Stress: 10, CAU: 60, GRD: 50, PRD: 70, EMP: 40, STB: 70, BLD: 10, RX: 30, RC: 40, Rig: 50, Mask: 40, MIS: 10, WV: 60, COMP: 30 }
 \`\`\`
 
 ## Scene
@@ -292,8 +289,6 @@ journal:
 ## B-Plots
 
 \`\`\`yaml
-## B-Plots
-
   - id: "bp_id"
     who: "distant person/group/institution outside the local cast"
     want: "their goal, in their own terms"
@@ -3794,8 +3789,9 @@ function parseLedgerYaml(rawLedgerText) {
   function parseYamlChunkWithRecovery(chunk, target) {
     if (!chunk.trim())
       return;
+    let sanitizedChunk = chunk.replace(/^(\s*[a-zA-Z0-9_-]+):\s*\([^)]*\)/gm, "$1:").replace(/^(\s*knowledge):(?!\s)/gm, "$1: ").replace(/\{([A-Z,\s]{10,})\}/g, "{}");
     try {
-      const parsed = yaml.load(chunk);
+      const parsed = yaml.load(sanitizedChunk);
       if (parsed && typeof parsed === "object") {
         Object.assign(target, parsed);
         return;
@@ -3971,7 +3967,7 @@ function deepMergeLedger(base, delta) {
       if (actorDelta.relations) {
         for (const [tgt, rData] of Object.entries(actorDelta.relations)) {
           mergedRelations[tgt] = {
-            ...mergedRelations[tgt] || {},
+            ...baseActor.relations?.[tgt] || {},
             ...rData
           };
         }
@@ -3979,16 +3975,16 @@ function deepMergeLedger(base, delta) {
       merged.actors[actorId] = {
         ...baseActor,
         ...actorDelta,
-        appearance: { ...baseActor.appearance, ...actorDelta.appearance },
-        money: { ...baseActor.money, ...actorDelta.money },
-        passions: { ...baseActor.passions, ...actorDelta.passions },
-        combat: { ...baseActor.combat, ...actorDelta.combat },
-        life_model: { ...baseActor.life_model, ...actorDelta.life_model },
-        profile: { ...baseActor.profile, ...actorDelta.profile },
-        agency: { ...baseActor.agency, ...actorDelta.agency },
-        knowledge: { ...baseActor.knowledge, ...actorDelta.knowledge },
-        stats: { ...baseActor.stats, ...actorDelta.stats },
-        wounds: { ...baseActor.wounds, ...actorDelta.wounds },
+        appearance: { ...baseActor.appearance || {}, ...actorDelta.appearance || {} },
+        money: { ...baseActor.money || {}, ...actorDelta.money || {} },
+        passions: { ...baseActor.passions || {}, ...actorDelta.passions || {} },
+        combat: { ...baseActor.combat || {}, ...actorDelta.combat || {} },
+        life_model: { ...baseActor.life_model || {}, ...actorDelta.life_model || {} },
+        profile: { ...baseActor.profile || {}, ...actorDelta.profile || {} },
+        agency: { ...baseActor.agency || {}, ...actorDelta.agency || {} },
+        knowledge: { ...baseActor.knowledge || {}, ...actorDelta.knowledge || {} },
+        stats: { ...baseActor.stats || {}, ...actorDelta.stats || {} },
+        wounds: { ...baseActor.wounds || {}, ...actorDelta.wounds || {} },
         outfit: {
           ...baseActor.outfit,
           ...actorDelta.outfit,
@@ -4411,7 +4407,7 @@ ${resolvedNotes}` : resolvedNotes;
   }
   return activeDirective;
 }
-async function evaluateDirectorInterceptor(messages, context, getChatState, getDirectorSettings, onInjectedDirective) {
+async function evaluateDirectorInterceptor(messages, context, getChatState, getDirectorSettings, onInjectedDirective, getStatRulesSettings) {
   const chatId = extractChatId(context);
   const genType = extractGenerationType(context);
   const isDry = Boolean(context?.dryRun || context?.isDryRun);
@@ -4421,11 +4417,19 @@ async function evaluateDirectorInterceptor(messages, context, getChatState, getD
   if (!settings || !settings.enabled)
     return messages;
   const currentState = await getChatState(chatId);
+  const statSettings = getStatRulesSettings ? await getStatRulesSettings() : null;
   if (!currentState)
     return messages;
   let activeDirective = formatDirectorDirective(settings);
   if (!activeDirective)
     return messages;
+  if (statSettings && statSettings.enabled && statSettings.mode === "inline_interceptor") {
+    activeDirective += `
+
+${statSettings.statRules}
+
+${statSettings.ledgerPrompt}`;
+  }
   const currentPlaceId = currentState.scene?.place;
   const currentPlace = currentPlaceId && currentState.places?.[currentPlaceId];
   const userDossier = currentState.actors?.["user"];
@@ -4704,6 +4708,7 @@ var storage = new StorageManager(spindle);
 var resolver = new AssetResolver(spindle, storage);
 var lastActiveChatId = null;
 var activeVnChats = new Set;
+var mvuEvaluatingChats = new Set;
 var activeGenerationIds = new Map;
 var pendingCommits = new Map;
 var injectedDirectives = new Map;
@@ -4719,7 +4724,7 @@ async function handleInterceptor(messages, context) {
     if (cached)
       return cached;
     return await storage.getChatState(cid) || { scene: { place: "default" }, actors: {} };
-  }, async () => storage.getDirectorSettings(), (key, directive) => injectedDirectives.set(key, directive));
+  }, async () => storage.getDirectorSettings(), (key, directive) => injectedDirectives.set(key, directive), async () => storage.getStatRulesSettings());
 }
 if (typeof spindle.registerInterceptor === "function") {
   spindle.registerInterceptor(handleInterceptor, 50);
@@ -4801,7 +4806,8 @@ spindle.commands.onInvoked(async (commandId) => {
 async function processChatTurn(chatId, messageId, overrideContent, force = false, generationId, swipeId) {
   if (!chatId)
     return;
-  if (!activeVnChats.has(chatId) && !force)
+  const statRulesSettings = await storage.getStatRulesSettings();
+  if (!activeVnChats.has(chatId) && !statRulesSettings.enabled && !force)
     return;
   lastActiveChatId = chatId;
   try {
@@ -4872,7 +4878,14 @@ async function processChatTurn(chatId, messageId, overrideContent, force = false
     } else if (rawToon) {
       delta = parseToonDelta(rawToon);
     } else if (statRulesSettings.enabled && statRulesSettings.mode === "mvu_quiet") {
-      delta = await evaluateMvuLedgerDelta(spindle, chatId, extractProse(targetMessage.content), cumulativeLedger || { scene: { place: "default" }, actors: {} }, statRulesSettings);
+      if (!mvuEvaluatingChats.has(chatId)) {
+        mvuEvaluatingChats.add(chatId);
+        try {
+          delta = await evaluateMvuLedgerDelta(spindle, chatId, extractProse(targetMessage.content), cumulativeLedger || { scene: { place: "default" }, actors: {} }, statRulesSettings);
+        } finally {
+          mvuEvaluatingChats.delete(chatId);
+        }
+      }
     } else {
       const prose = extractProse(targetMessage.content);
       delta = inferProseEmotionDelta(prose, characterId || "char");
@@ -5023,7 +5036,8 @@ spindle.on("GENERATION_ENDED", async (payload) => {
   if (generationId && activeGenerationIds.get(chatId) === generationId) {
     activeGenerationIds.delete(chatId);
   }
-  if (!activeVnChats.has(chatId))
+  const settings = await storage.getStatRulesSettings();
+  if (!activeVnChats.has(chatId) && !settings.enabled)
     return;
   await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
 });

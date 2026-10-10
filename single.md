@@ -229,6 +229,7 @@ let lastActiveChatId: string | null = null;
 
 // View Registry: Track active visual novel stage presence per chat
 const activeVnChats = new Set<string>();
+const mvuEvaluatingChats = new Set<string>();
 
 // LumiWorld Two-Stage Commit Lifecycle & Injected Directives Tracking
 const activeGenerationIds = new Map<string, string>(); // chatId -> generationId
@@ -261,7 +262,8 @@ async function handleInterceptor(
       return (await storage.getChatState(cid)) || { scene: { place: "default" }, actors: {} };
     },
     async () => storage.getDirectorSettings(),
-    (key, directive) => injectedDirectives.set(key, directive)
+    (key, directive) => injectedDirectives.set(key, directive),
+    async () => storage.getStatRulesSettings()
   );
 }
 
@@ -363,8 +365,8 @@ async function processChatTurn(
 ): Promise<void> {
   if (!chatId) return;
 
-  // View-Gating: Guard background chats when VN stage is not active for this chat
-  if (!activeVnChats.has(chatId) && !force) return;
+  const statRulesSettings = await storage.getStatRulesSettings();
+  if (!activeVnChats.has(chatId) && !statRulesSettings.enabled && !force) return;
 
   lastActiveChatId = chatId;
 
@@ -462,13 +464,20 @@ async function processChatTurn(
     } else if (rawToon) {
       delta = parseToonDelta(rawToon);
     } else if (statRulesSettings.enabled && statRulesSettings.mode === "mvu_quiet") {
-      delta = await evaluateMvuLedgerDelta(
-        spindle,
-        chatId,
-        extractProse(targetMessage.content),
-        cumulativeLedger || { scene: { place: "default" }, actors: {} },
-        statRulesSettings
-      );
+      if (!mvuEvaluatingChats.has(chatId)) {
+        mvuEvaluatingChats.add(chatId);
+        try {
+          delta = await evaluateMvuLedgerDelta(
+            spindle,
+            chatId,
+            extractProse(targetMessage.content),
+            cumulativeLedger || { scene: { place: "default" }, actors: {} },
+            statRulesSettings
+          );
+        } finally {
+          mvuEvaluatingChats.delete(chatId);
+        }
+      }
     } else {
       const prose = extractProse(targetMessage.content);
       delta = inferProseEmotionDelta(prose, characterId || "char");
@@ -666,8 +675,9 @@ spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO) => {
     activeGenerationIds.delete(chatId);
   }
 
-  // View-Gating: abort in < 1ms if stage not open for this chat
-  if (!activeVnChats.has(chatId)) return;
+  // View-Gating: abort in < 1ms if stage not open for this chat and stat rules not enabled
+  const settings = await storage.getStatRulesSettings();
+  if (!activeVnChats.has(chatId) && !settings.enabled) return;
   await processChatTurn(chatId, payload.messageId, payload.content, false, generationId);
 });
 
@@ -1544,14 +1554,14 @@ Rules: underwear: underwear_top, underwear_bottom (or \`none\`).
 
 \`\`\`yaml
 user:
-  appearance: {age: , traits: , appeal: 0-100, style: , condition: }
-  money: {in_hand: 0, in_bank: 0, currency: "$"}
-  combat: {tier: 1-10, lv: 0-10, exp: "0/100", hp: "cur/max", mp: "cur/max", eff_pwr: , eff_agi: , pwr: , agi: , int: , talent: []}
+  appearance: { age: 18, traits: "athletic", appeal: 65, style: "casual", condition: "normal" }
+  money: { in_hand: 50, in_bank: 500, currency: "$" }
+  combat: { tier: 1, lv: 1, exp: "0/100", hp: "100/100", mp: "50/50", eff_pwr: 15, eff_agi: 15, pwr: 15, agi: 15, int: 10, talent: [] }
   passions: { anger: 0, shame: 0, arousal: 0, fear: 0, stress: 0, pain: 0, exhaustion: 0, suspicion: 0, disgust: 0, sadness: 0, guilt: 0, joy: 10 }
-  outfit: {top: , bottom: , underwear_top: , underwear_bottom: , shoes: , accessories: [], state: }
-  inventory: {in_hand: {L: "Empty", R: "Empty"}, carried: [], room: [], room_location: ""}
+  outfit: { top: "t-shirt", bottom: "jeans", underwear_top: "none", underwear_bottom: "boxers", shoes: "sneakers", accessories: [], state: "clean" }
+  inventory: { in_hand: { L: "Empty", R: "Empty" }, carried: [], room: [], room_location: "user_residence:bedroom" }
+  agency:
     want_now: "explore area"
-    
 
 actor_id:
   name: "Actor Name"
@@ -1585,22 +1595,19 @@ actor_id:
     commitments: []
     want_now: want (source, cost)
   relations:
-    other_id: {affinity: 0, trust: 0, respect: 0, attraction: 0, grudge: 0, fear: 0, familiarity: 0, attachment: 0, loyalty: 0-100, sacrifice_willingness: 0-100, betrayal_threshold: 50, shared_secrets: [], leverage: [], grievances: [], obligations: []}
-  knowledge:(Emit towards {{user}} and any newly introduced npcs when they are present in the scene)
-    beliefs: [p, conf, source, basis, t]
+    user: { affinity: 0, trust: 0, respect: 0, attraction: 0, grudge: 0, fear: 0, familiarity: 0, attachment: 0, loyalty: 0, sacrifice_willingness: 0, betrayal_threshold: 50, shared_secrets: [], leverage: [], grievances: [], obligations: [] }
+  knowledge:
+    beliefs: [["user is new visitor", 80, "direct", "observed", "D1 12:00"]]
     Opinion: []
-    memories: [evt, interpretation, salience, imprint, with]
-    expectations: [situation, expect, conf]
-    grudges: [Any grudge or grievances towards them]
-    secrets: [truth, knows, suspects, exposure, cover]
-    Promises: [Any promises between each other]
+    memories: []
+    expectations: []
+    grudges: []
+    secrets: []
+    Promises: []
     held_leverage: []
-    presents_as: {audience: face}
-    Recent Interaction:[]
-Trigger:(Important memory from the past)
-Current Status: []
-Relationship Network:
-  stats: {T, A, R, F, Fam, G, Integ, Stress, CAU, GRD, PRD, EMP, STB, BLD, RX, RC, Rig, Mask, MIS, WV, COMP}
+    presents_as: { audience: "composed" }
+    Recent Interaction: []
+  stats: { T: 0, A: 0, R: 0, F: 0, Fam: 0, G: 0, Integ: 80, Stress: 10, CAU: 60, GRD: 50, PRD: 70, EMP: 40, STB: 70, BLD: 10, RX: 30, RC: 40, Rig: 50, Mask: 40, MIS: 10, WV: 60, COMP: 30 }
 \`\`\`
 
 ## Scene
@@ -1655,8 +1662,6 @@ journal:
 ## B-Plots
 
 \`\`\`yaml
-## B-Plots
-
   - id: "bp_id"
     who: "distant person/group/institution outside the local cast"
     want: "their goal, in their own terms"
@@ -1705,7 +1710,7 @@ opportunities:
 
 ```typescript
 import type { LlmMessageDTO, InterceptorResultDTO } from "lumiverse-spindle-types";
-import type { LedgerData, BPlot, DirectorSettings, DirectorLogEntry } from "../shared/types.js";
+import type { LedgerData, BPlot, DirectorSettings, DirectorLogEntry, StatRulesSettings } from "../shared/types.js";
 import { DEFAULT_DIRECTOR_SETTINGS } from "./storage.js";
 import { encodeToonState } from "./toon-parser.js";
 
@@ -1807,7 +1812,8 @@ export async function evaluateDirectorInterceptor(
   context: unknown,
   getChatState: (chatId: string) => Promise<LedgerData | null>,
   getDirectorSettings?: () => Promise<DirectorSettings>,
-  onInjectedDirective?: (key: string, directive: string) => void
+  onInjectedDirective?: (key: string, directive: string) => void,
+  getStatRulesSettings?: () => Promise<StatRulesSettings>
 ): Promise<LlmMessageDTO[] | InterceptorResultDTO> {
   const chatId = extractChatId(context);
   const genType = extractGenerationType(context);
@@ -1824,10 +1830,15 @@ export async function evaluateDirectorInterceptor(
 
   // 2. Read latest chat state and roster
   const currentState = await getChatState(chatId);
+  const statSettings = getStatRulesSettings ? await getStatRulesSettings() : null;
   if (!currentState) return messages;
 
   let activeDirective = formatDirectorDirective(settings);
   if (!activeDirective) return messages;
+
+  if (statSettings && statSettings.enabled && statSettings.mode === "inline_interceptor") {
+    activeDirective += `\n\n${statSettings.statRules}\n\n${statSettings.ledgerPrompt}`;
+  }
 
   // Decorum validation scan
   const currentPlaceId = currentState.scene?.place;
@@ -2296,8 +2307,14 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
 
   function parseYamlChunkWithRecovery(chunk: string, target: Record<string, unknown>): void {
     if (!chunk.trim()) return;
+    // Pre-sanitize known formatting quirks
+    let sanitizedChunk = chunk
+      .replace(/^(\s*[a-zA-Z0-9_-]+):\s*\([^)]*\)/gm, "$1:") // strip parenthetical annotations
+      .replace(/^(\s*knowledge):(?!\s)/gm, "$1: ")          // fix unspaced colons
+      .replace(/\{([A-Z,\s]{10,})\}/g, "{}");               // sanitize valueless flow maps
+
     try {
-      const parsed = yaml.load(chunk);
+      const parsed = yaml.load(sanitizedChunk);
       if (parsed && typeof parsed === "object") {
         Object.assign(target, parsed);
         return;
@@ -2503,7 +2520,7 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
       if (actorDelta.relations) {
         for (const [tgt, rData] of Object.entries(actorDelta.relations)) {
           mergedRelations[tgt] = {
-            ...(mergedRelations[tgt] || {}),
+            ...(baseActor.relations?.[tgt] || {}),
             ...(rData as any)
           };
         }
@@ -2512,16 +2529,16 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
       merged.actors![actorId] = {
         ...baseActor,
         ...actorDelta,
-        appearance: { ...baseActor.appearance, ...actorDelta.appearance },
-        money: { ...baseActor.money, ...actorDelta.money },
-        passions: { ...baseActor.passions, ...actorDelta.passions },
-        combat: { ...baseActor.combat, ...actorDelta.combat },
-        life_model: { ...baseActor.life_model, ...actorDelta.life_model },
-        profile: { ...baseActor.profile, ...actorDelta.profile },
-        agency: { ...baseActor.agency, ...actorDelta.agency },
-        knowledge: { ...baseActor.knowledge, ...actorDelta.knowledge },
-        stats: { ...baseActor.stats, ...actorDelta.stats },
-        wounds: { ...baseActor.wounds, ...actorDelta.wounds },
+        appearance: { ...(baseActor.appearance || {}), ...(actorDelta.appearance || {}) },
+        money: { ...(baseActor.money || {}), ...(actorDelta.money || {}) },
+        passions: { ...(baseActor.passions || {}), ...(actorDelta.passions || {}) },
+        combat: { ...(baseActor.combat || {}), ...(actorDelta.combat || {}) },
+        life_model: { ...(baseActor.life_model || {}), ...(actorDelta.life_model || {}) },
+        profile: { ...(baseActor.profile || {}), ...(actorDelta.profile || {}) },
+        agency: { ...(baseActor.agency || {}), ...(actorDelta.agency || {}) },
+        knowledge: { ...(baseActor.knowledge || {}), ...(actorDelta.knowledge || {}) },
+        stats: { ...(baseActor.stats || {}), ...(actorDelta.stats || {}) },
+        wounds: { ...(baseActor.wounds || {}), ...(actorDelta.wounds || {}) },
         outfit: {
           ...baseActor.outfit,
           ...actorDelta.outfit,
@@ -3226,6 +3243,8 @@ import type {
 import type { VnPresentationState, DiagnosticData } from "./shared/types.js";
 import { StageOverlay } from "./frontend/stage/overlay.js";
 import { registerDiagnosticsDrawer } from "./frontend/studio/diagnostics-drawer.js";
+import { CharactersTab } from "./frontend/hud/tab-characters.js";
+import { StatsTab } from "./frontend/hud/tab-stats.js";
 import { diagBus } from "./frontend/utils/diag-bus.js";
 
 const CLEANUP_KEY = "__lumivnCleanup";
@@ -3282,6 +3301,43 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   // 1. Sidebar Drawer Tab (VN Studio)
   const diagDrawer = registerDiagnosticsDrawer(ctx, toggleStage);
+
+  // 1b. Native Spindle Drawer Tabs (Cast & Stats)
+  const charactersDrawerTab = new CharactersTab();
+  const statsDrawerTab = new StatsTab();
+
+  let nativeCastTabHandle: any = null;
+  let nativeStatsTabHandle: any = null;
+
+  if (typeof ctx.ui?.registerDrawerTab === "function") {
+    nativeCastTabHandle = ctx.ui.registerDrawerTab({
+      id: "vn_cast",
+      title: "LumiVN Cast Dossiers",
+      shortName: "Cast",
+      headerTitle: "Cast & Character Dossiers",
+      description: "Inspect character dossiers, passions, traits, and relationship networks",
+      keywords: ["cast", "characters", "dossier", "passions", "vn"],
+      iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    });
+    if (nativeCastTabHandle?.root) {
+      nativeCastTabHandle.root.style.cssText = "height: 100%; overflow-y: auto; padding: 12px; box-sizing: border-box;";
+      nativeCastTabHandle.root.appendChild(charactersDrawerTab.root);
+    }
+
+    nativeStatsTabHandle = ctx.ui.registerDrawerTab({
+      id: "vn_stats",
+      title: "LumiVN Stats Matrix",
+      shortName: "Stats",
+      headerTitle: "Status & 21-Stat Network",
+      description: "Inspect 21-stat network, vitals, and relationship matrix",
+      keywords: ["stats", "matrix", "vitals", "passions", "vn"],
+      iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`,
+    });
+    if (nativeStatsTabHandle?.root) {
+      nativeStatsTabHandle.root.style.cssText = "height: 100%; overflow-y: auto; padding: 12px; box-sizing: border-box;";
+      nativeStatsTabHandle.root.appendChild(statsDrawerTab.root);
+    }
+  }
 
   // 2. Persistent Floating "🎬 Stage" Widget
   const WIDGET_STORAGE_KEY = "lumivn_launcher_widget_pos";
@@ -3453,12 +3509,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       overlay.updatePresentation(st);
       diagDrawer?.setLatestLedger(st.ledger);
       diagBus.setLedger(st.ledger);
+      if (st.ledger) {
+        charactersDrawerTab.render(st.ledger, overlay.getManifest?.() || undefined);
+        statsDrawerTab.render(st.ledger);
+      }
     } else if (payload.type === "vn_diagnostic_update" && payload.data) {
       diagDrawer?.updateDiagnostic(payload.data as DiagnosticData);
       diagBus.setTelemetry(payload.data as DiagnosticData);
     } else if (payload.type === "vn_manifest" && payload.manifest) {
       overlay.setManifest(payload.manifest as any);
       diagBus.setManifest(payload.manifest as any);
+      charactersDrawerTab.render(diagBus.getLedger(), payload.manifest as any);
     } else if (payload.type === "vn_generating") {
       const targetCid = typeof payload.chatId === "string" ? payload.chatId : null;
       if (overlay.isActive() && (!targetCid || overlay.getCurrentChatId() === targetCid)) {
@@ -3504,6 +3565,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     inputBarActionHandle?.destroy();
     floatWidget?.destroy();
     diagDrawer?.tab.destroy();
+    nativeCastTabHandle?.destroy?.();
+    nativeStatsTabHandle?.destroy?.();
     overlay.destroy();
     if (appMount) {
       appMount.destroy();
@@ -9809,6 +9872,10 @@ export class StageOverlay {
     }
 
     return this.currentChatId || undefined;
+  }
+
+  public getManifest(): any {
+    return this.manifest;
   }
 
   public resetStage(targetChatId?: string): void {

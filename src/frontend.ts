@@ -6,6 +6,8 @@ import type {
 import type { VnPresentationState, DiagnosticData } from "./shared/types.js";
 import { StageOverlay } from "./frontend/stage/overlay.js";
 import { registerDiagnosticsDrawer } from "./frontend/studio/diagnostics-drawer.js";
+import { CharactersTab } from "./frontend/hud/tab-characters.js";
+import { StatsTab } from "./frontend/hud/tab-stats.js";
 import { diagBus } from "./frontend/utils/diag-bus.js";
 
 const CLEANUP_KEY = "__lumivnCleanup";
@@ -62,6 +64,43 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   // 1. Sidebar Drawer Tab (VN Studio)
   const diagDrawer = registerDiagnosticsDrawer(ctx, toggleStage);
+
+  // 1b. Native Spindle Drawer Tabs (Cast & Stats)
+  const charactersDrawerTab = new CharactersTab();
+  const statsDrawerTab = new StatsTab();
+
+  let nativeCastTabHandle: any = null;
+  let nativeStatsTabHandle: any = null;
+
+  if (typeof ctx.ui?.registerDrawerTab === "function") {
+    nativeCastTabHandle = ctx.ui.registerDrawerTab({
+      id: "vn_cast",
+      title: "LumiVN Cast Dossiers",
+      shortName: "Cast",
+      headerTitle: "Cast & Character Dossiers",
+      description: "Inspect character dossiers, passions, traits, and relationship networks",
+      keywords: ["cast", "characters", "dossier", "passions", "vn"],
+      iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    });
+    if (nativeCastTabHandle?.root) {
+      nativeCastTabHandle.root.style.cssText = "height: 100%; overflow-y: auto; padding: 12px; box-sizing: border-box;";
+      nativeCastTabHandle.root.appendChild(charactersDrawerTab.root);
+    }
+
+    nativeStatsTabHandle = ctx.ui.registerDrawerTab({
+      id: "vn_stats",
+      title: "LumiVN Stats Matrix",
+      shortName: "Stats",
+      headerTitle: "Status & 21-Stat Network",
+      description: "Inspect 21-stat network, vitals, and relationship matrix",
+      keywords: ["stats", "matrix", "vitals", "passions", "vn"],
+      iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`,
+    });
+    if (nativeStatsTabHandle?.root) {
+      nativeStatsTabHandle.root.style.cssText = "height: 100%; overflow-y: auto; padding: 12px; box-sizing: border-box;";
+      nativeStatsTabHandle.root.appendChild(statsDrawerTab.root);
+    }
+  }
 
   // 2. Persistent Floating "🎬 Stage" Widget
   const WIDGET_STORAGE_KEY = "lumivn_launcher_widget_pos";
@@ -233,12 +272,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       overlay.updatePresentation(st);
       diagDrawer?.setLatestLedger(st.ledger);
       diagBus.setLedger(st.ledger);
+      if (st.ledger) {
+        charactersDrawerTab.render(st.ledger, overlay.getManifest?.() || undefined);
+        statsDrawerTab.render(st.ledger);
+      }
     } else if (payload.type === "vn_diagnostic_update" && payload.data) {
       diagDrawer?.updateDiagnostic(payload.data as DiagnosticData);
       diagBus.setTelemetry(payload.data as DiagnosticData);
     } else if (payload.type === "vn_manifest" && payload.manifest) {
       overlay.setManifest(payload.manifest as any);
       diagBus.setManifest(payload.manifest as any);
+      charactersDrawerTab.render(diagBus.getLedger(), payload.manifest as any);
     } else if (payload.type === "vn_generating") {
       const targetCid = typeof payload.chatId === "string" ? payload.chatId : null;
       if (overlay.isActive() && (!targetCid || overlay.getCurrentChatId() === targetCid)) {
@@ -284,6 +328,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     inputBarActionHandle?.destroy();
     floatWidget?.destroy();
     diagDrawer?.tab.destroy();
+    nativeCastTabHandle?.destroy?.();
+    nativeStatsTabHandle?.destroy?.();
     overlay.destroy();
     if (appMount) {
       appMount.destroy();

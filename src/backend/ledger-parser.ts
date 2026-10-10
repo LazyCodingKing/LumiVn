@@ -135,8 +135,14 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
 
   function parseYamlChunkWithRecovery(chunk: string, target: Record<string, unknown>): void {
     if (!chunk.trim()) return;
+    // Pre-sanitize known formatting quirks
+    let sanitizedChunk = chunk
+      .replace(/^(\s*[a-zA-Z0-9_-]+):\s*\([^)]*\)/gm, "$1:") // strip parenthetical annotations
+      .replace(/^(\s*knowledge):(?!\s)/gm, "$1: ")          // fix unspaced colons
+      .replace(/\{([A-Z,\s]{10,})\}/g, "{}");               // sanitize valueless flow maps
+
     try {
-      const parsed = yaml.load(chunk);
+      const parsed = yaml.load(sanitizedChunk);
       if (parsed && typeof parsed === "object") {
         Object.assign(target, parsed);
         return;
@@ -342,7 +348,7 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
       if (actorDelta.relations) {
         for (const [tgt, rData] of Object.entries(actorDelta.relations)) {
           mergedRelations[tgt] = {
-            ...(mergedRelations[tgt] || {}),
+            ...(baseActor.relations?.[tgt] || {}),
             ...(rData as any)
           };
         }
@@ -351,16 +357,16 @@ export function deepMergeLedger(base: LedgerData | null, delta: Partial<LedgerDa
       merged.actors![actorId] = {
         ...baseActor,
         ...actorDelta,
-        appearance: { ...baseActor.appearance, ...actorDelta.appearance },
-        money: { ...baseActor.money, ...actorDelta.money },
-        passions: { ...baseActor.passions, ...actorDelta.passions },
-        combat: { ...baseActor.combat, ...actorDelta.combat },
-        life_model: { ...baseActor.life_model, ...actorDelta.life_model },
-        profile: { ...baseActor.profile, ...actorDelta.profile },
-        agency: { ...baseActor.agency, ...actorDelta.agency },
-        knowledge: { ...baseActor.knowledge, ...actorDelta.knowledge },
-        stats: { ...baseActor.stats, ...actorDelta.stats },
-        wounds: { ...baseActor.wounds, ...actorDelta.wounds },
+        appearance: { ...(baseActor.appearance || {}), ...(actorDelta.appearance || {}) },
+        money: { ...(baseActor.money || {}), ...(actorDelta.money || {}) },
+        passions: { ...(baseActor.passions || {}), ...(actorDelta.passions || {}) },
+        combat: { ...(baseActor.combat || {}), ...(actorDelta.combat || {}) },
+        life_model: { ...(baseActor.life_model || {}), ...(actorDelta.life_model || {}) },
+        profile: { ...(baseActor.profile || {}), ...(actorDelta.profile || {}) },
+        agency: { ...(baseActor.agency || {}), ...(actorDelta.agency || {}) },
+        knowledge: { ...(baseActor.knowledge || {}), ...(actorDelta.knowledge || {}) },
+        stats: { ...(baseActor.stats || {}), ...(actorDelta.stats || {}) },
+        wounds: { ...(baseActor.wounds || {}), ...(actorDelta.wounds || {}) },
         outfit: {
           ...baseActor.outfit,
           ...actorDelta.outfit,

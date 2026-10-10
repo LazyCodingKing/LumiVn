@@ -1,5 +1,5 @@
 import type { LlmMessageDTO, InterceptorResultDTO } from "lumiverse-spindle-types";
-import type { LedgerData, BPlot, DirectorSettings, DirectorLogEntry } from "../shared/types.js";
+import type { LedgerData, BPlot, DirectorSettings, DirectorLogEntry, StatRulesSettings } from "../shared/types.js";
 import { DEFAULT_DIRECTOR_SETTINGS } from "./storage.js";
 import { encodeToonState } from "./toon-parser.js";
 
@@ -101,7 +101,8 @@ export async function evaluateDirectorInterceptor(
   context: unknown,
   getChatState: (chatId: string) => Promise<LedgerData | null>,
   getDirectorSettings?: () => Promise<DirectorSettings>,
-  onInjectedDirective?: (key: string, directive: string) => void
+  onInjectedDirective?: (key: string, directive: string) => void,
+  getStatRulesSettings?: () => Promise<StatRulesSettings>
 ): Promise<LlmMessageDTO[] | InterceptorResultDTO> {
   const chatId = extractChatId(context);
   const genType = extractGenerationType(context);
@@ -118,10 +119,15 @@ export async function evaluateDirectorInterceptor(
 
   // 2. Read latest chat state and roster
   const currentState = await getChatState(chatId);
+  const statSettings = getStatRulesSettings ? await getStatRulesSettings() : null;
   if (!currentState) return messages;
 
   let activeDirective = formatDirectorDirective(settings);
   if (!activeDirective) return messages;
+
+  if (statSettings && statSettings.enabled && statSettings.mode === "inline_interceptor") {
+    activeDirective += `\n\n${statSettings.statRules}\n\n${statSettings.ledgerPrompt}`;
+  }
 
   // Decorum validation scan
   const currentPlaceId = currentState.scene?.place;

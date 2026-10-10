@@ -180,14 +180,14 @@ Rules: underwear: underwear_top, underwear_bottom (or \`none\`).
 
 \`\`\`yaml
 user:
-  appearance: {age: , traits: , appeal: 0-100, style: , condition: }
-  money: {in_hand: 0, in_bank: 0, currency: "$"}
-  combat: {tier: 1-10, lv: 0-10, exp: "0/100", hp: "cur/max", mp: "cur/max", eff_pwr: , eff_agi: , pwr: , agi: , int: , talent: []}
+  appearance: { age: 18, traits: "athletic", appeal: 65, style: "casual", condition: "normal" }
+  money: { in_hand: 50, in_bank: 500, currency: "$" }
+  combat: { tier: 1, lv: 1, exp: "0/100", hp: "100/100", mp: "50/50", eff_pwr: 15, eff_agi: 15, pwr: 15, agi: 15, int: 10, talent: [] }
   passions: { anger: 0, shame: 0, arousal: 0, fear: 0, stress: 0, pain: 0, exhaustion: 0, suspicion: 0, disgust: 0, sadness: 0, guilt: 0, joy: 10 }
-  outfit: {top: , bottom: , underwear_top: , underwear_bottom: , shoes: , accessories: [], state: }
-  inventory: {in_hand: {L: "Empty", R: "Empty"}, carried: [], room: [], room_location: ""}
+  outfit: { top: "t-shirt", bottom: "jeans", underwear_top: "none", underwear_bottom: "boxers", shoes: "sneakers", accessories: [], state: "clean" }
+  inventory: { in_hand: { L: "Empty", R: "Empty" }, carried: [], room: [], room_location: "user_residence:bedroom" }
+  agency:
     want_now: "explore area"
-    
 
 actor_id:
   name: "Actor Name"
@@ -221,22 +221,19 @@ actor_id:
     commitments: []
     want_now: want (source, cost)
   relations:
-    other_id: {affinity: 0, trust: 0, respect: 0, attraction: 0, grudge: 0, fear: 0, familiarity: 0, attachment: 0, loyalty: 0-100, sacrifice_willingness: 0-100, betrayal_threshold: 50, shared_secrets: [], leverage: [], grievances: [], obligations: []}
-  knowledge:(Emit towards {{user}} and any newly introduced npcs when they are present in the scene)
-    beliefs: [p, conf, source, basis, t]
+    user: { affinity: 0, trust: 0, respect: 0, attraction: 0, grudge: 0, fear: 0, familiarity: 0, attachment: 0, loyalty: 0, sacrifice_willingness: 0, betrayal_threshold: 50, shared_secrets: [], leverage: [], grievances: [], obligations: [] }
+  knowledge:
+    beliefs: [["user is new visitor", 80, "direct", "observed", "D1 12:00"]]
     Opinion: []
-    memories: [evt, interpretation, salience, imprint, with]
-    expectations: [situation, expect, conf]
-    grudges: [Any grudge or grievances towards them]
-    secrets: [truth, knows, suspects, exposure, cover]
-    Promises: [Any promises between each other]
+    memories: []
+    expectations: []
+    grudges: []
+    secrets: []
+    Promises: []
     held_leverage: []
-    presents_as: {audience: face}
-    Recent Interaction:[]
-Trigger:(Important memory from the past)
-Current Status: []
-Relationship Network:
-  stats: {T, A, R, F, Fam, G, Integ, Stress, CAU, GRD, PRD, EMP, STB, BLD, RX, RC, Rig, Mask, MIS, WV, COMP}
+    presents_as: { audience: "composed" }
+    Recent Interaction: []
+  stats: { T: 0, A: 0, R: 0, F: 0, Fam: 0, G: 0, Integ: 80, Stress: 10, CAU: 60, GRD: 50, PRD: 70, EMP: 40, STB: 70, BLD: 10, RX: 30, RC: 40, Rig: 50, Mask: 40, MIS: 10, WV: 60, COMP: 30 }
 \`\`\`
 
 ## Scene
@@ -291,8 +288,6 @@ journal:
 ## B-Plots
 
 \`\`\`yaml
-## B-Plots
-
   - id: "bp_id"
     who: "distant person/group/institution outside the local cast"
     want: "their goal, in their own terms"
