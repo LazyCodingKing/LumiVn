@@ -2587,6 +2587,7 @@ class BPlotsTab {
 class WardrobeTab {
   root;
   onAction;
+  selectedActorId = null;
   constructor(onAction) {
     this.onAction = onAction;
     this.root = document.createElement("div");
@@ -2594,7 +2595,8 @@ class WardrobeTab {
   }
   render(ledger, activeActorId) {
     this.root.innerHTML = "";
-    const actorId = activeActorId || (ledger.actors?.["user"] ? "user" : Object.keys(ledger.actors || {})[0] || "user");
+    const actorId = activeActorId || this.selectedActorId || (ledger.actors?.["user"] ? "user" : Object.keys(ledger.actors || {})[0] || "user");
+    this.selectedActorId = actorId;
     const actor = ledger.actors?.[actorId];
     const outfit = actor?.outfit || {
       top: "None",
@@ -2608,37 +2610,60 @@ class WardrobeTab {
     header.className = "vn-tab-header";
     header.innerHTML = `<h3>\uD83D\uDC57 Wardrobe & Dressing — ${actor?.name || actorId}</h3>`;
     this.root.appendChild(header);
+    const actorKeys = Object.keys(ledger.actors || {});
+    if (actorKeys.length > 1) {
+      const switcher = document.createElement("div");
+      switcher.style.cssText = "display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;";
+      for (const aKey of actorKeys) {
+        const aName = ledger.actors?.[aKey]?.name || aKey;
+        const btn = document.createElement("button");
+        const isSel = aKey === actorId;
+        btn.className = `vn-btn vn-btn-sm ${isSel ? "vn-btn-primary" : "vn-btn-secondary"}`;
+        btn.innerHTML = `${aKey === "user" ? "\uD83D\uDC64" : "\uD83D\uDC65"} ${aName}`;
+        btn.addEventListener("click", () => {
+          this.selectedActorId = aKey;
+          this.render(ledger, aKey);
+        });
+        switcher.appendChild(btn);
+      }
+      this.root.appendChild(switcher);
+    }
     const statusBar = document.createElement("div");
     statusBar.className = "vn-wardrobe-status-bar";
-    const scentVal = outfit.scent || "None";
-    const conditionVal = outfit.state || "Clean";
+    const scentVal = outfit.scent || "Clean";
+    const conditionVal = outfit.state || "Pristine";
     const integrityVal = outfit.integrity ?? 100;
     const residueVal = Array.isArray(outfit.residue) && outfit.residue.length > 0 ? outfit.residue.join(", ") : "None";
     statusBar.innerHTML = `
-      <div class="vn-wardrobe-status-item"><span>Scent:</span> <strong>${scentVal}</strong></div>
-      <div class="vn-wardrobe-status-item"><span>Condition:</span> <strong>${conditionVal}</strong></div>
-      <div class="vn-wardrobe-status-item"><span>Integrity:</span> <strong>${integrityVal}%</strong></div>
-      <div class="vn-wardrobe-status-item"><span>Residue:</span> <strong>${residueVal}</strong></div>
+      <div class="vn-wardrobe-status-item"><span>\uD83C\uDF38 Scent:</span> <strong>${scentVal}</strong></div>
+      <div class="vn-wardrobe-status-item"><span>\uD83E\uDDFC Condition:</span> <strong>${conditionVal}</strong></div>
+      <div class="vn-wardrobe-status-item"><span>\uD83D\uDEE1️ Integrity:</span> <strong>${integrityVal}%</strong></div>
+      <div class="vn-wardrobe-status-item"><span>\uD83D\uDCA7 Residue:</span> <strong>${residueVal}</strong></div>
     `;
     this.root.appendChild(statusBar);
     const slotsGrid = document.createElement("div");
     slotsGrid.className = "vn-wardrobe-grid";
     const slots = [
-      { label: "Top", key: "top", value: outfit.top || "None" },
-      { label: "Bottom", key: "bottom", value: outfit.bottom || "None" },
-      { label: "Underwear (Top)", key: "underwear_top", value: outfit.underwear_top || "None" },
-      { label: "Underwear (Bottom)", key: "underwear_bottom", value: outfit.underwear_bottom || "None" },
-      { label: "Shoes", key: "shoes", value: outfit.shoes || "None" },
-      { label: "Accessories", key: "accessories", value: outfit.accessories || [] }
+      { label: "Top", icon: "\uD83D\uDC54", key: "top", value: outfit.top || "None" },
+      { label: "Bottom", icon: "\uD83D\uDC56", key: "bottom", value: outfit.bottom || "None" },
+      { label: "Underwear (Top)", icon: "\uD83D\uDC59", key: "underwear_top", value: outfit.underwear_top || "None" },
+      { label: "Underwear (Bottom)", icon: "\uD83E\uDE72", key: "underwear_bottom", value: outfit.underwear_bottom || "None" },
+      { label: "Shoes", icon: "\uD83D\uDC5E", key: "shoes", value: outfit.shoes || "None" },
+      { label: "Accessories", icon: "\uD83D\uDC8D", key: "accessories", value: outfit.accessories || [] }
     ];
     for (const slot of slots) {
       const card = document.createElement("div");
       card.className = "vn-slot-card";
       const valStr = Array.isArray(slot.value) ? slot.value.length ? slot.value.join(", ") : "None" : slot.value;
-      const isEquipped = valStr && valStr !== "None" && valStr !== "none";
+      const isEquipped = valStr && valStr.toLowerCase() !== "none" && valStr.trim() !== "";
+      card.style.cssText = isEquipped ? "background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; padding: 12px; transition: all 0.2s ease;" : "background: rgba(15, 23, 42, 0.5); border: 1px dashed rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 12px; opacity: 0.75;";
       card.innerHTML = `
-        <div class="vn-slot-title">${slot.label}</div>
-        <div class="vn-slot-value">${valStr}</div>
+        <div class="vn-slot-title" style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; margin-bottom: 6px;">
+          <span>${slot.icon}</span>
+          <span style="font-weight: 600;">${slot.label}</span>
+          ${isEquipped ? `<span style="margin-left: auto; font-size: 10px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; padding: 1px 6px; border-radius: 6px;">Worn</span>` : ""}
+        </div>
+        <div class="vn-slot-value" style="font-size: 14px; font-weight: 600; color: ${isEquipped ? "#f8fafc" : "#64748b"}; margin-bottom: 10px;">${valStr}</div>
       `;
       const actions = document.createElement("div");
       actions.className = "vn-slot-actions";
@@ -2902,35 +2927,43 @@ class StatsTab {
     passionsSection.className = "vn-section";
     passionsSection.innerHTML = `<h4>\uD83D\uDD25 Current Passions & Affect</h4>`;
     const badgesContainer = document.createElement("div");
-    badgesContainer.className = "vn-badges-container";
+    badgesContainer.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px;";
     const passions = actor.passions || {};
-    const passionEntries = [
-      ["Arousal", passions.arousal],
-      ["Anger", passions.anger],
-      ["Joy", passions.joy],
-      ["Stress", passions.stress],
-      ["Fear", passions.fear],
-      ["Shame", passions.shame],
-      ["Exhaustion", passions.exhaustion],
-      ["Pain", passions.pain],
-      ["Suspicion", passions.suspicion],
-      ["Disgust", passions.disgust],
-      ["Sadness", passions.sadness],
-      ["Guilt", passions.guilt]
+    const passionDefs = [
+      { name: "Arousal", key: "arousal", icon: "\uD83D\uDD25", color: "linear-gradient(90deg, #a855f7, #ec4899)" },
+      { name: "Anger", key: "anger", icon: "\uD83D\uDCA2", color: "linear-gradient(90deg, #f87171, #ef4444)" },
+      { name: "Joy", key: "joy", icon: "\uD83D\uDE0A", color: "linear-gradient(90deg, #34d399, #10b981)" },
+      { name: "Stress", key: "stress", icon: "⚡", color: "linear-gradient(90deg, #fbbf24, #f59e0b)" },
+      { name: "Fear", key: "fear", icon: "\uD83D\uDE28", color: "linear-gradient(90deg, #818cf8, #4f46e5)" },
+      { name: "Shame", key: "shame", icon: "\uD83D\uDE33", color: "linear-gradient(90deg, #fb923c, #f97316)" },
+      { name: "Suspicion", key: "suspicion", icon: "\uD83D\uDD75️", color: "linear-gradient(90deg, #94a3b8, #64748b)" },
+      { name: "Exhaustion", key: "exhaustion", icon: "\uD83D\uDCA4", color: "linear-gradient(90deg, #64748b, #475569)" },
+      { name: "Pain", key: "pain", icon: "\uD83E\uDE79", color: "linear-gradient(90deg, #f43f5e, #be123c)" },
+      { name: "Sadness", key: "sadness", icon: "\uD83D\uDCA7", color: "linear-gradient(90deg, #60a5fa, #2563eb)" },
+      { name: "Disgust", key: "disgust", icon: "\uD83E\uDD22", color: "linear-gradient(90deg, #a3e635, #65a30d)" },
+      { name: "Guilt", key: "guilt", icon: "\uD83E\uDD40", color: "linear-gradient(90deg, #c084fc, #9333ea)" }
     ];
     let hasBadge = false;
-    for (const [name, val] of passionEntries) {
-      if (val !== undefined && val > 0) {
+    for (const def of passionDefs) {
+      const val = Number(passions[def.key] ?? 0);
+      if (val > 0) {
         hasBadge = true;
-        const badge = document.createElement("div");
-        const severity = val >= 70 ? "high" : val >= 40 ? "mid" : "low";
-        badge.className = `vn-passion-badge vn-badge-${severity}`;
-        badge.innerHTML = `<span class="vn-badge-label">${name}</span> <span class="vn-badge-val">${val}</span>`;
-        badgesContainer.appendChild(badge);
+        const card = document.createElement("div");
+        card.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; display: flex; flex-direction: column; gap: 4px;";
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; font-size: 11px;">
+            <span style="font-weight: 600; color: #f1f5f9;">${def.icon} ${def.name}</span>
+            <strong style="color: #cbd5e1;">${val}</strong>
+          </div>
+          <div style="background: #1e293b; border-radius: 3px; height: 5px; overflow: hidden;">
+            <div style="background: ${def.color}; width: ${Math.min(100, val)}%; height: 100%; transition: width 0.4s ease;"></div>
+          </div>
+        `;
+        badgesContainer.appendChild(card);
       }
     }
     if (!hasBadge) {
-      badgesContainer.innerHTML = `<span class="vn-muted" style="padding:4px;">Equilibrium / Baseline emotional state</span>`;
+      badgesContainer.innerHTML = `<span class="vn-muted" style="padding:4px; grid-column: 1 / -1;">Equilibrium / Baseline emotional state</span>`;
     }
     passionsSection.appendChild(badgesContainer);
     this.root.appendChild(passionsSection);
@@ -2962,24 +2995,30 @@ class StatsTab {
       const metersContainer = document.createElement("div");
       metersContainer.className = "vn-meters-container";
       const relMeters = [
-        { label: "Affinity", min: -100, max: 100, val: Number(activeRel.affinity ?? 0) },
-        { label: "Trust", min: -100, max: 100, val: Number(activeRel.trust ?? 0) },
-        { label: "Respect", min: -100, max: 100, val: Number(activeRel.respect ?? 0) },
-        { label: "Attraction", min: -100, max: 100, val: Number(activeRel.attraction ?? 0) },
-        { label: "Fear", min: 0, max: 100, val: Number(activeRel.fear ?? 0) },
-        { label: "Familiarity", min: 0, max: 100, val: Number(activeRel.familiarity ?? 0) },
-        { label: "Attachment", min: 0, max: 100, val: Number(activeRel.attachment ?? 0) },
-        { label: "Grudge", min: 0, max: 100, val: Number(activeRel.grudge ?? 0) },
-        { label: "Loyalty", min: 0, max: 100, val: Number(activeRel.loyalty ?? 0) },
-        { label: "Sacrifice Willingness", min: 0, max: 100, val: Number(activeRel.sacrifice_willingness ?? 0) }
+        { label: "Affinity", icon: "\uD83D\uDC96", min: -100, max: 100, val: Number(activeRel.affinity ?? 0), gradient: "linear-gradient(90deg, #ec4899, #f43f5e)" },
+        { label: "Trust", icon: "\uD83E\uDD1D", min: -100, max: 100, val: Number(activeRel.trust ?? 0), gradient: "linear-gradient(90deg, #06b6d4, #3b82f6)" },
+        { label: "Respect", icon: "\uD83D\uDEE1️", min: -100, max: 100, val: Number(activeRel.respect ?? 0), gradient: "linear-gradient(90deg, #818cf8, #6366f1)" },
+        { label: "Attraction", icon: "\uD83D\uDD25", min: -100, max: 100, val: Number(activeRel.attraction ?? 0), gradient: "linear-gradient(90deg, #c084fc, #e11d48)" },
+        { label: "Fear", icon: "\uD83D\uDE28", min: 0, max: 100, val: Number(activeRel.fear ?? 0), gradient: "linear-gradient(90deg, #6366f1, #312e81)" },
+        { label: "Familiarity", icon: "☕", min: 0, max: 100, val: Number(activeRel.familiarity ?? 0), gradient: "linear-gradient(90deg, #10b981, #14b8a6)" },
+        { label: "Attachment", icon: "\uD83D\uDD17", min: 0, max: 100, val: Number(activeRel.attachment ?? 0), gradient: "linear-gradient(90deg, #f59e0b, #d97706)" },
+        { label: "Grudge", icon: "\uD83D\uDCA2", min: 0, max: 100, val: Number(activeRel.grudge ?? 0), gradient: "linear-gradient(90deg, #ef4444, #991b1b)" },
+        { label: "Loyalty", icon: "⚔️", min: 0, max: 100, val: Number(activeRel.loyalty ?? 0), gradient: "linear-gradient(90deg, #f59e0b, #eab308)" },
+        { label: "Sacrifice Willingness", icon: "✨", min: 0, max: 100, val: Number(activeRel.sacrifice_willingness ?? 0), gradient: "linear-gradient(90deg, #38bdf8, #a855f7)" }
       ];
       for (const m of relMeters) {
         const pct = m.min < 0 ? Math.max(0, Math.min(100, (m.val + 100) / 200 * 100)) : Math.max(0, Math.min(100, m.val / m.max * 100));
         const row = document.createElement("div");
         row.className = "vn-meter-row";
+        row.style.cssText = "background: #0f172a; border: 1px solid #1e293b; border-radius: 6px; padding: 6px 10px; margin-bottom: 6px;";
         row.innerHTML = `
-        <div class="vn-meter-header"><span>${m.label}</span><span>${m.val}</span></div>
-        <div class="vn-meter-bar-bg"><div class="vn-meter-bar-fill" style="width: ${pct}%"></div></div>
+        <div class="vn-meter-header" style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 11px;">
+          <span style="font-weight: 600; color: #f1f5f9;">${m.icon} ${m.label}</span>
+          <span style="font-weight: 700; color: #cbd5e1;">${m.val > 0 && m.min < 0 ? `+${m.val}` : m.val}</span>
+        </div>
+        <div class="vn-meter-bar-bg" style="background: #1e293b; border-radius: 4px; height: 7px; overflow: hidden;">
+          <div class="vn-meter-bar-fill" style="width: ${pct}%; height: 100%; background: ${m.gradient}; box-shadow: 0 0 6px rgba(255,255,255,0.2); transition: width 0.4s ease;"></div>
+        </div>
       `;
         metersContainer.appendChild(row);
       }
@@ -3052,6 +3091,31 @@ class StatsTab {
 }
 
 // src/frontend/hud/tab-inventory.ts
+function getItemIcon(itemName) {
+  const norm = itemName.toLowerCase();
+  if (norm.includes("sword") || norm.includes("blade") || norm.includes("katana") || norm.includes("knife") || norm.includes("dagger") || norm.includes("weapon") || norm.includes("gun"))
+    return "\uD83D\uDDE1️";
+  if (norm.includes("phone") || norm.includes("smartphone") || norm.includes("device") || norm.includes("terminal"))
+    return "\uD83D\uDCF1";
+  if (norm.includes("key") || norm.includes("card") || norm.includes("pass"))
+    return "\uD83D\uDD11";
+  if (norm.includes("potion") || norm.includes("medicine") || norm.includes("pill") || norm.includes("aid") || norm.includes("bandage"))
+    return "\uD83D\uDC8A";
+  if (norm.includes("book") || norm.includes("letter") || norm.includes("note") || norm.includes("scroll") || norm.includes("diary"))
+    return "\uD83D\uDCDC";
+  if (norm.includes("food") || norm.includes("apple") || norm.includes("snack") || norm.includes("bento") || norm.includes("bread"))
+    return "\uD83E\uDD6A";
+  if (norm.includes("drink") || norm.includes("water") || norm.includes("tea") || norm.includes("coffee") || norm.includes("soda") || norm.includes("bottle"))
+    return "☕";
+  if (norm.includes("ring") || norm.includes("necklace") || norm.includes("amulet") || norm.includes("badge") || norm.includes("ribbon"))
+    return "\uD83D\uDC8D";
+  if (norm.includes("wallet") || norm.includes("money") || norm.includes("coin") || norm.includes("cash") || norm.includes("gold"))
+    return "\uD83D\uDCB0";
+  if (norm.includes("bag") || norm.includes("backpack") || norm.includes("case") || norm.includes("pouch"))
+    return "\uD83C\uDF92";
+  return "\uD83D\uDCE6";
+}
+
 class InventoryTab {
   root;
   onAction;
@@ -3076,21 +3140,27 @@ class InventoryTab {
     this.root.appendChild(header);
     const handsSection = document.createElement("div");
     handsSection.className = "vn-section";
-    handsSection.innerHTML = `<h4>In Hands</h4>`;
+    handsSection.innerHTML = `<h4>✋ In Hands</h4>`;
     const handsGrid = document.createElement("div");
-    handsGrid.className = "vn-hands-grid";
+    handsGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px;";
     for (const hand of ["L", "R"]) {
       const item = inv.in_hand?.[hand] || "Empty";
       const isEmpty = item.toLowerCase() === "empty";
       const card = document.createElement("div");
-      card.className = "vn-item-card";
+      card.style.cssText = `background: #0f172a; border: 1px solid ${isEmpty ? "#334155" : "#6366f1"}; border-radius: 8px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; box-shadow: ${isEmpty ? "none" : "0 0 10px rgba(99,102,241,0.2)"};`;
       card.innerHTML = `
-        <div class="vn-item-title">${hand === "L" ? "Left Hand" : "Right Hand"}</div>
-        <div class="vn-item-desc">${item}</div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 22px;">${isEmpty ? "✋" : getItemIcon(item)}</span>
+          <div>
+            <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">${hand === "L" ? "Left Hand" : "Right Hand"}</div>
+            <div style="font-size: 13px; font-weight: 700; color: ${isEmpty ? "#64748b" : "#f8fafc"};">${item}</div>
+          </div>
+        </div>
       `;
       if (!isEmpty) {
         const btn = document.createElement("button");
         btn.className = "vn-btn vn-btn-sm vn-btn-warning";
+        btn.style.cssText = "padding: 4px 10px; font-size: 11px; cursor: pointer;";
         btn.textContent = "Stow";
         btn.addEventListener("click", () => {
           this.onAction(`*Stows ${item} from ${hand === "L" ? "left" : "right"} hand*`);
@@ -3103,69 +3173,66 @@ class InventoryTab {
     this.root.appendChild(handsSection);
     const carriedSection = document.createElement("div");
     carriedSection.className = "vn-section";
-    carriedSection.innerHTML = `<h4>Carried (${inv.carried?.length || 0})</h4>`;
-    const carriedList = document.createElement("div");
-    carriedList.className = "vn-items-list";
+    carriedSection.innerHTML = `<h4>\uD83C\uDF92 Carried Backpack (${inv.carried?.length || 0})</h4>`;
+    const carriedGrid = document.createElement("div");
+    carriedGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;";
     if (!inv.carried || inv.carried.length === 0) {
-      carriedList.innerHTML = `<div class="vn-muted">Nothing carried.</div>`;
+      carriedGrid.innerHTML = `<div class="vn-muted" style="grid-column: 1 / -1; padding: 12px; text-align: center; background: #0f172a; border-radius: 8px; border: 1px dashed #334155;">Backpack is empty.</div>`;
     } else {
       for (const item of inv.carried) {
-        const row = document.createElement("div");
-        row.className = "vn-item-row";
-        row.innerHTML = `<span class="vn-item-name">${item}</span>`;
-        const actions = document.createElement("div");
-        actions.className = "vn-item-row-actions";
-        const equipBtn = document.createElement("button");
-        equipBtn.className = "vn-btn vn-btn-sm vn-btn-primary";
-        equipBtn.textContent = "Equip";
-        equipBtn.addEventListener("click", () => {
+        const card = document.createElement("div");
+        card.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; transition: border-color 0.15s ease;";
+        card.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 20px;">${getItemIcon(item)}</span>
+            <span style="font-size: 12px; font-weight: 600; color: #f8fafc; word-break: break-word; line-height: 1.3;">${item}</span>
+          </div>
+          <div style="display: flex; gap: 4px; margin-top: auto; padding-top: 6px; border-top: 1px solid #1e293b;">
+            <button class="vn-btn vn-btn-sm vn-btn-primary vn-equip-btn" style="flex: 1; padding: 3px 0; font-size: 10px; font-weight: 600;">Equip</button>
+            <button class="vn-btn vn-btn-sm vn-btn-secondary vn-use-btn" style="flex: 1; padding: 3px 0; font-size: 10px; font-weight: 600;">Use</button>
+            <button class="vn-btn vn-btn-sm vn-btn-danger vn-drop-btn" style="padding: 3px 6px; font-size: 10px;" title="Drop">✕</button>
+          </div>
+        `;
+        card.querySelector(".vn-equip-btn")?.addEventListener("click", () => {
           this.onAction(`*Equips ${item} in hand*`);
         });
-        const useBtn = document.createElement("button");
-        useBtn.className = "vn-btn vn-btn-sm vn-btn-secondary";
-        useBtn.textContent = "Use";
-        useBtn.addEventListener("click", () => {
+        card.querySelector(".vn-use-btn")?.addEventListener("click", () => {
           this.onAction(`*Uses ${item}*`);
         });
-        const dropBtn = document.createElement("button");
-        dropBtn.className = "vn-btn vn-btn-sm vn-btn-danger";
-        dropBtn.textContent = "Drop";
-        dropBtn.addEventListener("click", () => {
+        card.querySelector(".vn-drop-btn")?.addEventListener("click", () => {
           this.onAction(`*Drops ${item} on the ground*`);
         });
-        actions.appendChild(equipBtn);
-        actions.appendChild(useBtn);
-        actions.appendChild(dropBtn);
-        row.appendChild(actions);
-        carriedList.appendChild(row);
+        carriedGrid.appendChild(card);
       }
     }
-    carriedSection.appendChild(carriedList);
+    carriedSection.appendChild(carriedGrid);
     this.root.appendChild(carriedSection);
     const roomSection = document.createElement("div");
     roomSection.className = "vn-section";
     const roomLoc = inv.room_location ? ` (${inv.room_location})` : "";
-    roomSection.innerHTML = `<h4>Room Container${roomLoc}</h4>`;
-    const roomList = document.createElement("div");
-    roomList.className = "vn-items-list";
+    roomSection.innerHTML = `<h4>\uD83D\uDCE6 Room Container${roomLoc}</h4>`;
+    const roomGrid = document.createElement("div");
+    roomGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;";
     if (!inv.room || inv.room.length === 0) {
-      roomList.innerHTML = `<div class="vn-muted">Container is empty.</div>`;
+      roomGrid.innerHTML = `<div class="vn-muted" style="grid-column: 1 / -1; padding: 12px; text-align: center; background: #0f172a; border-radius: 8px; border: 1px dashed #334155;">Container is empty.</div>`;
     } else {
       for (const item of inv.room) {
-        const row = document.createElement("div");
-        row.className = "vn-item-row";
-        row.innerHTML = `<span class="vn-item-name">${item}</span>`;
-        const takeBtn = document.createElement("button");
-        takeBtn.className = "vn-btn vn-btn-sm vn-btn-primary";
-        takeBtn.textContent = "Take";
-        takeBtn.addEventListener("click", () => {
+        const card = document.createElement("div");
+        card.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px;";
+        card.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 18px;">${getItemIcon(item)}</span>
+            <span style="font-size: 12px; font-weight: 600; color: #cbd5e1; word-break: break-word;">${item}</span>
+          </div>
+          <button class="vn-btn vn-btn-sm vn-btn-primary vn-take-btn" style="padding: 3px 8px; font-size: 10px; font-weight: 600;">Take</button>
+        `;
+        card.querySelector(".vn-take-btn")?.addEventListener("click", () => {
           this.onAction(`*Takes ${item} from container*`);
         });
-        row.appendChild(takeBtn);
-        roomList.appendChild(row);
+        roomGrid.appendChild(card);
       }
     }
-    roomSection.appendChild(roomList);
+    roomSection.appendChild(roomGrid);
     this.root.appendChild(roomSection);
   }
 }
@@ -3175,6 +3242,7 @@ class MapTab {
   root;
   onAction;
   viewMode = "indoor";
+  manifest;
   zoom = 1;
   panX = 0;
   panY = 0;
@@ -3187,7 +3255,9 @@ class MapTab {
     this.root = document.createElement("div");
     this.root.className = "vn-hud-tab vn-tab-map";
   }
-  render(ledger) {
+  render(ledger, manifest) {
+    if (manifest)
+      this.manifest = manifest;
     this.root.innerHTML = "";
     const currentPlace = (ledger.scene?.place || "default").toLowerCase();
     const isIndoor = currentPlace.includes(":") || currentPlace.includes("residence") || currentPlace.includes("dojo") || currentPlace.includes("room") || currentPlace.includes("foyer");
@@ -3579,8 +3649,17 @@ class MapTab {
     const route = currentRoutes.find((r) => typeof r === "object" && (r.to === selected || r.to === cleanName));
     const isGated = Boolean(route?.why_not || route?.requires && Object.keys(route.requires).length > 0);
     const whyNot = route?.why_not;
-    const npcsHere = (ledger.roster || []).filter((r) => (r.loc || "").toLowerCase().includes(cleanName.toLowerCase()));
+    const placeThumbnail = this.manifest?.places?.[selected] || this.manifest?.places?.[cleanName] || this.manifest?.places?.[selected.toLowerCase()] || this.manifest?.places?.[cleanName.toLowerCase()] || "";
+    const npcsHere = (ledger.roster || []).filter((r) => {
+      const loc = (r.loc || "").toLowerCase();
+      return loc === selected.toLowerCase() || loc === cleanName.toLowerCase() || loc.includes(cleanName.toLowerCase());
+    });
     sidebar.innerHTML = `
+      ${placeThumbnail ? `
+        <div style="width: 100%; height: 110px; border-radius: 8px; overflow: hidden; margin-bottom: 8px; border: 1px solid #334155; position: relative; background: #070d19;">
+          <img src="${placeThumbnail}" style="width: 100%; height: 100%; object-fit: cover;" alt="${cleanName}" />
+        </div>
+      ` : ""}
       <div style="border-bottom: 1px solid #334155; padding-bottom: 8px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <h4 style="margin: 0; font-size: 13px; color: #38bdf8; text-transform: uppercase;">
@@ -3636,12 +3715,22 @@ class MapTab {
       <div>
         <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px;">Present Cast (${npcsHere.length})</div>
         <div style="display: flex; flex-direction: column; gap: 4px;">
-          ${npcsHere.length > 0 ? npcsHere.map((n) => `
-                <div style="background: #1e293b; padding: 4px 8px; border-radius: 4px; font-size: 11px; display: flex; justify-content: space-between;">
-                  <span style="color: #c7d2fe; font-weight: 600;">${n.name || n.id}</span>
-                  <span style="color: #94a3b8; font-size: 10px;">${n.posture || n.activity || "Idle"}</span>
-                </div>
-              `).join("") : '<span style="color: #64748b; font-size: 11px;">No detected actors</span>'}
+          ${npcsHere.length > 0 ? npcsHere.map((n) => {
+      const normId = (n.id || "").toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      const charData = this.manifest?.characters?.[normId];
+      const outfits = charData?.outfits || charData;
+      const defaultSet = outfits?.["default"] || (outfits ? Object.values(outfits)[0] : undefined);
+      const avatar = defaultSet?.["neutral"] || (defaultSet ? Object.values(defaultSet)[0] : "") || "";
+      return `
+                  <div style="background: #1e293b; padding: 4px 8px; border-radius: 6px; font-size: 11px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      ${avatar ? `<img src="${avatar}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" alt="" />` : "<span>\uD83D\uDC64</span>"}
+                      <span style="color: #c7d2fe; font-weight: 600;">${n.name || n.id}</span>
+                    </div>
+                    <span style="color: #94a3b8; font-size: 10px;">${n.posture || n.activity || "Idle"}</span>
+                  </div>
+                `;
+    }).join("") : '<span style="color: #64748b; font-size: 11px;">No detected actors</span>'}
         </div>
       </div>
 
@@ -8780,7 +8869,7 @@ class MenuBar {
   }
   setManifest(manifest) {
     this.currentManifest = manifest;
-    if (this.activeTabId === "characters" || this.activeTabId === "scene") {
+    if (this.activeTabId === "characters" || this.activeTabId === "scene" || this.activeTabId === "map") {
       this.renderActiveTab();
     }
   }
@@ -8832,7 +8921,7 @@ class MenuBar {
         this.panelBody.appendChild(this.inventoryTab.root);
         break;
       case "map":
-        this.mapTab.render(this.currentLedger);
+        this.mapTab.render(this.currentLedger, this.currentManifest);
         this.panelBody.appendChild(this.mapTab.root);
         break;
       case "phone":
@@ -9400,6 +9489,7 @@ class StageOverlay {
   active = false;
   lastProcessedEvtId = null;
   toastContainer;
+  statusPill;
   constructor(options) {
     this.ctx = options.ctx;
     this.onExit = options.onExit;
@@ -9448,7 +9538,11 @@ class StageOverlay {
     });
     this.toastContainer = document.createElement("div");
     this.toastContainer.className = "vn-toast-container";
+    this.statusPill = document.createElement("div");
+    this.statusPill.className = "vn-top-status-pill";
+    this.statusPill.style.display = "none";
     this.root.appendChild(this.exitButton);
+    this.root.appendChild(this.statusPill);
     this.root.appendChild(this.stageRenderer.root);
     this.root.appendChild(this.dialogueBox.root);
     this.root.appendChild(this.menuBar.root);
@@ -9492,6 +9586,8 @@ class StageOverlay {
     this.currentChatId = targetChatId || this.resolveChatId() || null;
     this.ttsEngine.setChatId(this.currentChatId || "");
     this.lastProcessedEvtId = null;
+    this.statusPill.style.display = "none";
+    this.statusPill.innerHTML = "";
     this.dialogueBox.reset();
     this.stageRenderer.reset();
   }
@@ -9591,6 +9687,7 @@ class StageOverlay {
     this.dialogueBox.setKnownActors([...new Set(actorNames)]);
     this.dialogueBox.setContent(state.speakerName, state.paragraphs, state.messageId);
     this.menuBar.setLedger(state.ledger, state.hasBPlotNotification);
+    this.updateStatusPill(state.ledger);
     const newEvts = state.ledger?.journal || [];
     if (newEvts.length > 0) {
       const latestEvt = newEvts[newEvts.length - 1];
@@ -9645,6 +9742,92 @@ class StageOverlay {
       this.toastContainer.appendChild(toast);
       setTimeout(() => toast.remove(), 4000);
     }
+  }
+  updateStatusPill(ledger) {
+    if (!ledger) {
+      this.statusPill.style.display = "none";
+      return;
+    }
+    const clockPhase = ledger.clock?.phase || ledger.clock?.period;
+    const clockText = ledger.clock ? `${ledger.clock.t || ""}${clockPhase ? ` (${clockPhase})` : ""}`.trim() || "" : "";
+    const placeText = ledger.scene?.room || ledger.scene?.place || ledger.scene?.district || "";
+    const inv = ledger.inventory || ledger.actors?.["user"]?.inventory;
+    let itemCount = 0;
+    if (Array.isArray(inv?.carried)) {
+      itemCount += inv.carried.length;
+    }
+    if (inv?.in_hand?.L && inv.in_hand.L !== "Empty" && inv.in_hand.L !== "none")
+      itemCount++;
+    if (inv?.in_hand?.R && inv.in_hand.R !== "Empty" && inv.in_hand.R !== "none")
+      itemCount++;
+    if (inv?.hands?.left && inv.hands.left !== "Empty" && inv.hands.left !== "none")
+      itemCount++;
+    if (inv?.hands?.right && inv.hands.right !== "Empty" && inv.hands.right !== "none")
+      itemCount++;
+    let relText = "";
+    if (ledger.relationships) {
+      for (const [targetId, rels] of Object.entries(ledger.relationships)) {
+        if (targetId.toLowerCase() === "user")
+          continue;
+        const affinity = rels.affinity ?? rels.Affinity;
+        if (typeof affinity === "number") {
+          const targetName = ledger.actors?.[targetId]?.name || targetId;
+          relText = `${targetName} ${affinity >= 0 ? "+" : ""}${affinity}`;
+          break;
+        }
+      }
+    }
+    if (!clockText && !placeText && !relText && itemCount === 0) {
+      this.statusPill.style.display = "none";
+      return;
+    }
+    this.statusPill.innerHTML = "";
+    if (clockText) {
+      const clockBtn = document.createElement("button");
+      clockBtn.className = "vn-pill-item";
+      clockBtn.innerHTML = `<span class="vn-pill-icon">⏱️</span><span class="vn-pill-text">${clockText}</span>`;
+      clockBtn.title = "Time & Chronology";
+      clockBtn.addEventListener("click", () => this.menuBar.openTab("scene"));
+      this.statusPill.appendChild(clockBtn);
+    }
+    if (placeText) {
+      if (this.statusPill.children.length > 0) {
+        const sep = document.createElement("span");
+        sep.className = "vn-pill-sep";
+        this.statusPill.appendChild(sep);
+      }
+      const placeBtn = document.createElement("button");
+      placeBtn.className = "vn-pill-item";
+      placeBtn.innerHTML = `<span class="vn-pill-icon">\uD83D\uDCCD</span><span class="vn-pill-text">${placeText}</span>`;
+      placeBtn.title = "Current Location — Click for Map";
+      placeBtn.addEventListener("click", () => this.menuBar.openTab("map"));
+      this.statusPill.appendChild(placeBtn);
+    }
+    if (relText) {
+      if (this.statusPill.children.length > 0) {
+        const sep = document.createElement("span");
+        sep.className = "vn-pill-sep";
+        this.statusPill.appendChild(sep);
+      }
+      const relBtn = document.createElement("button");
+      relBtn.className = "vn-pill-item";
+      relBtn.innerHTML = `<span class="vn-pill-icon">\uD83D\uDC96</span><span class="vn-pill-text">${relText}</span>`;
+      relBtn.title = "Relationship Affinity — Click for Stats";
+      relBtn.addEventListener("click", () => this.menuBar.openTab("stats"));
+      this.statusPill.appendChild(relBtn);
+    }
+    if (this.statusPill.children.length > 0) {
+      const sep = document.createElement("span");
+      sep.className = "vn-pill-sep";
+      this.statusPill.appendChild(sep);
+    }
+    const bagBtn = document.createElement("button");
+    bagBtn.className = "vn-pill-item";
+    bagBtn.innerHTML = `<span class="vn-pill-icon">\uD83C\uDF92</span><span class="vn-pill-text">${itemCount} item${itemCount === 1 ? "" : "s"}</span>`;
+    bagBtn.title = "Inventory Bag — Click to view items";
+    bagBtn.addEventListener("click", () => this.menuBar.openTab("inventory"));
+    this.statusPill.appendChild(bagBtn);
+    this.statusPill.style.display = "flex";
   }
   dispatchAction(actionText) {
     const targetChatId = this.resolveChatId();
@@ -9938,6 +10121,61 @@ class StageOverlay {
         transform: translateY(-1px);
       }
 
+      /* Top Status Pill (floating Mini-HUD) */
+      .vn-top-status-pill {
+        position: fixed;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 9999px;
+        padding: 4px 12px;
+        backdrop-filter: blur(14px);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 1px rgba(255, 255, 255, 0.2);
+        max-width: 55vw;
+        overflow-x: auto;
+      }
+      .vn-top-status-pill::-webkit-scrollbar { display: none; }
+      .vn-pill-item {
+        background: transparent;
+        border: none;
+        color: #f1f5f9;
+        font-size: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 9999px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.2s ease;
+      }
+      .vn-pill-item:hover {
+        background: rgba(255, 255, 255, 0.14);
+        color: #38bdf8;
+      }
+      .vn-pill-sep {
+        width: 1px;
+        height: 14px;
+        background: rgba(255, 255, 255, 0.18);
+        margin: 0 2px;
+        flex-shrink: 0;
+      }
+      .vn-pill-icon {
+        font-size: 13px;
+      }
+      .vn-pill-text {
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
       /* HUD Menu Bar */
       .vn-hud-menubar {
         position: fixed;
@@ -9992,28 +10230,29 @@ class StageOverlay {
         100% { transform: scale(1); box-shadow: 0 0 4px #f43f5e; }
       }
 
-      /* HUD Modal / Overlay */
+      /* HUD Modal / Overlay (Ren'Py Glassmorphism) */
       .vn-hud-overlay {
         position: fixed;
         inset: 0;
         z-index: 99998;
-        background: rgba(0, 0, 0, 0.7);
-        backdrop-filter: blur(6px);
+        background: rgba(0, 0, 0, 0.72);
+        backdrop-filter: blur(8px);
         display: flex;
         align-items: center;
         justify-content: center;
       }
       .vn-hud-modal {
-        background: #0f172a;
-        border: 1px solid #334155;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.16);
         border-radius: 20px;
-        width: min(720px, 94%);
-        max-height: 82vh;
+        width: min(780px, 94%);
+        max-height: 84vh;
         display: flex;
         flex-direction: column;
         overflow: hidden;
         position: relative;
-        box-shadow: 0 24px 60px rgba(0,0,0,0.9);
+        backdrop-filter: blur(24px);
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85), 0 0 1px rgba(255, 255, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
       }
       .vn-hud-close-btn {
         position: absolute;
@@ -10076,6 +10315,26 @@ class StageOverlay {
       .vn-btn-danger:hover { background: #be123c; }
 
       /* Wardrobe Grid */
+      .vn-wardrobe-status-bar {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 10px 14px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        margin-bottom: 16px;
+      }
+      .vn-wardrobe-status-item {
+        font-size: 13px;
+        color: #94a3b8;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .vn-wardrobe-status-item strong {
+        color: #f8fafc;
+      }
       .vn-wardrobe-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));

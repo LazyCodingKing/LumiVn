@@ -161,7 +161,7 @@ export class MenuBar {
 
   public setManifest(manifest: AssetManifest): void {
     this.currentManifest = manifest;
-    if (this.activeTabId === "characters" || this.activeTabId === "scene") {
+    if (this.activeTabId === "characters" || this.activeTabId === "scene" || this.activeTabId === "map") {
       this.renderActiveTab();
     }
   }
@@ -217,7 +217,7 @@ export class MenuBar {
         this.panelBody.appendChild(this.inventoryTab.root);
         break;
       case "map":
-        this.mapTab.render(this.currentLedger);
+        this.mapTab.render(this.currentLedger, this.currentManifest);
         this.panelBody.appendChild(this.mapTab.root);
         break;
       case "phone":

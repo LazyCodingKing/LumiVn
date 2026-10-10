@@ -229,42 +229,50 @@ export class StatsTab {
       this.root.appendChild(matrixSection);
     }
 
-    // 3. Current Passions & Emotional Affect
+    // 3. Current Passions & Affect
     const passionsSection = document.createElement("div");
     passionsSection.className = "vn-section";
     passionsSection.innerHTML = `<h4>🔥 Current Passions & Affect</h4>`;
     const badgesContainer = document.createElement("div");
-    badgesContainer.className = "vn-badges-container";
+    badgesContainer.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px;";
 
     const passions = actor.passions || {};
-    const passionEntries: Array<[string, number | undefined]> = [
-      ["Arousal", passions.arousal],
-      ["Anger", passions.anger],
-      ["Joy", passions.joy],
-      ["Stress", passions.stress],
-      ["Fear", passions.fear],
-      ["Shame", passions.shame],
-      ["Exhaustion", passions.exhaustion],
-      ["Pain", passions.pain],
-      ["Suspicion", passions.suspicion],
-      ["Disgust", passions.disgust],
-      ["Sadness", passions.sadness],
-      ["Guilt", passions.guilt],
+    const passionDefs: Array<{ name: string; key: keyof typeof passions; icon: string; color: string }> = [
+      { name: "Arousal", key: "arousal", icon: "🔥", color: "linear-gradient(90deg, #a855f7, #ec4899)" },
+      { name: "Anger", key: "anger", icon: "💢", color: "linear-gradient(90deg, #f87171, #ef4444)" },
+      { name: "Joy", key: "joy", icon: "😊", color: "linear-gradient(90deg, #34d399, #10b981)" },
+      { name: "Stress", key: "stress", icon: "⚡", color: "linear-gradient(90deg, #fbbf24, #f59e0b)" },
+      { name: "Fear", key: "fear", icon: "😨", color: "linear-gradient(90deg, #818cf8, #4f46e5)" },
+      { name: "Shame", key: "shame", icon: "😳", color: "linear-gradient(90deg, #fb923c, #f97316)" },
+      { name: "Suspicion", key: "suspicion", icon: "🕵️", color: "linear-gradient(90deg, #94a3b8, #64748b)" },
+      { name: "Exhaustion", key: "exhaustion", icon: "💤", color: "linear-gradient(90deg, #64748b, #475569)" },
+      { name: "Pain", key: "pain", icon: "🩹", color: "linear-gradient(90deg, #f43f5e, #be123c)" },
+      { name: "Sadness", key: "sadness", icon: "💧", color: "linear-gradient(90deg, #60a5fa, #2563eb)" },
+      { name: "Disgust", key: "disgust", icon: "🤢", color: "linear-gradient(90deg, #a3e635, #65a30d)" },
+      { name: "Guilt", key: "guilt", icon: "🥀", color: "linear-gradient(90deg, #c084fc, #9333ea)" },
     ];
 
     let hasBadge = false;
-    for (const [name, val] of passionEntries) {
-      if (val !== undefined && val > 0) {
+    for (const def of passionDefs) {
+      const val = Number(passions[def.key] ?? 0);
+      if (val > 0) {
         hasBadge = true;
-        const badge = document.createElement("div");
-        const severity = val >= 70 ? "high" : val >= 40 ? "mid" : "low";
-        badge.className = `vn-passion-badge vn-badge-${severity}`;
-        badge.innerHTML = `<span class="vn-badge-label">${name}</span> <span class="vn-badge-val">${val}</span>`;
-        badgesContainer.appendChild(badge);
+        const card = document.createElement("div");
+        card.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; display: flex; flex-direction: column; gap: 4px;";
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; font-size: 11px;">
+            <span style="font-weight: 600; color: #f1f5f9;">${def.icon} ${def.name}</span>
+            <strong style="color: #cbd5e1;">${val}</strong>
+          </div>
+          <div style="background: #1e293b; border-radius: 3px; height: 5px; overflow: hidden;">
+            <div style="background: ${def.color}; width: ${Math.min(100, val)}%; height: 100%; transition: width 0.4s ease;"></div>
+          </div>
+        `;
+        badgesContainer.appendChild(card);
       }
     }
     if (!hasBadge) {
-      badgesContainer.innerHTML = `<span class="vn-muted" style="padding:4px;">Equilibrium / Baseline emotional state</span>`;
+      badgesContainer.innerHTML = `<span class="vn-muted" style="padding:4px; grid-column: 1 / -1;">Equilibrium / Baseline emotional state</span>`;
     }
     passionsSection.appendChild(badgesContainer);
     this.root.appendChild(passionsSection);
@@ -304,25 +312,31 @@ export class StatsTab {
     metersContainer.className = "vn-meters-container";
 
     const relMeters = [
-      { label: "Affinity", min: -100, max: 100, val: Number(activeRel.affinity ?? 0) },
-      { label: "Trust", min: -100, max: 100, val: Number(activeRel.trust ?? 0) },
-      { label: "Respect", min: -100, max: 100, val: Number(activeRel.respect ?? 0) },
-      { label: "Attraction", min: -100, max: 100, val: Number(activeRel.attraction ?? 0) },
-      { label: "Fear", min: 0, max: 100, val: Number(activeRel.fear ?? 0) },
-      { label: "Familiarity", min: 0, max: 100, val: Number(activeRel.familiarity ?? 0) },
-      { label: "Attachment", min: 0, max: 100, val: Number(activeRel.attachment ?? 0) },
-      { label: "Grudge", min: 0, max: 100, val: Number(activeRel.grudge ?? 0) },
-      { label: "Loyalty", min: 0, max: 100, val: Number(activeRel.loyalty ?? 0) },
-      { label: "Sacrifice Willingness", min: 0, max: 100, val: Number(activeRel.sacrifice_willingness ?? 0) },
+      { label: "Affinity", icon: "💖", min: -100, max: 100, val: Number(activeRel.affinity ?? 0), gradient: "linear-gradient(90deg, #ec4899, #f43f5e)" },
+      { label: "Trust", icon: "🤝", min: -100, max: 100, val: Number(activeRel.trust ?? 0), gradient: "linear-gradient(90deg, #06b6d4, #3b82f6)" },
+      { label: "Respect", icon: "🛡️", min: -100, max: 100, val: Number(activeRel.respect ?? 0), gradient: "linear-gradient(90deg, #818cf8, #6366f1)" },
+      { label: "Attraction", icon: "🔥", min: -100, max: 100, val: Number(activeRel.attraction ?? 0), gradient: "linear-gradient(90deg, #c084fc, #e11d48)" },
+      { label: "Fear", icon: "😨", min: 0, max: 100, val: Number(activeRel.fear ?? 0), gradient: "linear-gradient(90deg, #6366f1, #312e81)" },
+      { label: "Familiarity", icon: "☕", min: 0, max: 100, val: Number(activeRel.familiarity ?? 0), gradient: "linear-gradient(90deg, #10b981, #14b8a6)" },
+      { label: "Attachment", icon: "🔗", min: 0, max: 100, val: Number(activeRel.attachment ?? 0), gradient: "linear-gradient(90deg, #f59e0b, #d97706)" },
+      { label: "Grudge", icon: "💢", min: 0, max: 100, val: Number(activeRel.grudge ?? 0), gradient: "linear-gradient(90deg, #ef4444, #991b1b)" },
+      { label: "Loyalty", icon: "⚔️", min: 0, max: 100, val: Number(activeRel.loyalty ?? 0), gradient: "linear-gradient(90deg, #f59e0b, #eab308)" },
+      { label: "Sacrifice Willingness", icon: "✨", min: 0, max: 100, val: Number(activeRel.sacrifice_willingness ?? 0), gradient: "linear-gradient(90deg, #38bdf8, #a855f7)" },
     ];
 
     for (const m of relMeters) {
       const pct = m.min < 0 ? Math.max(0, Math.min(100, ((m.val + 100) / 200) * 100)) : Math.max(0, Math.min(100, (m.val / m.max) * 100));
       const row = document.createElement("div");
       row.className = "vn-meter-row";
+      row.style.cssText = "background: #0f172a; border: 1px solid #1e293b; border-radius: 6px; padding: 6px 10px; margin-bottom: 6px;";
       row.innerHTML = `
-        <div class="vn-meter-header"><span>${m.label}</span><span>${m.val}</span></div>
-        <div class="vn-meter-bar-bg"><div class="vn-meter-bar-fill" style="width: ${pct}%"></div></div>
+        <div class="vn-meter-header" style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 11px;">
+          <span style="font-weight: 600; color: #f1f5f9;">${m.icon} ${m.label}</span>
+          <span style="font-weight: 700; color: #cbd5e1;">${m.val > 0 && m.min < 0 ? `+${m.val}` : m.val}</span>
+        </div>
+        <div class="vn-meter-bar-bg" style="background: #1e293b; border-radius: 4px; height: 7px; overflow: hidden;">
+          <div class="vn-meter-bar-fill" style="width: ${pct}%; height: 100%; background: ${m.gradient}; box-shadow: 0 0 6px rgba(255,255,255,0.2); transition: width 0.4s ease;"></div>
+        </div>
       `;
       metersContainer.appendChild(row);
     }

@@ -1,5 +1,5 @@
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
-import type { VnPresentationState } from "../../shared/types.js";
+import type { VnPresentationState, LedgerData } from "../../shared/types.js";
 import { TEXT_EFFECTS_CSS } from "./rich-text.js";
 import { StageRenderer } from "./staging.js";
 import { DialogueBox } from "./dialogue-box.js";
@@ -35,6 +35,7 @@ export class StageOverlay {
   private active = false;
   private lastProcessedEvtId: string | null = null;
   private toastContainer: HTMLElement;
+  private statusPill: HTMLElement;
 
   constructor(options: OverlayOptions) {
     this.ctx = options.ctx;
@@ -97,7 +98,13 @@ export class StageOverlay {
     this.toastContainer = document.createElement("div");
     this.toastContainer.className = "vn-toast-container";
 
+    // Top Status Pill (floating Mini-HUD)
+    this.statusPill = document.createElement("div");
+    this.statusPill.className = "vn-top-status-pill";
+    this.statusPill.style.display = "none";
+
     this.root.appendChild(this.exitButton);
+    this.root.appendChild(this.statusPill);
     this.root.appendChild(this.stageRenderer.root);
     this.root.appendChild(this.dialogueBox.root);
     this.root.appendChild(this.menuBar.root);
@@ -152,6 +159,8 @@ export class StageOverlay {
     this.currentChatId = targetChatId || this.resolveChatId() || null;
     this.ttsEngine.setChatId(this.currentChatId || "");
     this.lastProcessedEvtId = null;
+    this.statusPill.style.display = "none";
+    this.statusPill.innerHTML = "";
     this.dialogueBox.reset();
     this.stageRenderer.reset();
   }
@@ -282,6 +291,7 @@ export class StageOverlay {
 
     this.dialogueBox.setContent(state.speakerName, state.paragraphs, state.messageId);
     this.menuBar.setLedger(state.ledger, state.hasBPlotNotification);
+    this.updateStatusPill(state.ledger);
 
     const newEvts = state.ledger?.journal || [];
     if (newEvts.length > 0) {
@@ -348,6 +358,107 @@ export class StageOverlay {
       this.toastContainer.appendChild(toast);
       setTimeout(() => toast.remove(), 4000);
     }
+  }
+
+  private updateStatusPill(ledger?: LedgerData): void {
+    if (!ledger) {
+      this.statusPill.style.display = "none";
+      return;
+    }
+
+    const clockPhase = ledger.clock?.phase || (ledger.clock as any)?.period;
+    const clockText = ledger.clock
+      ? `${ledger.clock.t || ""}${clockPhase ? ` (${clockPhase})` : ""}`.trim() || ""
+      : "";
+
+    const placeText = ledger.scene?.room || ledger.scene?.place || ledger.scene?.district || "";
+
+    // Count items in carried + hands (checking both ActorInventory and legacy layout)
+    const inv: any = (ledger as any).inventory || ledger.actors?.["user"]?.inventory;
+    let itemCount = 0;
+    if (Array.isArray(inv?.carried)) {
+      itemCount += inv.carried.length;
+    }
+    if (inv?.in_hand?.L && inv.in_hand.L !== "Empty" && inv.in_hand.L !== "none") itemCount++;
+    if (inv?.in_hand?.R && inv.in_hand.R !== "Empty" && inv.in_hand.R !== "none") itemCount++;
+    if (inv?.hands?.left && inv.hands.left !== "Empty" && inv.hands.left !== "none") itemCount++;
+    if (inv?.hands?.right && inv.hands.right !== "Empty" && inv.hands.right !== "none") itemCount++;
+
+    // Find main relation affinity if available
+    let relText = "";
+    if (ledger.relationships) {
+      for (const [targetId, rels] of Object.entries(ledger.relationships)) {
+        if (targetId.toLowerCase() === "user") continue;
+        const affinity = (rels as any).affinity ?? (rels as any).Affinity;
+        if (typeof affinity === "number") {
+          const targetName = ledger.actors?.[targetId]?.name || targetId;
+          relText = `${targetName} ${affinity >= 0 ? "+" : ""}${affinity}`;
+          break;
+        }
+      }
+    }
+
+    if (!clockText && !placeText && !relText && itemCount === 0) {
+      this.statusPill.style.display = "none";
+      return;
+    }
+
+    this.statusPill.innerHTML = "";
+
+    // 1. Clock Pill Item -> opens Scene tab
+    if (clockText) {
+      const clockBtn = document.createElement("button");
+      clockBtn.className = "vn-pill-item";
+      clockBtn.innerHTML = `<span class="vn-pill-icon">⏱️</span><span class="vn-pill-text">${clockText}</span>`;
+      clockBtn.title = "Time & Chronology";
+      clockBtn.addEventListener("click", () => this.menuBar.openTab("scene"));
+      this.statusPill.appendChild(clockBtn);
+    }
+
+    // 2. Place Pill Item -> opens Map
+    if (placeText) {
+      if (this.statusPill.children.length > 0) {
+        const sep = document.createElement("span");
+        sep.className = "vn-pill-sep";
+        this.statusPill.appendChild(sep);
+      }
+      const placeBtn = document.createElement("button");
+      placeBtn.className = "vn-pill-item";
+      placeBtn.innerHTML = `<span class="vn-pill-icon">📍</span><span class="vn-pill-text">${placeText}</span>`;
+      placeBtn.title = "Current Location — Click for Map";
+      placeBtn.addEventListener("click", () => this.menuBar.openTab("map"));
+      this.statusPill.appendChild(placeBtn);
+    }
+
+    // 3. Affinity Pill Item -> opens Stats
+    if (relText) {
+      if (this.statusPill.children.length > 0) {
+        const sep = document.createElement("span");
+        sep.className = "vn-pill-sep";
+        this.statusPill.appendChild(sep);
+      }
+      const relBtn = document.createElement("button");
+      relBtn.className = "vn-pill-item";
+      relBtn.innerHTML = `<span class="vn-pill-icon">💖</span><span class="vn-pill-text">${relText}</span>`;
+      relBtn.title = "Relationship Affinity — Click for Stats";
+      relBtn.addEventListener("click", () => this.menuBar.openTab("stats"));
+      this.statusPill.appendChild(relBtn);
+    }
+
+    // 4. Inventory Pill Item -> opens Inventory
+    if (this.statusPill.children.length > 0) {
+      const sep = document.createElement("span");
+      sep.className = "vn-pill-sep";
+      this.statusPill.appendChild(sep);
+    }
+    const bagBtn = document.createElement("button");
+    bagBtn.className = "vn-pill-item";
+    bagBtn.innerHTML = `<span class="vn-pill-icon">🎒</span><span class="vn-pill-text">${itemCount} item${itemCount === 1 ? "" : "s"}</span>`;
+    bagBtn.title = "Inventory Bag — Click to view items";
+    bagBtn.addEventListener("click", () => this.menuBar.openTab("inventory"));
+    this.statusPill.appendChild(bagBtn);
+
+    this.statusPill.style.display = "flex";
   }
 
   private dispatchAction(actionText: string): void {
@@ -643,6 +754,61 @@ export class StageOverlay {
         transform: translateY(-1px);
       }
 
+      /* Top Status Pill (floating Mini-HUD) */
+      .vn-top-status-pill {
+        position: fixed;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 9999px;
+        padding: 4px 12px;
+        backdrop-filter: blur(14px);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 1px rgba(255, 255, 255, 0.2);
+        max-width: 55vw;
+        overflow-x: auto;
+      }
+      .vn-top-status-pill::-webkit-scrollbar { display: none; }
+      .vn-pill-item {
+        background: transparent;
+        border: none;
+        color: #f1f5f9;
+        font-size: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 9999px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.2s ease;
+      }
+      .vn-pill-item:hover {
+        background: rgba(255, 255, 255, 0.14);
+        color: #38bdf8;
+      }
+      .vn-pill-sep {
+        width: 1px;
+        height: 14px;
+        background: rgba(255, 255, 255, 0.18);
+        margin: 0 2px;
+        flex-shrink: 0;
+      }
+      .vn-pill-icon {
+        font-size: 13px;
+      }
+      .vn-pill-text {
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
       /* HUD Menu Bar */
       .vn-hud-menubar {
         position: fixed;
@@ -697,28 +863,29 @@ export class StageOverlay {
         100% { transform: scale(1); box-shadow: 0 0 4px #f43f5e; }
       }
 
-      /* HUD Modal / Overlay */
+      /* HUD Modal / Overlay (Ren'Py Glassmorphism) */
       .vn-hud-overlay {
         position: fixed;
         inset: 0;
         z-index: 99998;
-        background: rgba(0, 0, 0, 0.7);
-        backdrop-filter: blur(6px);
+        background: rgba(0, 0, 0, 0.72);
+        backdrop-filter: blur(8px);
         display: flex;
         align-items: center;
         justify-content: center;
       }
       .vn-hud-modal {
-        background: #0f172a;
-        border: 1px solid #334155;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.16);
         border-radius: 20px;
-        width: min(720px, 94%);
-        max-height: 82vh;
+        width: min(780px, 94%);
+        max-height: 84vh;
         display: flex;
         flex-direction: column;
         overflow: hidden;
         position: relative;
-        box-shadow: 0 24px 60px rgba(0,0,0,0.9);
+        backdrop-filter: blur(24px);
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85), 0 0 1px rgba(255, 255, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
       }
       .vn-hud-close-btn {
         position: absolute;
@@ -781,6 +948,26 @@ export class StageOverlay {
       .vn-btn-danger:hover { background: #be123c; }
 
       /* Wardrobe Grid */
+      .vn-wardrobe-status-bar {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 10px 14px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        margin-bottom: 16px;
+      }
+      .vn-wardrobe-status-item {
+        font-size: 13px;
+        color: #94a3b8;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .vn-wardrobe-status-item strong {
+        color: #f8fafc;
+      }
       .vn-wardrobe-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));

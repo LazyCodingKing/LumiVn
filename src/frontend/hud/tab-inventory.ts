@@ -1,5 +1,20 @@
 import type { LedgerData, ActorInventory } from "../../shared/types.js";
 
+function getItemIcon(itemName: string): string {
+  const norm = itemName.toLowerCase();
+  if (norm.includes("sword") || norm.includes("blade") || norm.includes("katana") || norm.includes("knife") || norm.includes("dagger") || norm.includes("weapon") || norm.includes("gun")) return "🗡️";
+  if (norm.includes("phone") || norm.includes("smartphone") || norm.includes("device") || norm.includes("terminal")) return "📱";
+  if (norm.includes("key") || norm.includes("card") || norm.includes("pass")) return "🔑";
+  if (norm.includes("potion") || norm.includes("medicine") || norm.includes("pill") || norm.includes("aid") || norm.includes("bandage")) return "💊";
+  if (norm.includes("book") || norm.includes("letter") || norm.includes("note") || norm.includes("scroll") || norm.includes("diary")) return "📜";
+  if (norm.includes("food") || norm.includes("apple") || norm.includes("snack") || norm.includes("bento") || norm.includes("bread")) return "🥪";
+  if (norm.includes("drink") || norm.includes("water") || norm.includes("tea") || norm.includes("coffee") || norm.includes("soda") || norm.includes("bottle")) return "☕";
+  if (norm.includes("ring") || norm.includes("necklace") || norm.includes("amulet") || norm.includes("badge") || norm.includes("ribbon")) return "💍";
+  if (norm.includes("wallet") || norm.includes("money") || norm.includes("coin") || norm.includes("cash") || norm.includes("gold")) return "💰";
+  if (norm.includes("bag") || norm.includes("backpack") || norm.includes("case") || norm.includes("pouch")) return "🎒";
+  return "📦";
+}
+
 export class InventoryTab {
   public root: HTMLElement;
   private onAction: (actionText: string) => void;
@@ -27,25 +42,31 @@ export class InventoryTab {
     header.innerHTML = `<h3>🎒 Inventory & Containers — ${actor?.name || actorId}</h3>`;
     this.root.appendChild(header);
 
-    // In Hands
+    // 1. In Hands (Hero Slots)
     const handsSection = document.createElement("div");
     handsSection.className = "vn-section";
-    handsSection.innerHTML = `<h4>In Hands</h4>`;
+    handsSection.innerHTML = `<h4>✋ In Hands</h4>`;
     const handsGrid = document.createElement("div");
-    handsGrid.className = "vn-hands-grid";
+    handsGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px;";
 
     for (const hand of ["L", "R"] as const) {
       const item = inv.in_hand?.[hand] || "Empty";
       const isEmpty = item.toLowerCase() === "empty";
       const card = document.createElement("div");
-      card.className = "vn-item-card";
+      card.style.cssText = `background: #0f172a; border: 1px solid ${isEmpty ? "#334155" : "#6366f1"}; border-radius: 8px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; box-shadow: ${isEmpty ? "none" : "0 0 10px rgba(99,102,241,0.2)"};`;
       card.innerHTML = `
-        <div class="vn-item-title">${hand === "L" ? "Left Hand" : "Right Hand"}</div>
-        <div class="vn-item-desc">${item}</div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 22px;">${isEmpty ? "✋" : getItemIcon(item)}</span>
+          <div>
+            <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">${hand === "L" ? "Left Hand" : "Right Hand"}</div>
+            <div style="font-size: 13px; font-weight: 700; color: ${isEmpty ? "#64748b" : "#f8fafc"};">${item}</div>
+          </div>
+        </div>
       `;
       if (!isEmpty) {
         const btn = document.createElement("button");
         btn.className = "vn-btn vn-btn-sm vn-btn-warning";
+        btn.style.cssText = "padding: 4px 10px; font-size: 11px; cursor: pointer;";
         btn.textContent = "Stow";
         btn.addEventListener("click", () => {
           this.onAction(`*Stows ${item} from ${hand === "L" ? "left" : "right"} hand*`);
@@ -57,83 +78,77 @@ export class InventoryTab {
     handsSection.appendChild(handsGrid);
     this.root.appendChild(handsSection);
 
-    // Carried Items
+    // 2. Carried Items (RPG Card Grid)
     const carriedSection = document.createElement("div");
     carriedSection.className = "vn-section";
-    carriedSection.innerHTML = `<h4>Carried (${inv.carried?.length || 0})</h4>`;
-    const carriedList = document.createElement("div");
-    carriedList.className = "vn-items-list";
+    carriedSection.innerHTML = `<h4>🎒 Carried Backpack (${inv.carried?.length || 0})</h4>`;
+    const carriedGrid = document.createElement("div");
+    carriedGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;";
 
     if (!inv.carried || inv.carried.length === 0) {
-      carriedList.innerHTML = `<div class="vn-muted">Nothing carried.</div>`;
+      carriedGrid.innerHTML = `<div class="vn-muted" style="grid-column: 1 / -1; padding: 12px; text-align: center; background: #0f172a; border-radius: 8px; border: 1px dashed #334155;">Backpack is empty.</div>`;
     } else {
       for (const item of inv.carried) {
-        const row = document.createElement("div");
-        row.className = "vn-item-row";
-        row.innerHTML = `<span class="vn-item-name">${item}</span>`;
+        const card = document.createElement("div");
+        card.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; transition: border-color 0.15s ease;";
+        card.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 20px;">${getItemIcon(item)}</span>
+            <span style="font-size: 12px; font-weight: 600; color: #f8fafc; word-break: break-word; line-height: 1.3;">${item}</span>
+          </div>
+          <div style="display: flex; gap: 4px; margin-top: auto; padding-top: 6px; border-top: 1px solid #1e293b;">
+            <button class="vn-btn vn-btn-sm vn-btn-primary vn-equip-btn" style="flex: 1; padding: 3px 0; font-size: 10px; font-weight: 600;">Equip</button>
+            <button class="vn-btn vn-btn-sm vn-btn-secondary vn-use-btn" style="flex: 1; padding: 3px 0; font-size: 10px; font-weight: 600;">Use</button>
+            <button class="vn-btn vn-btn-sm vn-btn-danger vn-drop-btn" style="padding: 3px 6px; font-size: 10px;" title="Drop">✕</button>
+          </div>
+        `;
 
-        const actions = document.createElement("div");
-        actions.className = "vn-item-row-actions";
-
-        const equipBtn = document.createElement("button");
-        equipBtn.className = "vn-btn vn-btn-sm vn-btn-primary";
-        equipBtn.textContent = "Equip";
-        equipBtn.addEventListener("click", () => {
+        card.querySelector(".vn-equip-btn")?.addEventListener("click", () => {
           this.onAction(`*Equips ${item} in hand*`);
         });
-
-        const useBtn = document.createElement("button");
-        useBtn.className = "vn-btn vn-btn-sm vn-btn-secondary";
-        useBtn.textContent = "Use";
-        useBtn.addEventListener("click", () => {
+        card.querySelector(".vn-use-btn")?.addEventListener("click", () => {
           this.onAction(`*Uses ${item}*`);
         });
-
-        const dropBtn = document.createElement("button");
-        dropBtn.className = "vn-btn vn-btn-sm vn-btn-danger";
-        dropBtn.textContent = "Drop";
-        dropBtn.addEventListener("click", () => {
+        card.querySelector(".vn-drop-btn")?.addEventListener("click", () => {
           this.onAction(`*Drops ${item} on the ground*`);
         });
 
-        actions.appendChild(equipBtn);
-        actions.appendChild(useBtn);
-        actions.appendChild(dropBtn);
-        row.appendChild(actions);
-        carriedList.appendChild(row);
+        carriedGrid.appendChild(card);
       }
     }
-    carriedSection.appendChild(carriedList);
+    carriedSection.appendChild(carriedGrid);
     this.root.appendChild(carriedSection);
 
-    // Room Container
+    // 3. Room Container
     const roomSection = document.createElement("div");
     roomSection.className = "vn-section";
     const roomLoc = inv.room_location ? ` (${inv.room_location})` : "";
-    roomSection.innerHTML = `<h4>Room Container${roomLoc}</h4>`;
-    const roomList = document.createElement("div");
-    roomList.className = "vn-items-list";
+    roomSection.innerHTML = `<h4>📦 Room Container${roomLoc}</h4>`;
+    const roomGrid = document.createElement("div");
+    roomGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;";
 
     if (!inv.room || inv.room.length === 0) {
-      roomList.innerHTML = `<div class="vn-muted">Container is empty.</div>`;
+      roomGrid.innerHTML = `<div class="vn-muted" style="grid-column: 1 / -1; padding: 12px; text-align: center; background: #0f172a; border-radius: 8px; border: 1px dashed #334155;">Container is empty.</div>`;
     } else {
       for (const item of inv.room) {
-        const row = document.createElement("div");
-        row.className = "vn-item-row";
-        row.innerHTML = `<span class="vn-item-name">${item}</span>`;
+        const card = document.createElement("div");
+        card.style.cssText = "background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px;";
+        card.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 18px;">${getItemIcon(item)}</span>
+            <span style="font-size: 12px; font-weight: 600; color: #cbd5e1; word-break: break-word;">${item}</span>
+          </div>
+          <button class="vn-btn vn-btn-sm vn-btn-primary vn-take-btn" style="padding: 3px 8px; font-size: 10px; font-weight: 600;">Take</button>
+        `;
 
-        const takeBtn = document.createElement("button");
-        takeBtn.className = "vn-btn vn-btn-sm vn-btn-primary";
-        takeBtn.textContent = "Take";
-        takeBtn.addEventListener("click", () => {
+        card.querySelector(".vn-take-btn")?.addEventListener("click", () => {
           this.onAction(`*Takes ${item} from container*`);
         });
 
-        row.appendChild(takeBtn);
-        roomList.appendChild(row);
+        roomGrid.appendChild(card);
       }
     }
-    roomSection.appendChild(roomList);
+    roomSection.appendChild(roomGrid);
     this.root.appendChild(roomSection);
   }
 }

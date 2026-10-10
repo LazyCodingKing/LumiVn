@@ -1,9 +1,10 @@
-import type { LedgerData, PlaceRoute, PlaceNode } from "../../shared/types.js";
+import type { LedgerData, PlaceRoute, PlaceNode, AssetManifest, RosterCharacter } from "../../shared/types.js";
 
 export class MapTab {
   public root: HTMLElement;
   private onAction: (actionText: string) => void;
   private viewMode: "indoor" | "outdoor" = "indoor";
+  private manifest?: AssetManifest;
 
   // Pan & Zoom state
   private zoom = 1.0;
@@ -20,7 +21,8 @@ export class MapTab {
     this.root.className = "vn-hud-tab vn-tab-map";
   }
 
-  public render(ledger: LedgerData): void {
+  public render(ledger: LedgerData, manifest?: AssetManifest): void {
+    if (manifest) this.manifest = manifest;
     this.root.innerHTML = "";
     const currentPlace = (ledger.scene?.place || "default").toLowerCase();
     const isIndoor = currentPlace.includes(":") || currentPlace.includes("residence") || currentPlace.includes("dojo") || currentPlace.includes("room") || currentPlace.includes("foyer");
@@ -509,10 +511,28 @@ export class MapTab {
     const isGated = Boolean(route?.why_not || (route?.requires && Object.keys(route.requires).length > 0));
     const whyNot = route?.why_not;
 
-    // Presence in selected node
-    const npcsHere = (ledger.roster || []).filter((r) => (r.loc || "").toLowerCase().includes(cleanName.toLowerCase()));
+    const placeThumbnail =
+      this.manifest?.places?.[selected] ||
+      this.manifest?.places?.[cleanName] ||
+      this.manifest?.places?.[selected.toLowerCase()] ||
+      this.manifest?.places?.[cleanName.toLowerCase()] ||
+      "";
+
+    const npcsHere = (ledger.roster || []).filter((r: RosterCharacter) => {
+      const loc = (r.loc || "").toLowerCase();
+      return (
+        loc === selected.toLowerCase() ||
+        loc === cleanName.toLowerCase() ||
+        loc.includes(cleanName.toLowerCase())
+      );
+    });
 
     sidebar.innerHTML = `
+      ${placeThumbnail ? `
+        <div style="width: 100%; height: 110px; border-radius: 8px; overflow: hidden; margin-bottom: 8px; border: 1px solid #334155; position: relative; background: #070d19;">
+          <img src="${placeThumbnail}" style="width: 100%; height: 100%; object-fit: cover;" alt="${cleanName}" />
+        </div>
+      ` : ''}
       <div style="border-bottom: 1px solid #334155; padding-bottom: 8px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <h4 style="margin: 0; font-size: 13px; color: #38bdf8; text-transform: uppercase;">
@@ -569,12 +589,22 @@ export class MapTab {
         <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px;">Present Cast (${npcsHere.length})</div>
         <div style="display: flex; flex-direction: column; gap: 4px;">
           ${npcsHere.length > 0
-            ? npcsHere.map((n) => `
-                <div style="background: #1e293b; padding: 4px 8px; border-radius: 4px; font-size: 11px; display: flex; justify-content: space-between;">
-                  <span style="color: #c7d2fe; font-weight: 600;">${n.name || n.id}</span>
-                  <span style="color: #94a3b8; font-size: 10px;">${n.posture || n.activity || "Idle"}</span>
-                </div>
-              `).join("")
+            ? npcsHere.map((n) => {
+                const normId = (n.id || "").toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+                const charData = this.manifest?.characters?.[normId];
+                const outfits = charData?.outfits || (charData as any);
+                const defaultSet = outfits?.["default"] || (outfits ? Object.values(outfits)[0] : undefined);
+                const avatar = defaultSet?.["neutral"] || (defaultSet ? Object.values(defaultSet)[0] : "") || "";
+                return `
+                  <div style="background: #1e293b; padding: 4px 8px; border-radius: 6px; font-size: 11px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      ${avatar ? `<img src="${avatar}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" alt="" />` : '<span>👤</span>'}
+                      <span style="color: #c7d2fe; font-weight: 600;">${n.name || n.id}</span>
+                    </div>
+                    <span style="color: #94a3b8; font-size: 10px;">${n.posture || n.activity || "Idle"}</span>
+                  </div>
+                `;
+              }).join("")
             : '<span style="color: #64748b; font-size: 11px;">No detected actors</span>'
           }
         </div>
