@@ -113,6 +113,14 @@ export class StageOverlay {
     this.root.appendChild(this.toastContainer);
 
     this.injectStyles();
+
+    // Autoplay unlocker on user gesture
+    this.root.addEventListener("click", () => {
+      this.audioEngine.unlockAudio();
+    });
+    this.root.addEventListener("keydown", () => {
+      this.audioEngine.unlockAudio();
+    });
     applyVnTheme(this.root, "default");
   }
 
@@ -279,9 +287,21 @@ export class StageOverlay {
     this.stageRenderer.setBackground(state.background);
     this.stageRenderer.setCharacters(state.characters);
 
+    // Dynamic Cinema Animations & Shader Toggles
+    if (typeof localStorage !== "undefined" && localStorage.getItem("vn_cinema_animations_enabled") === "false") {
+      this.root.classList.add("vn-no-cinema-anim");
+    } else {
+      this.root.classList.remove("vn-no-cinema-anim");
+    }
+
     // Weather / particle ambience from ledger place
     const place = state.ledger?.scene?.place || "";
-    this.stageRenderer.setWeather(place);
+    if (typeof localStorage !== "undefined" && localStorage.getItem("vn_shaders_enabled") === "false") {
+      this.stageRenderer.particleEngine.canvas.style.display = "none";
+    } else {
+      this.stageRenderer.particleEngine.canvas.style.display = "block";
+      this.stageRenderer.setWeather(place);
+    }
 
     // Dynamic BGM handling (explicit track URL, inline [Music: ...]/🎵 tags, or mood/place mapping)
     if (state.bgmUrl) {
@@ -572,14 +592,32 @@ export class StageOverlay {
         padding-bottom: 90px;
         pointer-events: none;
       }
-      @keyframes vn-char-slide-in {
+      @keyframes portraitSlideIn {
         from {
           opacity: 0;
-          transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) + 20px)) scale(calc(var(--char-scale, 1) * 0.96));
+          transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) + 50px)) scale(calc(var(--char-scale, 1) * 0.94));
         }
         to {
           opacity: 1;
           transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1));
+        }
+      }
+      @keyframes vn-speaker-bob {
+        0%, 100% {
+          transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 8px)) scale(calc(var(--char-scale, 1) * 1.05));
+        }
+        50% {
+          transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 16px)) scale(calc(var(--char-scale, 1) * 1.07));
+        }
+      }
+      @keyframes namePulse {
+        0%, 100% {
+          transform: translateX(-50%) translateY(0) scale(1);
+          box-shadow: 0 0 10px rgba(129, 140, 248, 0.4);
+        }
+        50% {
+          transform: translateX(-50%) translateY(-2px) scale(1.05);
+          box-shadow: 0 0 20px rgba(129, 140, 248, 0.8), 0 0 10px #ffd700;
         }
       }
 
@@ -593,13 +631,14 @@ export class StageOverlay {
         transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1));
         transform-origin: bottom center;
         transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), filter 0.35s ease, opacity 0.35s ease;
-        animation: vn-char-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+        animation: portraitSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
         animation-delay: var(--enter-delay, 0s);
         pointer-events: auto;
         cursor: pointer;
       }
       .vn-char-slot:hover {
-        transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 6px)) scale(calc(var(--char-scale, 1) * 1.02));
+        transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 12px)) scale(calc(var(--char-scale, 1) * 1.08));
+        filter: drop-shadow(0 0 20px rgba(250, 204, 21, 0.6)) drop-shadow(0 12px 24px rgba(0,0,0,0.8));
         z-index: 6;
       }
       .vn-char-slot:hover .vn-char-tag {
@@ -627,16 +666,34 @@ export class StageOverlay {
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
       }
       .vn-char-speaker {
-        transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 6px)) scale(calc(var(--char-scale, 1) * 1.04));
         z-index: 5;
-        filter: drop-shadow(0 0 16px rgba(129, 140, 248, 0.45)) drop-shadow(0 10px 20px rgba(0,0,0,0.6));
+        filter: drop-shadow(0 0 18px rgba(129, 140, 248, 0.55)) drop-shadow(0 12px 24px rgba(0,0,0,0.6));
         opacity: 1;
+        animation: vn-speaker-bob 2.2s ease-in-out infinite;
+      }
+      .vn-char-speaker .vn-char-tag {
+        opacity: 1;
+        color: #ffd700;
+        border-color: #ffd700;
+        background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95));
+        animation: namePulse 1.2s ease-in-out infinite;
+        font-size: 12px;
       }
       .vn-char-inactive {
-        transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(calc(var(--char-scale, 1) * 0.98));
+        transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(calc(var(--char-scale, 1) * 0.96));
         z-index: 2;
-        filter: drop-shadow(0 8px 16px rgba(0,0,0,0.7)) brightness(0.88) saturate(0.92);
-        opacity: 1;
+        filter: drop-shadow(0 8px 16px rgba(0,0,0,0.7)) brightness(0.75) saturate(0.85);
+        opacity: 0.78;
+      }
+      .vn-no-cinema-anim .vn-char-speaker {
+        animation: none !important;
+        transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 6px)) scale(calc(var(--char-scale, 1) * 1.04));
+      }
+      .vn-no-cinema-anim .vn-char-slot {
+        animation: none !important;
+      }
+      .vn-no-cinema-anim .vn-char-speaker .vn-char-tag {
+        animation: none !important;
       }
       .vn-char-far-left { order: 1; }
       .vn-char-left { order: 2; }

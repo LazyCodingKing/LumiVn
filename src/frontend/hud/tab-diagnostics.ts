@@ -292,7 +292,7 @@ export class DiagnosticsTab {
       </div>
 
       <div id="vn-rb-panel-tabs" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
-        <div style="font-size: 11px; color: #cbd5e1;">Toggle which tabs appear on the bottom Game HUD Menu Bar:</div>
+        <div style="font-size: 11px; color: #cbd5e1; font-weight: 700;">Toggle which tabs appear on the bottom Game HUD Menu Bar:</div>
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px;">
           ${ALL_HUD_TABS.filter((t) => t.id !== "diagnostics").map((tabItem) => `
             <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
@@ -300,6 +300,28 @@ export class DiagnosticsTab {
               <span>${tabItem.icon}</span> <span>${tabItem.label}</span>
             </label>
           `).join("")}
+        </div>
+
+        <div style="border-top: 1px solid #334155; margin-top: 8px; padding-top: 8px;">
+          <div style="font-size: 11px; color: #38bdf8; font-weight: 700; margin-bottom: 6px;">Cinema & Stage Engine Toggles:</div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
+              <input type="checkbox" id="vn-hud-toggle-cinema-anim" checked style="accent-color: #6366f1; cursor: pointer;" />
+              <span>🎬 Cinema Sprite Movement & Speaking Bob</span>
+            </label>
+            <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
+              <input type="checkbox" id="vn-hud-toggle-card-sprites" checked style="accent-color: #6366f1; cursor: pointer;" />
+              <span>🎭 Character Expressions Auto-Sync (Card Sprites)</span>
+            </label>
+            <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
+              <input type="checkbox" id="vn-hud-toggle-bgm" checked style="accent-color: #6366f1; cursor: pointer;" />
+              <span>🎵 Ambient BGM & Procedural Chords</span>
+            </label>
+            <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
+              <input type="checkbox" id="vn-hud-toggle-shaders" checked style="accent-color: #6366f1; cursor: pointer;" />
+              <span>🌧️ Atmospheric Weather & Shaders</span>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -415,6 +437,42 @@ export class DiagnosticsTab {
         this.menuBar?.setVisibleTabs?.(checkedList);
       });
     });
+
+    // Engine toggle checkboxes handling
+    const cinemaAnimCb = rulesCard.querySelector<HTMLInputElement>("#vn-hud-toggle-cinema-anim");
+    if (cinemaAnimCb) {
+      cinemaAnimCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_cinema_animations_enabled") !== "false" : true;
+      cinemaAnimCb.addEventListener("change", () => {
+        if (typeof localStorage !== "undefined") localStorage.setItem("vn_cinema_animations_enabled", String(cinemaAnimCb.checked));
+        document.querySelector(".vn-stage-overlay")?.classList.toggle("vn-no-cinema-anim", !cinemaAnimCb.checked);
+      });
+    }
+
+    const cardSpritesCb = rulesCard.querySelector<HTMLInputElement>("#vn-hud-toggle-card-sprites");
+    if (cardSpritesCb) {
+      cardSpritesCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_card_sprites_enabled") !== "false" : true;
+      cardSpritesCb.addEventListener("change", () => {
+        if (typeof localStorage !== "undefined") localStorage.setItem("vn_card_sprites_enabled", String(cardSpritesCb.checked));
+      });
+    }
+
+    const bgmCb = rulesCard.querySelector<HTMLInputElement>("#vn-hud-toggle-bgm");
+    if (bgmCb) {
+      bgmCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_bgm_enabled") !== "false" : true;
+      bgmCb.addEventListener("change", () => {
+        if (typeof localStorage !== "undefined") localStorage.setItem("vn_bgm_enabled", String(bgmCb.checked));
+      });
+    }
+
+    const shadersCb = rulesCard.querySelector<HTMLInputElement>("#vn-hud-toggle-shaders");
+    if (shadersCb) {
+      shadersCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_shaders_enabled") !== "false" : true;
+      shadersCb.addEventListener("change", () => {
+        if (typeof localStorage !== "undefined") localStorage.setItem("vn_shaders_enabled", String(shadersCb.checked));
+        const canvas = document.querySelector<HTMLCanvasElement>(".vn-stage canvas");
+        if (canvas) canvas.style.display = shadersCb.checked ? "block" : "none";
+      });
+    }
 
     if (!this.statRulesSettings) {
       this.ctx?.sendToBackend?.({ type: "vn_get_stat_rules_settings" });

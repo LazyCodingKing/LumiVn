@@ -1,14 +1,63 @@
 export type SoundEffectType = "click" | "type" | "page" | "impact" | "chime";
 
+export const LOCAL_AUDIO_MAP: Record<string, string> = {
+  calm_ambient: "/data/audio/bgm/bgm_peaceful_day.mp3",
+  peaceful: "/data/audio/bgm/bgm_peaceful_day.mp3",
+  daily_ambient: "/data/audio/bgm/bgm_peaceful_day.mp3",
+  ambient: "/data/audio/bgm/bgm_peaceful_day.mp3",
+  melancholy_strings: "/data/audio/bgm/bgm_piano_melancholy.mp3",
+  sad: "/data/audio/bgm/bgm_piano_melancholy.mp3",
+  grief: "/data/audio/bgm/bgm_piano_melancholy.mp3",
+  combat_intense: "/data/audio/bgm/bgm_tension_dramatic.mp3",
+  combat: "/data/audio/bgm/bgm_tension_dramatic.mp3",
+  action: "/data/audio/bgm/bgm_tension_dramatic.mp3",
+  danger: "/data/audio/bgm/bgm_tension_dramatic.mp3",
+  mystery_ambient: "/data/audio/bgm/bgm_night_ambient.mp3",
+  mystery: "/data/audio/bgm/bgm_night_ambient.mp3",
+  night: "/data/audio/bgm/bgm_night_ambient.mp3",
+  climax: "/data/audio/bgm/bgm_climax_emotional.mp3",
+  menu: "/data/audio/bgm/bgm_menu_theme.mp3",
+};
+
 export class VnAudioEngine {
   private audioCtx: AudioContext | null = null;
   private bgmAudio: HTMLAudioElement | null = null;
+  private proceduralNodes: { oscillators: any[]; gain: any } | null = null;
   private sfxVolume = 0.5;
   private bgmVolume = 0.4;
   private isMuted = false;
 
   constructor() {
     // AudioContext will be lazily initialized on first user gesture
+  }
+
+  public isBgmEnabled(): boolean {
+    if (typeof localStorage !== "undefined") {
+      const val = localStorage.getItem("vn_bgm_enabled");
+      if (val !== null) return val !== "false";
+    }
+    return true;
+  }
+
+  public setBgmEnabled(enabled: boolean): void {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("vn_bgm_enabled", String(enabled));
+    }
+    if (!enabled) {
+      this.stopBgm();
+    } else {
+      this.toggleBgm();
+    }
+  }
+
+  public unlockAudio(): void {
+    const ctx = this.getContext();
+    if (ctx && ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+    if (this.bgmAudio && this.bgmAudio.paused && !this.isMuted && this.isBgmEnabled()) {
+      this.bgmAudio.play().catch(() => {});
+    }
   }
 
   private getContext(): AudioContext | null {
@@ -29,6 +78,9 @@ export class VnAudioEngine {
     if (this.bgmAudio) {
       this.bgmAudio.muted = muted;
     }
+    if (muted) {
+      this.stopProceduralBgm();
+    }
   }
 
   public toggleMute(): boolean {
@@ -37,22 +89,21 @@ export class VnAudioEngine {
   }
 
   public isBgmActive(): boolean {
-    return Boolean(this.bgmAudio && !this.bgmAudio.paused && !this.bgmAudio.muted && !this.isMuted);
+    return Boolean(
+      ((this.bgmAudio && !this.bgmAudio.paused && !this.bgmAudio.muted) || this.proceduralNodes) &&
+      !this.isMuted &&
+      this.isBgmEnabled()
+    );
   }
 
   public toggleBgm(): boolean {
     if (this.isBgmActive()) {
-      if (this.bgmAudio) this.bgmAudio.pause();
+      this.stopBgm();
       return false;
     }
     this.isMuted = false;
-    if (this.bgmAudio) {
-      this.bgmAudio.muted = false;
-      this.bgmAudio.play().catch(() => {});
-      return true;
-    }
     const defaultTrack = this.currentBgmTrack || "peaceful";
-    const url = this.customBgmMap[defaultTrack] || defaultTrack;
+    const url = this.customBgmMap[defaultTrack] || LOCAL_AUDIO_MAP[defaultTrack] || defaultTrack;
     this.playBgm(url, defaultTrack);
     return true;
   }
@@ -345,30 +396,104 @@ export class VnAudioEngine {
     return null;
   }
 
+  public startProceduralBgm(theme = "calm_ambient"): void {
+    if (this.isMuted || !this.isBgmEnabled()) return;
+    this.stopProceduralBgm();
+    const ctx = this.getContext();
+    if (!ctx) return;
+    try {
+      const chordSets: Record<string, number[]> = {
+        combat_intense: [110, 130.81, 164.81, 220],
+        melancholy_strings: [146.83, 174.61, 220, 261.63],
+        mystery_ambient: [130.81, 155.56, 196, 233.08],
+        calm_ambient: [220, 277.18, 329.63, 440],
+        daily_ambient: [261.63, 329.63, 392, 523.25],
+        default: [220, 277.18, 329.63, 440],
+      };
+      const freqs = chordSets[theme] || chordSets.default!;
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.06 * this.bgmVolume, ctx.currentTime);
+      masterGain.connect(ctx.destination);
+      const oscillators: any[] = [];
+      freqs.forEach((f, i) => {
+        const osc = ctx.createOscillator();
+        osc.type = i % 2 === 0 ? "sine" : "triangle";
+        osc.frequency.setValueAtTime(f, ctx.currentTime);
+        const filter = ctx.createBiquadFilter();
+        filter.type = "lowpass";
+        filter.frequency.setValueAtTime(500 + i * 80, ctx.currentTime);
+        osc.connect(filter);
+        filter.connect(masterGain);
+        osc.start();
+        oscillators.push(osc);
+      });
+      this.proceduralNodes = { oscillators, gain: masterGain };
+    } catch {}
+  }
+
+  public stopProceduralBgm(): void {
+    if (this.proceduralNodes) {
+      try {
+        const { oscillators, gain } = this.proceduralNodes;
+        oscillators.forEach((osc) => {
+          try {
+            osc.stop();
+            osc.disconnect();
+          } catch {}
+        });
+        gain.disconnect();
+      } catch {}
+      this.proceduralNodes = null;
+    }
+  }
+
   public playBgm(url: string, trackName?: string): void {
-    if (!url) {
+    if (!url || !this.isBgmEnabled()) {
       this.stopBgm();
       return;
     }
 
     const trackId = trackName || url;
-    if (this.currentBgmTrack === trackId && this.bgmAudio && !this.bgmAudio.paused) {
+    if (this.currentBgmTrack === trackId && ((this.bgmAudio && !this.bgmAudio.paused) || this.proceduralNodes)) {
       return;
     }
 
     this.stopBgm();
     this.currentBgmTrack = trackId;
 
-    try {
-      this.bgmAudio = new Audio(url);
-      this.bgmAudio.loop = true;
-      this.bgmAudio.volume = this.bgmVolume;
-      this.bgmAudio.muted = this.isMuted;
-      this.bgmAudio.play().catch(() => {});
-    } catch {}
+    const realUrl = LOCAL_AUDIO_MAP[url] || this.customBgmMap[url] || (LOCAL_AUDIO_MAP[trackId] || url);
+    const isDirectAudio = /^(?:https?:\/\/|\/|data:|blob:|file:)/i.test(realUrl);
+
+    if (isDirectAudio) {
+      try {
+        const audio = new Audio(realUrl);
+        audio.loop = true;
+        audio.volume = this.bgmVolume;
+        audio.muted = this.isMuted;
+        this.bgmAudio = audio;
+        audio.onplay = () => this.stopProceduralBgm();
+        audio.onerror = () => {
+          this.startProceduralBgm(trackId);
+        };
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {
+            this.startProceduralBgm(trackId);
+          });
+        }
+        return;
+      } catch {
+        this.startProceduralBgm(trackId);
+        return;
+      }
+    }
+
+    // Abstract track keyword fallback -> procedural synth
+    this.startProceduralBgm(trackId);
   }
 
   public stopBgm(): void {
+    this.stopProceduralBgm();
     if (this.bgmAudio) {
       try {
         this.bgmAudio.pause();

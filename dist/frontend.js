@@ -935,7 +935,12 @@ class StageRenderer {
       }
       const nameTag = document.createElement("span");
       nameTag.className = "vn-char-tag";
-      nameTag.textContent = char.name;
+      const moodIcon = char.emotion === "happy" || char.emotion === "smile" ? "\uD83D\uDE0A" : char.emotion === "angry" || char.emotion === "rage" ? "\uD83D\uDCA2" : char.emotion === "sad" || char.emotion === "crying" ? "\uD83D\uDE22" : char.emotion === "blush" || char.emotion === "embarrassed" ? "\uD83D\uDE33" : char.emotion === "scared" || char.emotion === "fear" ? "\uD83D\uDE28" : "✨";
+      if (char.isSpeaker) {
+        nameTag.textContent = `\uD83C\uDF99️ ${char.name} ${moodIcon} \uD83C\uDF99️`;
+      } else {
+        nameTag.textContent = `${char.name} ${moodIcon}`;
+      }
       slotEl.appendChild(nameTag);
       const touchOverlay = document.createElement("div");
       touchOverlay.className = "vn-touch-overlay";
@@ -1013,12 +1018,17 @@ class StageRenderer {
         slotEl.classList.remove("vn-char-inactive");
       } else {
         const isSpeaking = isActorMatch(normSpeaker, actorId, actorName);
+        const nameTag = slotEl.querySelector(".vn-char-tag");
         if (isSpeaking) {
           slotEl.classList.remove("vn-char-inactive");
           slotEl.classList.add("vn-char-speaker");
+          if (nameTag)
+            nameTag.textContent = `\uD83C\uDF99️ ${actorName} \uD83C\uDF99️`;
         } else {
           slotEl.classList.remove("vn-char-speaker");
           slotEl.classList.add("vn-char-inactive");
+          if (nameTag)
+            nameTag.textContent = actorName;
         }
       }
     });
@@ -12034,7 +12044,7 @@ ${note.directorNote}`;
       </div>
 
       <div id="vn-rb-panel-tabs" class="vn-rb-panel" style="display: none; flex-direction: column; gap: 8px;">
-        <div style="font-size: 11px; color: #cbd5e1;">Toggle which tabs appear on the bottom Game HUD Menu Bar:</div>
+        <div style="font-size: 11px; color: #cbd5e1; font-weight: 700;">Toggle which tabs appear on the bottom Game HUD Menu Bar:</div>
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px;">
           ${ALL_HUD_TABS.filter((t) => t.id !== "diagnostics").map((tabItem) => `
             <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
@@ -12042,6 +12052,28 @@ ${note.directorNote}`;
               <span>${tabItem.icon}</span> <span>${tabItem.label}</span>
             </label>
           `).join("")}
+        </div>
+
+        <div style="border-top: 1px solid #334155; margin-top: 8px; padding-top: 8px;">
+          <div style="font-size: 11px; color: #38bdf8; font-weight: 700; margin-bottom: 6px;">Cinema & Stage Engine Toggles:</div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
+              <input type="checkbox" id="vn-hud-toggle-cinema-anim" checked style="accent-color: #6366f1; cursor: pointer;" />
+              <span>\uD83C\uDFAC Cinema Sprite Movement & Speaking Bob</span>
+            </label>
+            <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
+              <input type="checkbox" id="vn-hud-toggle-card-sprites" checked style="accent-color: #6366f1; cursor: pointer;" />
+              <span>\uD83C\uDFAD Character Expressions Auto-Sync (Card Sprites)</span>
+            </label>
+            <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
+              <input type="checkbox" id="vn-hud-toggle-bgm" checked style="accent-color: #6366f1; cursor: pointer;" />
+              <span>\uD83C\uDFB5 Ambient BGM & Procedural Chords</span>
+            </label>
+            <label style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; color: #f8fafc;">
+              <input type="checkbox" id="vn-hud-toggle-shaders" checked style="accent-color: #6366f1; cursor: pointer;" />
+              <span>\uD83C\uDF27️ Atmospheric Weather & Shaders</span>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -12166,6 +12198,42 @@ ${note.directorNote}`;
         this.menuBar?.setVisibleTabs?.(checkedList);
       });
     });
+    const cinemaAnimCb = rulesCard.querySelector("#vn-hud-toggle-cinema-anim");
+    if (cinemaAnimCb) {
+      cinemaAnimCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_cinema_animations_enabled") !== "false" : true;
+      cinemaAnimCb.addEventListener("change", () => {
+        if (typeof localStorage !== "undefined")
+          localStorage.setItem("vn_cinema_animations_enabled", String(cinemaAnimCb.checked));
+        document.querySelector(".vn-stage-overlay")?.classList.toggle("vn-no-cinema-anim", !cinemaAnimCb.checked);
+      });
+    }
+    const cardSpritesCb = rulesCard.querySelector("#vn-hud-toggle-card-sprites");
+    if (cardSpritesCb) {
+      cardSpritesCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_card_sprites_enabled") !== "false" : true;
+      cardSpritesCb.addEventListener("change", () => {
+        if (typeof localStorage !== "undefined")
+          localStorage.setItem("vn_card_sprites_enabled", String(cardSpritesCb.checked));
+      });
+    }
+    const bgmCb = rulesCard.querySelector("#vn-hud-toggle-bgm");
+    if (bgmCb) {
+      bgmCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_bgm_enabled") !== "false" : true;
+      bgmCb.addEventListener("change", () => {
+        if (typeof localStorage !== "undefined")
+          localStorage.setItem("vn_bgm_enabled", String(bgmCb.checked));
+      });
+    }
+    const shadersCb = rulesCard.querySelector("#vn-hud-toggle-shaders");
+    if (shadersCb) {
+      shadersCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_shaders_enabled") !== "false" : true;
+      shadersCb.addEventListener("change", () => {
+        if (typeof localStorage !== "undefined")
+          localStorage.setItem("vn_shaders_enabled", String(shadersCb.checked));
+        const canvas = document.querySelector(".vn-stage canvas");
+        if (canvas)
+          canvas.style.display = shadersCb.checked ? "block" : "none";
+      });
+    }
     if (!this.statRulesSettings) {
       this.ctx?.sendToBackend?.({ type: "vn_get_stat_rules_settings" });
     }
@@ -12724,13 +12792,60 @@ function applyVnTheme(rootEl, themeId = "default") {
 }
 
 // src/frontend/stage/audio-player.ts
+var LOCAL_AUDIO_MAP = {
+  calm_ambient: "/data/audio/bgm/bgm_peaceful_day.mp3",
+  peaceful: "/data/audio/bgm/bgm_peaceful_day.mp3",
+  daily_ambient: "/data/audio/bgm/bgm_peaceful_day.mp3",
+  ambient: "/data/audio/bgm/bgm_peaceful_day.mp3",
+  melancholy_strings: "/data/audio/bgm/bgm_piano_melancholy.mp3",
+  sad: "/data/audio/bgm/bgm_piano_melancholy.mp3",
+  grief: "/data/audio/bgm/bgm_piano_melancholy.mp3",
+  combat_intense: "/data/audio/bgm/bgm_tension_dramatic.mp3",
+  combat: "/data/audio/bgm/bgm_tension_dramatic.mp3",
+  action: "/data/audio/bgm/bgm_tension_dramatic.mp3",
+  danger: "/data/audio/bgm/bgm_tension_dramatic.mp3",
+  mystery_ambient: "/data/audio/bgm/bgm_night_ambient.mp3",
+  mystery: "/data/audio/bgm/bgm_night_ambient.mp3",
+  night: "/data/audio/bgm/bgm_night_ambient.mp3",
+  climax: "/data/audio/bgm/bgm_climax_emotional.mp3",
+  menu: "/data/audio/bgm/bgm_menu_theme.mp3"
+};
+
 class VnAudioEngine {
   audioCtx = null;
   bgmAudio = null;
+  proceduralNodes = null;
   sfxVolume = 0.5;
   bgmVolume = 0.4;
   isMuted = false;
   constructor() {}
+  isBgmEnabled() {
+    if (typeof localStorage !== "undefined") {
+      const val = localStorage.getItem("vn_bgm_enabled");
+      if (val !== null)
+        return val !== "false";
+    }
+    return true;
+  }
+  setBgmEnabled(enabled) {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("vn_bgm_enabled", String(enabled));
+    }
+    if (!enabled) {
+      this.stopBgm();
+    } else {
+      this.toggleBgm();
+    }
+  }
+  unlockAudio() {
+    const ctx = this.getContext();
+    if (ctx && ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+    if (this.bgmAudio && this.bgmAudio.paused && !this.isMuted && this.isBgmEnabled()) {
+      this.bgmAudio.play().catch(() => {});
+    }
+  }
   getContext() {
     if (!this.audioCtx && typeof window !== "undefined") {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -12748,28 +12863,25 @@ class VnAudioEngine {
     if (this.bgmAudio) {
       this.bgmAudio.muted = muted;
     }
+    if (muted) {
+      this.stopProceduralBgm();
+    }
   }
   toggleMute() {
     this.setMuted(!this.isMuted);
     return this.isMuted;
   }
   isBgmActive() {
-    return Boolean(this.bgmAudio && !this.bgmAudio.paused && !this.bgmAudio.muted && !this.isMuted);
+    return Boolean((this.bgmAudio && !this.bgmAudio.paused && !this.bgmAudio.muted || this.proceduralNodes) && !this.isMuted && this.isBgmEnabled());
   }
   toggleBgm() {
     if (this.isBgmActive()) {
-      if (this.bgmAudio)
-        this.bgmAudio.pause();
+      this.stopBgm();
       return false;
     }
     this.isMuted = false;
-    if (this.bgmAudio) {
-      this.bgmAudio.muted = false;
-      this.bgmAudio.play().catch(() => {});
-      return true;
-    }
     const defaultTrack = this.currentBgmTrack || "peaceful";
-    const url = this.customBgmMap[defaultTrack] || defaultTrack;
+    const url = this.customBgmMap[defaultTrack] || LOCAL_AUDIO_MAP[defaultTrack] || defaultTrack;
     this.playBgm(url, defaultTrack);
     return true;
   }
@@ -13041,26 +13153,97 @@ class VnAudioEngine {
     }
     return null;
   }
+  startProceduralBgm(theme = "calm_ambient") {
+    if (this.isMuted || !this.isBgmEnabled())
+      return;
+    this.stopProceduralBgm();
+    const ctx = this.getContext();
+    if (!ctx)
+      return;
+    try {
+      const chordSets = {
+        combat_intense: [110, 130.81, 164.81, 220],
+        melancholy_strings: [146.83, 174.61, 220, 261.63],
+        mystery_ambient: [130.81, 155.56, 196, 233.08],
+        calm_ambient: [220, 277.18, 329.63, 440],
+        daily_ambient: [261.63, 329.63, 392, 523.25],
+        default: [220, 277.18, 329.63, 440]
+      };
+      const freqs = chordSets[theme] || chordSets.default;
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.06 * this.bgmVolume, ctx.currentTime);
+      masterGain.connect(ctx.destination);
+      const oscillators = [];
+      freqs.forEach((f, i) => {
+        const osc = ctx.createOscillator();
+        osc.type = i % 2 === 0 ? "sine" : "triangle";
+        osc.frequency.setValueAtTime(f, ctx.currentTime);
+        const filter = ctx.createBiquadFilter();
+        filter.type = "lowpass";
+        filter.frequency.setValueAtTime(500 + i * 80, ctx.currentTime);
+        osc.connect(filter);
+        filter.connect(masterGain);
+        osc.start();
+        oscillators.push(osc);
+      });
+      this.proceduralNodes = { oscillators, gain: masterGain };
+    } catch {}
+  }
+  stopProceduralBgm() {
+    if (this.proceduralNodes) {
+      try {
+        const { oscillators, gain } = this.proceduralNodes;
+        oscillators.forEach((osc) => {
+          try {
+            osc.stop();
+            osc.disconnect();
+          } catch {}
+        });
+        gain.disconnect();
+      } catch {}
+      this.proceduralNodes = null;
+    }
+  }
   playBgm(url, trackName) {
-    if (!url) {
+    if (!url || !this.isBgmEnabled()) {
       this.stopBgm();
       return;
     }
     const trackId = trackName || url;
-    if (this.currentBgmTrack === trackId && this.bgmAudio && !this.bgmAudio.paused) {
+    if (this.currentBgmTrack === trackId && (this.bgmAudio && !this.bgmAudio.paused || this.proceduralNodes)) {
       return;
     }
     this.stopBgm();
     this.currentBgmTrack = trackId;
-    try {
-      this.bgmAudio = new Audio(url);
-      this.bgmAudio.loop = true;
-      this.bgmAudio.volume = this.bgmVolume;
-      this.bgmAudio.muted = this.isMuted;
-      this.bgmAudio.play().catch(() => {});
-    } catch {}
+    const realUrl = LOCAL_AUDIO_MAP[url] || this.customBgmMap[url] || (LOCAL_AUDIO_MAP[trackId] || url);
+    const isDirectAudio = /^(?:https?:\/\/|\/|data:|blob:|file:)/i.test(realUrl);
+    if (isDirectAudio) {
+      try {
+        const audio = new Audio(realUrl);
+        audio.loop = true;
+        audio.volume = this.bgmVolume;
+        audio.muted = this.isMuted;
+        this.bgmAudio = audio;
+        audio.onplay = () => this.stopProceduralBgm();
+        audio.onerror = () => {
+          this.startProceduralBgm(trackId);
+        };
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {
+            this.startProceduralBgm(trackId);
+          });
+        }
+        return;
+      } catch {
+        this.startProceduralBgm(trackId);
+        return;
+      }
+    }
+    this.startProceduralBgm(trackId);
   }
   stopBgm() {
+    this.stopProceduralBgm();
     if (this.bgmAudio) {
       try {
         this.bgmAudio.pause();
@@ -13602,6 +13785,12 @@ class StageOverlay {
     this.root.appendChild(this.menuBar.getOverlay());
     this.root.appendChild(this.toastContainer);
     this.injectStyles();
+    this.root.addEventListener("click", () => {
+      this.audioEngine.unlockAudio();
+    });
+    this.root.addEventListener("keydown", () => {
+      this.audioEngine.unlockAudio();
+    });
     applyVnTheme(this.root, "default");
   }
   setTheme(themeId) {
@@ -13729,8 +13918,18 @@ class StageOverlay {
     this.currentChatId = state.chatId;
     this.stageRenderer.setBackground(state.background);
     this.stageRenderer.setCharacters(state.characters);
+    if (typeof localStorage !== "undefined" && localStorage.getItem("vn_cinema_animations_enabled") === "false") {
+      this.root.classList.add("vn-no-cinema-anim");
+    } else {
+      this.root.classList.remove("vn-no-cinema-anim");
+    }
     const place = state.ledger?.scene?.place || "";
-    this.stageRenderer.setWeather(place);
+    if (typeof localStorage !== "undefined" && localStorage.getItem("vn_shaders_enabled") === "false") {
+      this.stageRenderer.particleEngine.canvas.style.display = "none";
+    } else {
+      this.stageRenderer.particleEngine.canvas.style.display = "block";
+      this.stageRenderer.setWeather(place);
+    }
     if (state.bgmUrl) {
       this.audioEngine.playBgm(state.bgmUrl);
     } else {
@@ -13983,14 +14182,32 @@ class StageOverlay {
         padding-bottom: 90px;
         pointer-events: none;
       }
-      @keyframes vn-char-slide-in {
+      @keyframes portraitSlideIn {
         from {
           opacity: 0;
-          transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) + 20px)) scale(calc(var(--char-scale, 1) * 0.96));
+          transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) + 50px)) scale(calc(var(--char-scale, 1) * 0.94));
         }
         to {
           opacity: 1;
           transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1));
+        }
+      }
+      @keyframes vn-speaker-bob {
+        0%, 100% {
+          transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 8px)) scale(calc(var(--char-scale, 1) * 1.05));
+        }
+        50% {
+          transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 16px)) scale(calc(var(--char-scale, 1) * 1.07));
+        }
+      }
+      @keyframes namePulse {
+        0%, 100% {
+          transform: translateX(-50%) translateY(0) scale(1);
+          box-shadow: 0 0 10px rgba(129, 140, 248, 0.4);
+        }
+        50% {
+          transform: translateX(-50%) translateY(-2px) scale(1.05);
+          box-shadow: 0 0 20px rgba(129, 140, 248, 0.8), 0 0 10px #ffd700;
         }
       }
 
@@ -14004,13 +14221,14 @@ class StageOverlay {
         transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1));
         transform-origin: bottom center;
         transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), filter 0.35s ease, opacity 0.35s ease;
-        animation: vn-char-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+        animation: portraitSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
         animation-delay: var(--enter-delay, 0s);
         pointer-events: auto;
         cursor: pointer;
       }
       .vn-char-slot:hover {
-        transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 6px)) scale(calc(var(--char-scale, 1) * 1.02));
+        transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 12px)) scale(calc(var(--char-scale, 1) * 1.08));
+        filter: drop-shadow(0 0 20px rgba(250, 204, 21, 0.6)) drop-shadow(0 12px 24px rgba(0,0,0,0.8));
         z-index: 6;
       }
       .vn-char-slot:hover .vn-char-tag {
@@ -14038,16 +14256,34 @@ class StageOverlay {
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
       }
       .vn-char-speaker {
-        transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 6px)) scale(calc(var(--char-scale, 1) * 1.04));
         z-index: 5;
-        filter: drop-shadow(0 0 16px rgba(129, 140, 248, 0.45)) drop-shadow(0 10px 20px rgba(0,0,0,0.6));
+        filter: drop-shadow(0 0 18px rgba(129, 140, 248, 0.55)) drop-shadow(0 12px 24px rgba(0,0,0,0.6));
         opacity: 1;
+        animation: vn-speaker-bob 2.2s ease-in-out infinite;
+      }
+      .vn-char-speaker .vn-char-tag {
+        opacity: 1;
+        color: #ffd700;
+        border-color: #ffd700;
+        background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95));
+        animation: namePulse 1.2s ease-in-out infinite;
+        font-size: 12px;
       }
       .vn-char-inactive {
-        transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(calc(var(--char-scale, 1) * 0.98));
+        transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(calc(var(--char-scale, 1) * 0.96));
         z-index: 2;
-        filter: drop-shadow(0 8px 16px rgba(0,0,0,0.7)) brightness(0.88) saturate(0.92);
-        opacity: 1;
+        filter: drop-shadow(0 8px 16px rgba(0,0,0,0.7)) brightness(0.75) saturate(0.85);
+        opacity: 0.78;
+      }
+      .vn-no-cinema-anim .vn-char-speaker {
+        animation: none !important;
+        transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 6px)) scale(calc(var(--char-scale, 1) * 1.04));
+      }
+      .vn-no-cinema-anim .vn-char-slot {
+        animation: none !important;
+      }
+      .vn-no-cinema-anim .vn-char-speaker .vn-char-tag {
+        animation: none !important;
       }
       .vn-char-far-left { order: 1; }
       .vn-char-left { order: 2; }
@@ -14929,7 +15165,7 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
           </div>
 
           <div id="vn-dr-panel-tabs" class="vn-dr-panel" style="display: none; flex-direction: column; gap: 6px;">
-            <label style="font-size: 10px; color: #94a3b8;">HUD Tab Checkboxes (Show / Hide):</label>
+            <label style="font-size: 10px; color: #94a3b8; font-weight: 700;">HUD Tab Checkboxes (Show / Hide):</label>
             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;">
               ${ALL_HUD_TABS.filter((t) => t.id !== "diagnostics").map((tabItem) => `
                 <label style="background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 4px 6px; display: flex; align-items: center; gap: 4px; font-size: 10px; cursor: pointer; color: #f8fafc;">
@@ -14937,6 +15173,28 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
                   <span>${tabItem.icon}</span> <span>${tabItem.label}</span>
                 </label>
               `).join("")}
+            </div>
+
+            <div style="border-top: 1px solid #334155; margin-top: 6px; padding-top: 6px;">
+              <label style="font-size: 10px; color: #38bdf8; font-weight: 700;">Cinema & Audio Engine Toggles:</label>
+              <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+                <label style="background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 4px 6px; display: flex; align-items: center; gap: 6px; font-size: 10px; cursor: pointer; color: #f8fafc;">
+                  <input type="checkbox" id="vn-toggle-cinema-anim" checked style="accent-color: #6366f1; cursor: pointer;" />
+                  <span>\uD83C\uDFAC Cinema Sprite Movement & Speaking Bob</span>
+                </label>
+                <label style="background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 4px 6px; display: flex; align-items: center; gap: 6px; font-size: 10px; cursor: pointer; color: #f8fafc;">
+                  <input type="checkbox" id="vn-toggle-card-sprites" checked style="accent-color: #6366f1; cursor: pointer;" />
+                  <span>\uD83C\uDFAD Character Expressions Auto-Sync (Card Sprites)</span>
+                </label>
+                <label style="background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 4px 6px; display: flex; align-items: center; gap: 6px; font-size: 10px; cursor: pointer; color: #f8fafc;">
+                  <input type="checkbox" id="vn-toggle-bgm" checked style="accent-color: #6366f1; cursor: pointer;" />
+                  <span>\uD83C\uDFB5 Ambient BGM & Procedural Chords</span>
+                </label>
+                <label style="background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 4px 6px; display: flex; align-items: center; gap: 6px; font-size: 10px; cursor: pointer; color: #f8fafc;">
+                  <input type="checkbox" id="vn-toggle-shaders" checked style="accent-color: #6366f1; cursor: pointer;" />
+                  <span>\uD83C\uDF27️ Atmospheric Weather & Shaders</span>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -15147,6 +15405,42 @@ function registerDiagnosticsDrawer(ctx, onLaunchStage) {
       } catch {}
     });
   });
+  const cinemaAnimCb = root.querySelector("#vn-toggle-cinema-anim");
+  if (cinemaAnimCb) {
+    cinemaAnimCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_cinema_animations_enabled") !== "false" : true;
+    cinemaAnimCb.addEventListener("change", () => {
+      if (typeof localStorage !== "undefined")
+        localStorage.setItem("vn_cinema_animations_enabled", String(cinemaAnimCb.checked));
+      document.querySelector(".vn-stage-overlay")?.classList.toggle("vn-no-cinema-anim", !cinemaAnimCb.checked);
+    });
+  }
+  const cardSpritesCb = root.querySelector("#vn-toggle-card-sprites");
+  if (cardSpritesCb) {
+    cardSpritesCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_card_sprites_enabled") !== "false" : true;
+    cardSpritesCb.addEventListener("change", () => {
+      if (typeof localStorage !== "undefined")
+        localStorage.setItem("vn_card_sprites_enabled", String(cardSpritesCb.checked));
+    });
+  }
+  const bgmCb = root.querySelector("#vn-toggle-bgm");
+  if (bgmCb) {
+    bgmCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_bgm_enabled") !== "false" : true;
+    bgmCb.addEventListener("change", () => {
+      if (typeof localStorage !== "undefined")
+        localStorage.setItem("vn_bgm_enabled", String(bgmCb.checked));
+    });
+  }
+  const shadersCb = root.querySelector("#vn-toggle-shaders");
+  if (shadersCb) {
+    shadersCb.checked = typeof localStorage !== "undefined" ? localStorage.getItem("vn_shaders_enabled") !== "false" : true;
+    shadersCb.addEventListener("change", () => {
+      if (typeof localStorage !== "undefined")
+        localStorage.setItem("vn_shaders_enabled", String(shadersCb.checked));
+      const canvas = document.querySelector(".vn-stage canvas");
+      if (canvas)
+        canvas.style.display = shadersCb.checked ? "block" : "none";
+    });
+  }
   saveBtn?.addEventListener("click", () => {
     const settings = {
       systemPrompt: systemTextarea?.value || "",

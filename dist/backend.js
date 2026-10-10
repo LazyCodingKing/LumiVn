@@ -4259,6 +4259,86 @@ class AssetResolver {
         }
       }
     }
+    try {
+      let cardChar = null;
+      if (this.spindle.characters) {
+        if (actorId && actorId.length >= 8) {
+          cardChar = await this.spindle.characters.get(actorId).catch(() => null);
+        }
+        if (!cardChar && this.spindle.characters.list) {
+          const listRes = await this.spindle.characters.list().catch(() => null);
+          const chars = Array.isArray(listRes) ? listRes : listRes?.data || [];
+          cardChar = chars.find((c) => c.name?.toLowerCase() === cleanActor || c.name?.toLowerCase() === actorId.toLowerCase() || c.id === actorId);
+        }
+      }
+      if (cardChar?.extensions) {
+        if (currentSentenceText) {
+          const tagMatch = currentSentenceText.match(/<p?img\s*(?:=|cmd=|src=)["']?([^"'>\s]+)["']?[^>]*\/?>|\{\{img::([^\}]+)\}\}/i);
+          const inlineTag = (tagMatch?.[1] || tagMatch?.[2] || "").trim().toLowerCase();
+          if (inlineTag) {
+            const mappings = cardChar.extensions.expressions?.mappings || {};
+            const risu = cardChar.extensions.risu_asset_map || {};
+            const matchedId = mappings[inlineTag] || risu[inlineTag] || risu[`${inlineTag}.png`];
+            if (matchedId) {
+              return { spriteUrl: `/api/v1/images/${matchedId}`, layers: {}, emotion: inlineTag };
+            }
+          }
+        }
+        const exprMappings = cardChar.extensions.expressions?.mappings;
+        if (exprMappings && typeof exprMappings === "object") {
+          const EMOTION_ALIASES = {
+            blush: ["blush", "embarrassed", "shy", "flustered"],
+            smile: ["smile", "happy", "joy", "laugh"],
+            angry: ["angry", "rage", "annoyed", "mad"],
+            sad: ["sad", "crying", "sorrow", "grief"],
+            scared: ["scared", "fear", "shocked", "surprised"],
+            neutral: ["neutral", "idle", "default", "normal"]
+          };
+          const candidates = EMOTION_ALIASES[emotion] || [emotion];
+          for (const cand of candidates) {
+            for (const [k, id] of Object.entries(exprMappings)) {
+              if (k.toLowerCase() === cand || k.toLowerCase().replace(/[^a-z0-9]/g, "") === cand) {
+                if (typeof id === "string" && id) {
+                  return { spriteUrl: `/api/v1/images/${id}`, layers: {}, emotion };
+                }
+              }
+            }
+          }
+          const defaultExpr = cardChar.extensions.expressions?.defaultExpression;
+          if (defaultExpr && exprMappings[defaultExpr]) {
+            return { spriteUrl: `/api/v1/images/${exprMappings[defaultExpr]}`, layers: {}, emotion };
+          }
+        }
+        const risuMap = cardChar.extensions.risu_asset_map;
+        if (risuMap && typeof risuMap === "object") {
+          for (const [k, id] of Object.entries(risuMap)) {
+            const cleanKey = k.toLowerCase().replace(/\.[a-z0-9]+$/i, "");
+            if (cleanKey === emotion || cleanKey === "default" || cleanKey === "neutral") {
+              if (typeof id === "string" && id) {
+                return { spriteUrl: `/api/v1/images/${id}`, layers: {}, emotion };
+              }
+            }
+          }
+        }
+        if (cardChar.extensions.alternate_avatars && Array.isArray(cardChar.extensions.alternate_avatars)) {
+          const matchedAvatar = cardChar.extensions.alternate_avatars.find((a) => a.name?.toLowerCase().includes(outfit) || a.label?.toLowerCase().includes(outfit));
+          if (matchedAvatar?.image_id) {
+            return { spriteUrl: `/api/v1/images/${matchedAvatar.image_id}`, layers: {}, emotion };
+          }
+        }
+        if (cardChar.image_id) {
+          return { spriteUrl: `/api/v1/images/${cardChar.image_id}`, layers: {}, emotion };
+        }
+      }
+    } catch {}
+    if ((actorId.toLowerCase() === "user" || cleanActor === "user") && this.spindle.personas?.getActive) {
+      try {
+        const activePersona = await this.spindle.personas.getActive();
+        if (activePersona?.image_id) {
+          return { spriteUrl: `/api/v1/images/${activePersona.image_id}`, layers: {}, emotion };
+        }
+      } catch {}
+    }
     if (characterCardAvatarUrl) {
       return { spriteUrl: characterCardAvatarUrl, layers: {}, emotion };
     }

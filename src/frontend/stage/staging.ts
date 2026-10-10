@@ -151,10 +151,21 @@ export class StageRenderer {
         slotEl.appendChild(img);
       }
 
-      // Visual Staging Hover Name Badge
+      // Visual Staging Hover Name Badge (ST-CinemaMode Style)
       const nameTag = document.createElement("span");
       nameTag.className = "vn-char-tag";
-      nameTag.textContent = char.name;
+      const moodIcon =
+        char.emotion === "happy" || char.emotion === "smile" ? "😊" :
+        char.emotion === "angry" || char.emotion === "rage" ? "💢" :
+        char.emotion === "sad" || char.emotion === "crying" ? "😢" :
+        char.emotion === "blush" || char.emotion === "embarrassed" ? "😳" :
+        char.emotion === "scared" || char.emotion === "fear" ? "😨" :
+        "✨";
+      if (char.isSpeaker) {
+        nameTag.textContent = `🎙️ ${char.name} ${moodIcon} 🎙️`;
+      } else {
+        nameTag.textContent = `${char.name} ${moodIcon}`;
+      }
       slotEl.appendChild(nameTag);
 
       // Tactile Touch Zones & Interaction Overlay
@@ -250,12 +261,15 @@ export class StageRenderer {
         slotEl.classList.remove("vn-char-inactive");
       } else {
         const isSpeaking = isActorMatch(normSpeaker, actorId, actorName);
+        const nameTag = slotEl.querySelector<HTMLElement>(".vn-char-tag");
         if (isSpeaking) {
           slotEl.classList.remove("vn-char-inactive");
           slotEl.classList.add("vn-char-speaker");
+          if (nameTag) nameTag.textContent = `🎙️ ${actorName} 🎙️`;
         } else {
           slotEl.classList.remove("vn-char-speaker");
           slotEl.classList.add("vn-char-inactive");
+          if (nameTag) nameTag.textContent = actorName;
         }
       }
     });
