@@ -10,6 +10,8 @@ const PLAYER_TRACKING_RE = /\n*(?:Loadout|Attire|Body):[\s\S]*$/i;
 const TOON_COMMENT_RE = /<!--\s*toon\b[\s\S]*?-->/gi;
 const TOON_BRACKET_RE = /\[toon\b[\s\S]*?\]/gi;
 
+const UNCLOSED_DETAILS_RE = /<details\b[^>]*>[\s\S]*$/gi;
+
 /**
  * Extracts and cleans the narrative prose from the raw assistant message.
  */
@@ -17,6 +19,7 @@ export function extractProse(rawContent: string): string {
   let cleaned = (rawContent || "")
     .replace(THINK_TAGS_RE, "")
     .replace(ALL_DETAILS_RE, "")
+    .replace(UNCLOSED_DETAILS_RE, "")
     .replace(DIRECTOR_JSON_RE, "")
     .replace(TOON_COMMENT_RE, "")
     .replace(TOON_BRACKET_RE, "")
@@ -149,29 +152,7 @@ export function parseLedgerYaml(rawLedgerText: string): Partial<LedgerData> {
       }
     } catch {}
 
-    // 1. Sanitization attempt for unescaped quotes inside flow mappings
-    try {
-      const sanitized = chunk.split("\n").map((line) => {
-        const flowMatch = line.match(/^(\s*[a-zA-Z0-9_-]+:\s*\{)(.*)(\}\s*)$/);
-        if (flowMatch) {
-          const prefix = flowMatch[1];
-          const body = flowMatch[2];
-          const suffix = flowMatch[3];
-          const cleanedBody = body.replace(/([a-zA-Z0-9_-]+:\s*)"([\s\S]*?)"(?=\s*(?:,|\}))/g, (_m, k, val) => {
-            return k + "\"" + val.replace(/"/g, "\\\"") + "\"";
-          });
-          return prefix + cleanedBody + suffix;
-        }
-        return line;
-      }).join("\n");
-      const parsed = yaml.load(sanitized);
-      if (parsed && typeof parsed === "object") {
-        Object.assign(target, parsed);
-        return;
-      }
-    } catch {}
-
-    // 2. Sub-block chunk recovery: parse each root section or actor independently
+    // Sub-block chunk recovery: parse each root section or actor independently
     const subBlocks = chunk.split(/^(?=[a-zA-Z0-9_-]+:)/m);
     for (const sub of subBlocks) {
       if (!sub.trim()) continue;

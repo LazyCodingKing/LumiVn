@@ -1,7 +1,6 @@
 import type { LlmMessageDTO, InterceptorResultDTO } from "lumiverse-spindle-types";
 import type { LedgerData, BPlot, DirectorSettings, DirectorLogEntry, StatRulesSettings } from "../shared/types.js";
 import { DEFAULT_DIRECTOR_SETTINGS } from "./storage.js";
-import { encodeToonState } from "./toon-parser.js";
 
 export const DIRECTOR_DIRECTIVES = DEFAULT_DIRECTOR_SETTINGS.systemPrompt;
 
@@ -46,56 +45,6 @@ export function formatDirectorDirective(
   return activeDirective;
 }
 
-export function formatLivingWorldContext(currentState: LedgerData): string {
-  const clock = currentState.clock || {};
-  const date = clock.date || "Day 1";
-  const time = clock.t || "12:00";
-  const place = currentState.scene?.place || "Current Location";
-
-  const presentActors: string[] = [];
-  const participants = Array.isArray(currentState.scene?.participants) ? currentState.scene.participants : [];
-  const actors = currentState.actors || {};
-
-  for (const [id, a] of Object.entries(actors)) {
-    if (id.toLowerCase() === "user") continue;
-    if (participants.includes(id) || !participants.length) {
-      const name = a.name || id;
-      const topPassion = a.passions
-        ? Object.entries(a.passions).sort((x, y) => (y[1] ?? 0) - (x[1] ?? 0))[0]
-        : undefined;
-      const moodStr = topPassion && (topPassion[1] ?? 0) > 15 ? `${topPassion[0]} (${topPassion[1]})` : "composed";
-      const attire = a.outfit?.top ? `${a.outfit.top}` : (a.outfit?.state || "casual");
-      const want = a.agency?.want_now ? `wants: ${a.agency.want_now}` : "";
-      const secret = Array.isArray((a.knowledge as any)?.secrets) && (a.knowledge as any).secrets[0]?.truth
-        ? `secret: ${(a.knowledge as any).secrets[0].truth}`
-        : "";
-      const relToUser = (a.relations as any)?.["user"]?.affinity !== undefined
-        ? `affinity: ${(a.relations as any)["user"].affinity}`
-        : "";
-      const details = [want, secret, relToUser].filter(Boolean).join(", ");
-      presentActors.push(`${name} (attire: ${attire}, mood: ${moodStr}${details ? ` | ${details}` : ""})`);
-    }
-  }
-
-  const user = actors["user"] || {};
-  const userAttire = user.outfit?.top ? `${user.outfit.top} / ${user.outfit.bottom || ""}` : (user.outfit?.state || "casual");
-  const inHand = user.inventory?.in_hand?.R || user.inventory?.in_hand?.L ? `held: ${[user.inventory?.in_hand?.R, user.inventory?.in_hand?.L].filter(Boolean).join(", ")}` : "";
-
-  // Active B-Plots
-  const activeBplots = (currentState.bplots || []).filter((b) => b.status !== "resolved").slice(0, 1);
-  const bplotStr = activeBplots.length
-    ? `Offscreen: ${activeBplots[0].who || "Distant parties"} (${activeBplots[0].doing || "active"}) [ripple ${activeBplots[0].ripple ?? 1}]`
-    : "";
-
-  return [
-    `[LumiVN Living World Context]`,
-    `⏰ Clock: ${date}, ${time} | Location: ${place}`,
-    presentActors.length ? `👥 Present: ${presentActors.slice(0, 3).join("; ")}` : "",
-    `👔 Player: ${userAttire}${inHand ? ` | ${inHand}` : ""}`,
-    bplotStr ? `🎭 ${bplotStr}` : "",
-  ].filter(Boolean).join("\n");
-}
-
 export async function evaluateDirectorInterceptor(
   messages: LlmMessageDTO[],
   context: unknown,
@@ -114,20 +63,26 @@ export async function evaluateDirectorInterceptor(
   const settings = getDirectorSettings
     ? await getDirectorSettings()
     : DEFAULT_DIRECTOR_SETTINGS;
+  const statSettings = getStatRulesSettings ? await getStatRulesSettings() : null;
 
-  if (!settings || !settings.enabled) return messages;
+  const directorActive = Boolean(settings?.enabled);
+  const inlineStatsActive = Boolean(statSettings?.enabled && statSettings?.mode === "inline_interceptor");
+
+  if (!directorActive && !inlineStatsActive) return messages;
 
   // 2. Read latest chat state and roster
   const currentState = await getChatState(chatId);
-  const statSettings = getStatRulesSettings ? await getStatRulesSettings() : null;
   if (!currentState) return messages;
 
-  let activeDirective = formatDirectorDirective(settings);
-  if (!activeDirective) return messages;
+  let activeDirective = directorActive ? formatDirectorDirective(settings) : "";
 
-  if (statSettings && statSettings.enabled && statSettings.mode === "inline_interceptor") {
-    activeDirective += `\n\n${statSettings.statRules}\n\n${statSettings.ledgerPrompt}`;
+  if (inlineStatsActive && statSettings) {
+    activeDirective = activeDirective
+      ? `${activeDirective}\n\n${statSettings.statRules}\n\n${statSettings.ledgerPrompt}`
+      : `${statSettings.statRules}\n\n${statSettings.ledgerPrompt}`;
   }
+
+  if (!activeDirective.trim()) return messages;
 
   // Decorum validation scan
   const currentPlaceId = currentState.scene?.place;

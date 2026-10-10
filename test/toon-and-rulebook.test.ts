@@ -4,7 +4,6 @@ import {
   extractToonRaw,
   parseToonDelta,
   moodToPassions,
-  getToonPromptInstruction,
 } from "../src/backend/toon-parser.js";
 import {
   extractProse,
@@ -13,7 +12,8 @@ import {
   extractLedgerRaw,
   parseLedgerYaml,
 } from "../src/backend/ledger-parser.js";
-import type { LedgerData } from "../src/shared/types.js";
+import { evaluateMvuLedgerDelta } from "../src/backend/mvu-evaluator.js";
+import type { LedgerData, StatRulesSettings } from "../src/shared/types.js";
 
 describe("TOON Format & Preset Independence", () => {
   test("encodeToonState produces ultra-compact tabular notation", () => {
@@ -252,6 +252,89 @@ actors:
     const parsed = parseLedgerYaml(raw!);
     expect(parsed.scene?.place).toBe("school:roof");
     expect((parsed.actors?.["ranma"]?.relations as any)?.["user"]?.betrayal_threshold).toBe(75);
+  });
+});
+
+describe("MVU Quiet LLM Ledger Evaluator", () => {
+  const dummySettings: StatRulesSettings = {
+    enabled: true,
+    mode: "mvu_quiet",
+    statRules: "Passions: arousal 0..100. Modifiers on physical contact.",
+    ledgerPrompt: "Emit yaml inside <details><summary>📊 Ledger</summary>.",
+  };
+
+  test("returns null if settings are disabled or mode is not mvu_quiet", async () => {
+    const mockSpindle: any = { generate: { quiet: async () => "" }, log: { error: () => {} } };
+    const res1 = await evaluateMvuLedgerDelta(
+      mockSpindle,
+      "chat-1",
+      "prose",
+      {},
+      { ...dummySettings, enabled: false }
+    );
+    expect(res1).toBeNull();
+
+    const res2 = await evaluateMvuLedgerDelta(
+      mockSpindle,
+      "chat-1",
+      "prose",
+      {},
+      { ...dummySettings, mode: "inline_interceptor" }
+    );
+    expect(res2).toBeNull();
+  });
+
+  test("calls quiet generation, passes userId, and parses yaml delta", async () => {
+    let capturedPayload: any = null;
+    let capturedUserId: string | undefined = undefined;
+
+    const mockSpindle: any = {
+      generate: {
+        quiet: async (payload: any, userId?: string) => {
+          capturedPayload = payload;
+          capturedUserId = userId;
+          return `<details><summary>📊 Ledger</summary>\n\`\`\`yaml\nscene:\n  place: "dojo"\nactors:\n  akane:\n    passions:\n      arousal: 40\n\`\`\`\n</details>`;
+        },
+      },
+      log: { error: () => {} },
+    };
+
+    const delta = await evaluateMvuLedgerDelta(
+      mockSpindle,
+      "chat-123",
+      "She turned away quickly, her face flushed.",
+      { scene: { place: "garden" }, actors: {} },
+      dummySettings,
+      "user-42"
+    );
+
+    expect(delta).not.toBeNull();
+    expect(delta?.scene?.place).toBe("dojo");
+    expect(delta?.actors?.["akane"]?.passions?.arousal).toBe(40);
+    expect(capturedUserId).toBe("user-42");
+    expect(capturedPayload.userId).toBe("user-42");
+    expect(capturedPayload.messages[0].content).toContain(dummySettings.statRules);
+    expect(capturedPayload.messages[1].content).toContain("She turned away quickly");
+  });
+
+  test("handles LLM failure or empty response gracefully returning null", async () => {
+    const failingSpindle: any = {
+      generate: {
+        quiet: async () => {
+          throw new Error("Quiet generation timeout");
+        },
+      },
+      log: { error: () => {} },
+    };
+
+    const delta = await evaluateMvuLedgerDelta(
+      failingSpindle,
+      "chat-123",
+      "Prose text",
+      {},
+      dummySettings
+    );
+    expect(delta).toBeNull();
   });
 });
 

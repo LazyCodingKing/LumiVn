@@ -51,10 +51,10 @@ END ON: Name one concrete unresolved physical or environmental moment where the 
 export class StorageManager {
   private spindle: SpindleAPI;
   private manifestCache: AssetManifest | null = null;
-  private manifestDirty = false;
   private chatStateCache: Map<string, LedgerData> = new Map();
   private directorSettingsCache: DirectorSettings | null = null;
   private statRulesSettingsCache: StatRulesSettings | null = null;
+  private existingDirs = new Set<string>();
 
   constructor(spindle: SpindleAPI) {
     this.spindle = spindle;
@@ -65,12 +65,14 @@ export class StorageManager {
     let current = "";
     for (const part of parts) {
       current = current ? `${current}/${part}` : part;
+      if (this.existingDirs.has(current)) continue;
       try {
         if (!(await this.spindle.storage.exists(current))) {
           await this.spindle.storage.mkdir(current);
         }
+        this.existingDirs.add(current);
       } catch {
-        // Ignore directory already exists
+        this.existingDirs.add(current);
       }
     }
   }
@@ -95,16 +97,10 @@ export class StorageManager {
     return this.manifestCache;
   }
 
-  getCachedManifest(): AssetManifest {
-    return this.manifestCache || DEFAULT_MANIFEST;
-  }
-
   async saveManifest(manifest: AssetManifest): Promise<void> {
     this.manifestCache = manifest;
-    this.manifestDirty = true;
     try {
       await this.spindle.storage.write("asset_manifest.json", JSON.stringify(manifest, null, 2));
-      this.manifestDirty = false;
     } catch (e) {
       console.error("[LumiVN] Failed to save asset_manifest.json:", e);
     }
@@ -114,10 +110,6 @@ export class StorageManager {
 
   getCachedChatState(chatId: string): LedgerData | null {
     return this.chatStateCache.get(chatId) || null;
-  }
-
-  setCachedChatState(chatId: string, state: LedgerData): void {
-    this.chatStateCache.set(chatId, state);
   }
 
   async getChatState(
@@ -193,45 +185,7 @@ export class StorageManager {
     }
   }
 
-  async saveMediaFile(relPath: string, dataUrlOrBase64: string): Promise<string> {
-    try {
-      const parts = relPath.split("/");
-      if (parts.length > 1) {
-        const dir = parts.slice(0, -1).join("/");
-        await this.ensureDir(dir);
-      }
-
-      let base64 = dataUrlOrBase64;
-      if (base64.includes(",")) {
-        base64 = base64.split(",")[1] ?? "";
-      }
-      const binaryString = atob(base64);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      await this.spindle.storage.writeBinary(relPath, bytes);
-      return relPath;
-    } catch (e) {
-      console.error(`[LumiVN] Failed to save media file to ${relPath}:`, e);
-      throw e;
-    }
-  }
-
-  async fileExists(path: string): Promise<boolean> {
-    try {
-      return await this.spindle.storage.exists(path);
-    } catch {
-      return false;
-    }
-  }
-
   // ── Director Settings with In-Memory Caching ──
-
-  getCachedDirectorSettings(): DirectorSettings {
-    return this.directorSettingsCache || DEFAULT_DIRECTOR_SETTINGS;
-  }
 
   async getDirectorSettings(): Promise<DirectorSettings> {
     if (this.directorSettingsCache) {
@@ -269,14 +223,16 @@ export class StorageManager {
     try {
       if (await this.spindle.storage.exists("stat_rules_settings.json")) {
         const raw = await this.spindle.storage.read("stat_rules_settings.json");
-        this.statRulesSettingsCache = { ...DEFAULT_STAT_RULES_SETTINGS, ...JSON.parse(raw) };
-        return this.statRulesSettingsCache;
+        const loaded: StatRulesSettings = { ...DEFAULT_STAT_RULES_SETTINGS, ...JSON.parse(raw) };
+        this.statRulesSettingsCache = loaded;
+        return loaded;
       }
     } catch (e) {
       console.warn("[LumiVN] Failed to read stat_rules_settings.json, using defaults:", e);
     }
-    this.statRulesSettingsCache = { ...DEFAULT_STAT_RULES_SETTINGS };
-    return this.statRulesSettingsCache;
+    const fallback: StatRulesSettings = { ...DEFAULT_STAT_RULES_SETTINGS };
+    this.statRulesSettingsCache = fallback;
+    return fallback;
   }
 
   async saveStatRulesSettings(settings: StatRulesSettings): Promise<void> {

@@ -53,7 +53,7 @@ export function parseTwineChoices(text: string): { cleanText: string; choices: T
       choices.push({ text: lbl, action: act });
       return `<button class="vn-inline-choice" data-action="${escapeHtml(act)}">${escapeHtml(lbl)}</button>`;
     } else {
-      const lbl = (twineP2 !== undefined ? twineP1 : twineP1).trim();
+      const lbl = twineP1.trim();
       const act = (twineP2 !== undefined ? twineP2 : twineP1).trim();
       choices.push({ text: lbl, action: act });
       return `<button class="vn-inline-choice" data-action="${escapeHtml(act)}">${escapeHtml(lbl)}</button>`;

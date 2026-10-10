@@ -7,10 +7,14 @@ export function formatDialogueHtml(rawText: string): { html: string; hasInlineCh
   // 2. Pair known text effect tags into <span data-vn-text-fx="tag">
   let formatted = escapeHtml(cleanText);
 
-  // Unescape the button elements created by parseTwineChoices
+  // Unescape the button elements created by parseTwineChoices without double-escaping
   formatted = formatted.replace(
     /&lt;button class=&quot;vn-inline-choice&quot; data-action=&quot;([\s\S]*?)&quot;&gt;([\s\S]*?)&lt;\/button&gt;/g,
-    '<button class="vn-inline-choice" data-action="$1">$2</button>'
+    (_m, act, lbl) => {
+      const cleanAct = act.replace(/&amp;/g, "&").replace(/&quot;/g, '"');
+      const cleanLbl = lbl.replace(/&amp;/g, "&");
+      return `<button class="vn-inline-choice" data-action="${cleanAct}">${cleanLbl}</button>`;
+    }
   );
 
   for (const tag of TEXT_EFFECT_IDS) {

@@ -979,4 +979,9 @@ export class PhoneTab {
       window.removeEventListener("keydown", onKeyDown);
     };
   }
+
+  public close(): void {
+    this.stopCurrentGame?.();
+    this.stopCurrentGame = null;
+  }
 }

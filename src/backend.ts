@@ -37,16 +37,15 @@ const storage = new StorageManager(spindle);
 const resolver = new AssetResolver(spindle, storage);
 
 let lastActiveChatId: string | null = null;
-let lastActiveUserId: string | null = null;
+let lastActiveUserId: string | undefined = undefined;
 
 // View Registry: Track active visual novel stage presence per chat
 const activeVnChats = new Set<string>();
 const mvuEvaluatingChats = new Set<string>();
 
-// LumiWorld Two-Stage Commit Lifecycle & Injected Directives Tracking
+// LumiWorld Directives & Log Buffers Tracking
 const activeGenerationIds = new Map<string, string>(); // chatId -> generationId
-const pendingCommits = new Map<string, LedgerData>(); // `${chatId}:${generationId}` -> LedgerData
-const injectedDirectives = new Map<string, string>(); // `${chatId}:${generationId}` -> directive
+const injectedDirectives = new Map<string, string>(); // `${chatId}:${generationId}` or chatId -> directive
 const directorLogBuffers = new Map<string, DirectorLogEntry[]>(); // chatId -> DirectorLogEntry[]
 
 // ── Pre-Turn Director & Agency Guardrails ──
@@ -89,8 +88,8 @@ function onHostChatSwitched(chatId: string | null, userId?: string) {
   lastActiveChatId = chatId;
   if (userId) lastActiveUserId = userId;
   spindle.log.info("[LumiVN] Active chat switched to: " + chatId);
-  if (activeVnChats.has(chatId) || true) {
-    void processChatTurn(chatId, undefined, undefined, true, undefined, undefined, userId);
+  if (activeVnChats.has(chatId)) {
+    void processChatTurn(chatId, undefined, undefined, false, undefined, undefined, userId);
   }
 }
 
@@ -186,11 +185,11 @@ async function processChatTurn(
   if (!activeVnChats.has(chatId) && !statRulesSettings.enabled && !force) return;
 
   lastActiveChatId = chatId;
+  let effectiveUserId: string | undefined = userId || lastActiveUserId || undefined;
 
   try {
     let targetMessage: ChatMessageDTO | null = null;
     let characterId: string | undefined;
-    let effectiveUserId = userId || lastActiveUserId;
 
     try {
       const activeChat = await spindle.chats.get(chatId);
@@ -257,7 +256,7 @@ async function processChatTurn(
       spindle.sendToFrontend({
         type: "vn_state",
         state: presentation,
-      });
+      }, effectiveUserId);
       return;
     }
 
@@ -274,7 +273,7 @@ async function processChatTurn(
               threadLabel: (parsed.thread_label || "Active Thread").trim(),
               timestamp: new Date().toLocaleTimeString(),
             },
-          });
+          }, effectiveUserId);
         }
       }
     } catch {
@@ -328,27 +327,18 @@ async function processChatTurn(
         type: "vn_bplot_notification",
         chatId,
         ripples: bplotResult.activeRipples,
-      });
+      }, effectiveUserId);
       spindle.sendToFrontend({
         type: "vn_log",
         message: `[B-Plot Alert] Active ripple(s): ${bplotResult.activeRipples.map((r) => `${r.who}: ${r.doing}`).join("; ")}`,
         level: "warn",
-      });
+      }, effectiveUserId);
     }
 
-    // Two-Stage Commit Lifecycle: Staged until successful generation completion
     const effectiveGenId = generationId || activeGenerationIds.get(chatId);
-    const commitKey = effectiveGenId ? `${chatId}:${effectiveGenId}` : null;
-    if (commitKey) {
-      pendingCommits.set(commitKey, cumulativeLedger);
-    }
 
     // Persist active snapshot and isolated turn branch
     await storage.saveChatState(chatId, cumulativeLedger, targetMessage.id, swipeId);
-
-    if (commitKey) {
-      pendingCommits.delete(commitKey);
-    }
 
     // Post-Turn State Diffing & Director Log Generation
     const activeDirective =
@@ -376,11 +366,12 @@ async function processChatTurn(
     spindle.sendToFrontend({
       type: "vn_director_log",
       log: directorEntry,
-    });
+    }, effectiveUserId);
 
     if (effectiveGenId) {
       injectedDirectives.delete(`${chatId}:${effectiveGenId}`);
     }
+    injectedDirectives.delete(chatId);
 
     const prose = extractProse(targetMessage.content);
     const presentation = await resolver.buildPresentationState(
@@ -399,7 +390,7 @@ async function processChatTurn(
     spindle.sendToFrontend({
       type: "vn_state",
       state: presentation,
-    });
+    }, effectiveUserId);
 
     // Send telemetry update for diagnostics tab
     spindle.sendToFrontend({
@@ -415,7 +406,7 @@ async function processChatTurn(
         ),
         bgUrl: presentation.background.url,
       },
-    });
+    }, effectiveUserId);
 
     spindle.log.info(
       `[LumiVN] Turn processed. Place: ${cumulativeLedger?.scene?.place || "none"}, Ledger found: ${Boolean(rawLedger)}`
@@ -425,27 +416,29 @@ async function processChatTurn(
     spindle.sendToFrontend({
       type: "vn_error",
       error: String(err),
-    });
+    }, effectiveUserId);
   }
 }
 
 // ── Event Handlers ──
-spindle.on("GENERATION_STARTED", async (payload: GenerationStartedPayloadDTO) => {
+spindle.on("GENERATION_STARTED", async (payload: GenerationStartedPayloadDTO, userId?: string) => {
   const { chatId, generationId } = payload || {};
   if (!chatId || !generationId) return;
 
+  if (userId) lastActiveUserId = userId;
   lastActiveChatId = chatId;
 
   const previousGenId = activeGenerationIds.get(chatId);
   if (previousGenId && previousGenId !== generationId) {
-    pendingCommits.delete(`${chatId}:${previousGenId}`);
     injectedDirectives.delete(`${chatId}:${previousGenId}`);
+    injectedDirectives.delete(chatId);
     spindle.log.info(`[LumiVN] Discarded uncommitted state from superseded generation ${previousGenId} on chat ${chatId}`);
   }
   activeGenerationIds.set(chatId, generationId);
 
   // Notify frontend if visual novel stage is open for this chat
   if (activeVnChats.has(chatId)) {
+    const activeUid = userId || lastActiveUserId;
     try {
       const messages: any[] = await (spindle.chat as any).getMessages(chatId, { limit: 5 });
       const bounded = Array.isArray(messages) ? messages : [];
@@ -464,23 +457,25 @@ spindle.on("GENERATION_STARTED", async (payload: GenerationStartedPayloadDTO) =>
           chatId,
           speaker,
           text: latestUserMsg.content,
-        });
+        }, activeUid);
       } else {
-        spindle.sendToFrontend({ type: "vn_generating", chatId });
+        spindle.sendToFrontend({ type: "vn_generating", chatId }, activeUid);
       }
     } catch {
-      spindle.sendToFrontend({ type: "vn_generating", chatId });
+      spindle.sendToFrontend({ type: "vn_generating", chatId }, activeUid);
     }
   }
 });
 
-spindle.on("GENERATION_STOPPED", (payload: GenerationStoppedPayloadDTO) => {
+spindle.on("GENERATION_STOPPED", (payload: GenerationStoppedPayloadDTO, userId?: string) => {
   const { chatId, generationId } = payload || {};
   if (!chatId || !generationId) return;
 
+  if (userId) lastActiveUserId = userId;
+
   const commitKey = `${chatId}:${generationId}`;
-  pendingCommits.delete(commitKey);
   injectedDirectives.delete(commitKey);
+  injectedDirectives.delete(chatId);
   if (activeGenerationIds.get(chatId) === generationId) {
     activeGenerationIds.delete(chatId);
   }
@@ -495,9 +490,9 @@ spindle.on("GENERATION_ENDED", async (payload: GenerationEndedPayloadDTO, userId
 
   if (error) {
     if (generationId) {
-      pendingCommits.delete(`${chatId}:${generationId}`);
       injectedDirectives.delete(`${chatId}:${generationId}`);
     }
+    injectedDirectives.delete(chatId);
     if (activeGenerationIds.get(chatId) === generationId) {
       activeGenerationIds.delete(chatId);
     }
@@ -592,7 +587,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         spindle.sendToFrontend({
           type: "vn_error",
           error: "No active chat could be found to launch Visual Novel.",
-        });
+        }, effectiveUid);
       }
       break;
     }
@@ -606,7 +601,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         spindle.sendToFrontend({
           type: "vn_error",
           error: "Failed to dispatch action: chatId or actionText was empty",
-        });
+        }, effectiveUid);
         break;
       }
 
@@ -616,7 +611,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         chatId,
         speaker: "You",
         text: actionText,
-      });
+      }, effectiveUid);
 
       try {
         await spindle.chat.appendMessage(
@@ -629,7 +624,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
           type: "vn_log",
           message: `Dispatched user action: "${actionText.slice(0, 40)}..."`,
           level: "action",
-        });
+        }, effectiveUid);
       } catch (err: any) {
         const errMsg = String(err?.message || err);
         spindle.log.error(`[LumiVN] Failed to dispatch action: ${errMsg}`);
@@ -642,14 +637,14 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         spindle.sendToFrontend({
           type: "vn_error",
           error: `Action dispatch failed: ${userNotice}`,
-        });
+        }, effectiveUid);
       }
       break;
     }
 
     case "vn_get_manifest": {
       const manifest = await storage.getManifest();
-      spindle.sendToFrontend({ type: "vn_manifest", manifest });
+      spindle.sendToFrontend({ type: "vn_manifest", manifest }, effectiveUid);
       break;
     }
 
@@ -657,14 +652,14 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
       const manifest = payload.manifest as AssetManifest;
       if (manifest) {
         await storage.saveManifest(manifest);
-        spindle.sendToFrontend({ type: "vn_manifest", manifest });
+        spindle.sendToFrontend({ type: "vn_manifest", manifest }, effectiveUid);
       }
       break;
     }
 
     case "vn_get_director_settings": {
       const settings = await storage.getDirectorSettings();
-      spindle.sendToFrontend({ type: "vn_director_settings", settings });
+      spindle.sendToFrontend({ type: "vn_director_settings", settings }, effectiveUid);
       break;
     }
 
@@ -675,19 +670,19 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         if (typeof (spindle as any).toast?.success === "function") {
           (spindle as any).toast.success("Director prompt saved");
         }
-        spindle.sendToFrontend({ type: "vn_director_settings", settings });
+        spindle.sendToFrontend({ type: "vn_director_settings", settings }, effectiveUid);
         spindle.sendToFrontend({
           type: "vn_log",
           message: "Director prompt and scene notes saved.",
           level: "info",
-        });
+        }, effectiveUid);
       }
       break;
     }
 
     case "vn_get_stat_rules_settings": {
       const settings = await storage.getStatRulesSettings();
-      spindle.sendToFrontend({ type: "vn_stat_rules_settings", settings });
+      spindle.sendToFrontend({ type: "vn_stat_rules_settings", settings }, effectiveUid);
       break;
     }
 
@@ -695,12 +690,12 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
       const settings = payload.settings as StatRulesSettings;
       if (settings) {
         await storage.saveStatRulesSettings(settings);
-        spindle.sendToFrontend({ type: "vn_stat_rules_settings", settings });
+        spindle.sendToFrontend({ type: "vn_stat_rules_settings", settings }, effectiveUid);
         spindle.sendToFrontend({
           type: "vn_log",
           message: "Stat rules and ledger schema updated.",
           level: "info",
-        });
+        }, effectiveUid);
       }
       break;
     }
@@ -717,7 +712,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
           type: "vn_director_logs",
           chatId,
           logs,
-        });
+        }, effectiveUid);
       }
       break;
     }
@@ -736,10 +731,10 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
             type: "vn_log",
             message: `Updated line in message #${messageId.slice(0, 8)}`,
             level: "info",
-          });
+          }, effectiveUid);
         } catch (err: any) {
           spindle.log.error(`[LumiVN] Failed to edit message: ${err.message || err}`);
-          spindle.sendToFrontend({ type: "vn_error", error: `Edit failed: ${String(err.message || err)}` });
+          spindle.sendToFrontend({ type: "vn_error", error: `Edit failed: ${String(err.message || err)}` }, effectiveUid);
         }
       }
       break;
@@ -788,11 +783,7 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
             if (match) mimeType = match[1]!;
             base64 = base64.split(",")[1] ?? "";
           }
-          const binaryString = atob(base64);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-          }
+          const bytes = Buffer.from(base64, "base64");
 
           const upload = await spindle.images.upload({
             data: bytes,
@@ -822,18 +813,18 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         }
 
         await storage.saveManifest(manifest);
-        spindle.sendToFrontend({ type: "vn_manifest", manifest });
+        spindle.sendToFrontend({ type: "vn_manifest", manifest }, effectiveUid);
         spindle.sendToFrontend({
           type: "vn_log",
           message: `Registered: ${category} -> ${finalPlaceKey || `${actorId}/${outfit}/${expression}` || actionName}`,
           level: "info",
-        });
+        }, effectiveUid);
 
         if (chatId) {
-          await processChatTurn(chatId);
+          await processChatTurn(chatId, undefined, undefined, false, undefined, undefined, effectiveUid);
         }
       } catch (err: any) {
-        spindle.sendToFrontend({ type: "vn_error", error: `Upload failed: ${String(err.message || err)}` });
+        spindle.sendToFrontend({ type: "vn_error", error: `Upload failed: ${String(err.message || err)}` }, effectiveUid);
       }
       break;
     }
@@ -900,18 +891,18 @@ spindle.onFrontendMessage(async (msg: unknown, senderUserId?: string) => {
         }
 
         await storage.saveManifest(manifest);
-        spindle.sendToFrontend({ type: "vn_manifest", manifest });
+        spindle.sendToFrontend({ type: "vn_manifest", manifest }, effectiveUid);
         spindle.sendToFrontend({
           type: "vn_log",
           message: `Deleted asset entry: ${category} -> ${key || actionName || `${actorId}/${outfit}/${expression}`}`,
           level: "info",
-        });
+        }, effectiveUid);
 
         if (chatId) {
-          await processChatTurn(chatId);
+          await processChatTurn(chatId, undefined, undefined, false, undefined, undefined, effectiveUid);
         }
       } catch (err: any) {
-        spindle.sendToFrontend({ type: "vn_error", error: `Delete failed: ${String(err.message || err)}` });
+        spindle.sendToFrontend({ type: "vn_error", error: `Delete failed: ${String(err.message || err)}` }, effectiveUid);
       }
       break;
     }

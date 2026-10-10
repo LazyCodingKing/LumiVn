@@ -171,12 +171,24 @@ export class MenuBar {
   }
 
   public openTab(tabId: HudTabId): void {
+    if (this.activeTabId === "phone" && tabId !== "phone") {
+      this.phoneTab.close();
+    }
+    if (this.activeTabId === "diagnostics" && tabId !== "diagnostics") {
+      this.diagnosticsTab.destroy();
+    }
     this.activeTabId = tabId;
     this.renderActiveTab();
     this.panelOverlay.style.display = "flex";
   }
 
   public closeTab(): void {
+    if (this.activeTabId === "phone") {
+      this.phoneTab.close();
+    }
+    if (this.activeTabId === "diagnostics") {
+      this.diagnosticsTab.destroy();
+    }
     this.activeTabId = null;
     this.panelOverlay.style.display = "none";
   }

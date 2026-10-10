@@ -361,4 +361,11 @@ export class DiagnosticsTab {
       updateDirectorCard();
     });
   }
+
+  public destroy(): void {
+    if (this.unsubscribeBus) {
+      this.unsubscribeBus();
+      this.unsubscribeBus = undefined;
+    }
+  }
 }

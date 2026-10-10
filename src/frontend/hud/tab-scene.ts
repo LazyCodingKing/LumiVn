@@ -50,11 +50,13 @@ export class SceneTab {
   }
 
   private async fileToDataUrl(file: { bytes: Uint8Array; mimeType?: string }): Promise<string> {
-    let binary = "";
-    for (let i = 0; i < file.bytes.byteLength; i++) {
-      binary += String.fromCharCode(file.bytes[i]!);
-    }
-    return `data:${file.mimeType || "image/png"};base64,${btoa(binary)}`;
+    return new Promise((resolve, reject) => {
+      const blob = new Blob([file.bytes as any], { type: file.mimeType || "image/png" });
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
   }
 
   public render(ledger: LedgerData, manifest?: AssetManifest): void {

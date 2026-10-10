@@ -169,22 +169,3 @@ export function parseToonDelta(toonText: string): Partial<LedgerData> | null {
 
   return Object.keys(result).length > 0 ? result : null;
 }
-
-/**
- * Returns a tight, self-contained prompt instruction for LLM visual guidance.
- */
-export function getToonPromptInstruction(currentLedger: LedgerData | null): string {
-  const stateSummary = encodeToonState(currentLedger);
-  return `[LumiVN Stage Context]
-${stateSummary}
-
-[Visual Novel Directive]
-Write the reply as standard narrative prose with natural dialogue.
-If the scene location, character expression, or position changes, append an ultra-compact tag at the very end of your reply:
-<!--toon
-scene: place:<place_id>
-actors[N]{id,mood,slot}:
- <actor_id>,<mood>,<slot>
--->
-(Valid moods: neutral, smile, blush, angry, sad, scared, suspicious. Slots: left, center, right.)`;
-}

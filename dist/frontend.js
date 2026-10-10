@@ -25,7 +25,7 @@ function parseTwineChoices(text) {
       choices.push({ text: lbl, action: act });
       return `<button class="vn-inline-choice" data-action="${escapeHtml(act)}">${escapeHtml(lbl)}</button>`;
     } else {
-      const lbl = (twineP2 !== undefined ? twineP1 : twineP1).trim();
+      const lbl = twineP1.trim();
       const act = (twineP2 !== undefined ? twineP2 : twineP1).trim();
       choices.push({ text: lbl, action: act });
       return `<button class="vn-inline-choice" data-action="${escapeHtml(act)}">${escapeHtml(lbl)}</button>`;
@@ -38,7 +38,11 @@ function parseTwineChoices(text) {
 function formatDialogueHtml(rawText) {
   const { cleanText, choices } = parseTwineChoices(rawText);
   let formatted = escapeHtml(cleanText);
-  formatted = formatted.replace(/&lt;button class=&quot;vn-inline-choice&quot; data-action=&quot;([\s\S]*?)&quot;&gt;([\s\S]*?)&lt;\/button&gt;/g, '<button class="vn-inline-choice" data-action="$1">$2</button>');
+  formatted = formatted.replace(/&lt;button class=&quot;vn-inline-choice&quot; data-action=&quot;([\s\S]*?)&quot;&gt;([\s\S]*?)&lt;\/button&gt;/g, (_m, act, lbl) => {
+    const cleanAct = act.replace(/&amp;/g, "&").replace(/&quot;/g, '"');
+    const cleanLbl = lbl.replace(/&amp;/g, "&");
+    return `<button class="vn-inline-choice" data-action="${cleanAct}">${cleanLbl}</button>`;
+  });
   for (const tag of TEXT_EFFECT_IDS) {
     const openRe = new RegExp(`&lt;${tag}&gt;`, "gi");
     const closeRe = new RegExp(`&lt;\\/${tag}&gt;`, "gi");
@@ -4520,6 +4524,10 @@ class PhoneTab {
       window.removeEventListener("keydown", onKeyDown);
     };
   }
+  close() {
+    this.stopCurrentGame?.();
+    this.stopCurrentGame = null;
+  }
 }
 
 // src/frontend/hud/tab-journal.ts
@@ -7790,11 +7798,13 @@ class SceneTab {
     return null;
   }
   async fileToDataUrl(file) {
-    let binary = "";
-    for (let i = 0;i < file.bytes.byteLength; i++) {
-      binary += String.fromCharCode(file.bytes[i]);
-    }
-    return `data:${file.mimeType || "image/png"};base64,${btoa(binary)}`;
+    return new Promise((resolve, reject) => {
+      const blob = new Blob([file.bytes], { type: file.mimeType || "image/png" });
+      const reader = new FileReader;
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
   }
   render(ledger, manifest) {
     if (manifest)
@@ -8654,6 +8664,12 @@ ${note.directorNote}`;
       updateDirectorCard();
     });
   }
+  destroy() {
+    if (this.unsubscribeBus) {
+      this.unsubscribeBus();
+      this.unsubscribeBus = undefined;
+    }
+  }
 }
 
 // src/frontend/hud/menu-bar.ts
@@ -8772,11 +8788,23 @@ class MenuBar {
     this.diagnosticsTab.setStatRulesSettings(settings);
   }
   openTab(tabId) {
+    if (this.activeTabId === "phone" && tabId !== "phone") {
+      this.phoneTab.close();
+    }
+    if (this.activeTabId === "diagnostics" && tabId !== "diagnostics") {
+      this.diagnosticsTab.destroy();
+    }
     this.activeTabId = tabId;
     this.renderActiveTab();
     this.panelOverlay.style.display = "flex";
   }
   closeTab() {
+    if (this.activeTabId === "phone") {
+      this.phoneTab.close();
+    }
+    if (this.activeTabId === "diagnostics") {
+      this.diagnosticsTab.destroy();
+    }
     this.activeTabId = null;
     this.panelOverlay.style.display = "none";
   }
