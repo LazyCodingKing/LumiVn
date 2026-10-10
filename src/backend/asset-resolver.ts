@@ -5,6 +5,7 @@ import type {
   ActorPassions,
   VnPresentationState,
   StageCharacter,
+  StageSlot,
   StageBackground,
   CharacterSpriteLayers,
 } from "../shared/types.js";
@@ -83,16 +84,9 @@ export class AssetResolver {
       return { url: manifest.places["default"]!, isVideo: false };
     }
 
-    // Fallback SVG
-    const svgFallback = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">` +
-      `<defs><linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">` +
-      `<stop offset="0%" stop-color="#141e30"/><stop offset="100%" stop-color="#243b55"/></linearGradient></defs>` +
-      `<rect width="1280" height="720" fill="url(#bg)"/>` +
-      `<text x="640" y="360" font-family="system-ui, sans-serif" font-size="28" fill="#ffffff88" text-anchor="middle">` +
-      `${placeId ? placeId.toUpperCase() : "STAGE BACKGROUND"}</text></svg>`
-    );
-    return { url: svgFallback, isVideo: false };
+    // Procedural Scenic SVG Fallback
+    const scenicSvg = generateScenicSvg(placeId || "STAGE BACKGROUND");
+    return { url: scenicSvg, isVideo: false };
   }
 
   async resolveCharacterSprite(
@@ -151,17 +145,8 @@ export class AssetResolver {
       return { spriteUrl: characterCardAvatarUrl, layers: {}, emotion };
     }
 
-    const svgAvatar = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="800" viewBox="0 0 400 800">` +
-      `<rect width="400" height="800" fill="transparent"/>` +
-      `<circle cx="200" cy="220" r="100" fill="#4a5568" opacity="0.8"/>` +
-      `<path d="M 80 750 C 80 450, 320 450, 320 750 Z" fill="#2d3748" opacity="0.8"/>` +
-      `<text x="200" y="230" font-family="system-ui, sans-serif" font-size="24" fill="#ffffff" text-anchor="middle">` +
-      `${actorId.slice(0, 10).toUpperCase()}</text>` +
-      `<text x="200" y="270" font-family="system-ui, sans-serif" font-size="16" fill="#cbd5e1" text-anchor="middle">` +
-      `(${emotion})</text></svg>`
-    );
-
+    // Stylized Generic NPC Fallback Sprite
+    const svgAvatar = generateGenericNpcSprite(actorId, actor, emotion);
     return { spriteUrl: svgAvatar, layers: {}, emotion };
   }
 
@@ -199,7 +184,7 @@ export class AssetResolver {
 
     if (participants.length === 0) {
       if (ledger.roster && ledger.roster.length > 0) {
-        for (const r of ledger.roster.slice(0, 3)) {
+        for (const r of ledger.roster.slice(0, 5)) {
           participants.push(r.id || r.name || "npc");
         }
       } else if (characterId) {
@@ -207,12 +192,16 @@ export class AssetResolver {
       }
     }
 
-    const slots: Array<"left" | "center" | "right"> =
-      participants.length === 1 ? ["center"] :
-      participants.length === 2 ? ["left", "right"] :
-      ["left", "center", "right"];
+    // Multi-Sprite Staging: supports up to 5 concurrent characters on stage
+    const count = Math.min(participants.length, 5);
+    const slots: StageSlot[] =
+      count === 1 ? ["center"] :
+      count === 2 ? ["left", "right"] :
+      count === 3 ? ["left", "center", "right"] :
+      count === 4 ? ["far-left", "left", "right", "far-right"] :
+      ["far-left", "left", "center", "right", "far-right"];
 
-    for (let i = 0; i < participants.length && i < 3; i++) {
+    for (let i = 0; i < count; i++) {
       const actorId = participants[i]!;
       const actorDossier = ledger.actors?.[actorId];
       const slot = slots[i]!;
@@ -227,7 +216,7 @@ export class AssetResolver {
         normId.split(/[_-]/).includes(normSpeaker) ||
         (normSpeaker.length >= 3 && (normName.includes(normSpeaker) || normId.includes(normSpeaker)))
       );
-      const isSpeaker = isMatch || (participants.length === 1 && normSpeaker !== "narrator");
+      const isSpeaker = isMatch || (count === 1 && normSpeaker !== "narrator");
 
       const latestJournalAction = ledger.journal && ledger.journal.length > 0
         ? ledger.journal[ledger.journal.length - 1]?.action || ""
@@ -262,6 +251,12 @@ export class AssetResolver {
       }
     }
 
+    // BGM resolution from inline prose tags or place/mood
+    const manifest = await this.storage.getManifest();
+    const bgmMatch = prose.match(/(?:🎵\s*Music|BGM|\[Music|【Music|Play music)[：:]\s*([^\n\r\]】]+)/i);
+    const bgmTrack = bgmMatch ? bgmMatch[1]!.trim() : undefined;
+    const bgmUrl = bgmTrack ? (manifest.places[bgmTrack] || undefined) : undefined;
+
     return {
       chatId,
       messageId,
@@ -271,6 +266,78 @@ export class AssetResolver {
       characters: stageCharacters,
       ledger,
       hasBPlotNotification,
+      bgmTrack,
+      bgmUrl,
     };
   }
+}
+
+function generateScenicSvg(place: string): string {
+  const p = (place || "").toLowerCase();
+  let gradientStops = `<stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#1e293b"/>`;
+  let silhouette = `<rect x="0" y="500" width="1280" height="220" fill="#090d16" opacity="0.9"/>`;
+  let ambientIcon = "🏛️";
+
+  if (p.includes("forest") || p.includes("nature") || p.includes("garden") || p.includes("park") || p.includes("woods")) {
+    gradientStops = `<stop offset="0%" stop-color="#064e3b"/><stop offset="60%" stop-color="#022c22"/><stop offset="100%" stop-color="#0f172a"/>`;
+    silhouette = `<path d="M 0 720 L 100 520 L 180 720 L 260 480 L 340 720 L 500 500 L 640 720 L 800 460 L 950 720 L 1100 490 L 1280 720 Z" fill="#022c22" opacity="0.95"/>`;
+    ambientIcon = "🌲";
+  } else if (p.includes("tavern") || p.includes("bar") || p.includes("cafe") || p.includes("restaurant") || p.includes("kitchen")) {
+    gradientStops = `<stop offset="0%" stop-color="#451a03"/><stop offset="60%" stop-color="#271106"/><stop offset="100%" stop-color="#180c05"/>`;
+    silhouette = `<rect x="0" y="580" width="1280" height="140" fill="#180c05"/><circle cx="200" cy="200" r="120" fill="#ea580c" opacity="0.15"/>`;
+    ambientIcon = "🍺";
+  } else if (p.includes("street") || p.includes("city") || p.includes("alley") || p.includes("market") || p.includes("urban") || p.includes("neon")) {
+    gradientStops = `<stop offset="0%" stop-color="#1e1b4b"/><stop offset="50%" stop-color="#0f172a"/><stop offset="100%" stop-color="#030712"/>`;
+    silhouette = `<path d="M 0 720 L 0 450 L 120 450 L 120 380 L 240 380 L 240 500 L 400 500 L 400 320 L 540 320 L 540 720 L 700 720 L 700 400 L 850 400 L 850 350 L 1000 350 L 1000 480 L 1280 480 L 1280 720 Z" fill="#090d16" opacity="0.95"/>`;
+    ambientIcon = "🌃";
+  } else if (p.includes("sky") || p.includes("rooftop") || p.includes("balcony") || p.includes("tower")) {
+    gradientStops = `<stop offset="0%" stop-color="#312e81"/><stop offset="50%" stop-color="#4c1d95"/><stop offset="100%" stop-color="#0f172a"/>`;
+    silhouette = `<circle cx="1000" cy="180" r="60" fill="#fef08a" opacity="0.85"/><path d="M 0 720 L 0 620 L 1280 620 L 1280 720 Z" fill="#090d16"/>`;
+    ambientIcon = "✨";
+  } else if (p.includes("dungeon") || p.includes("cave") || p.includes("ruin") || p.includes("crypt") || p.includes("vault")) {
+    gradientStops = `<stop offset="0%" stop-color="#1c1917"/><stop offset="60%" stop-color="#0c0a09"/><stop offset="100%" stop-color="#000000"/>`;
+    silhouette = `<path d="M 0 0 L 180 200 L 300 0 L 600 150 L 900 0 L 1100 220 L 1280 0 Z" fill="#0c0a09" opacity="0.8"/>`;
+    ambientIcon = "⚔️";
+  }
+
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">` +
+    `<defs><linearGradient id="scenic-bg" x1="0%" y1="0%" x2="100%" y2="100%">${gradientStops}</linearGradient></defs>` +
+    `<rect width="1280" height="720" fill="url(#scenic-bg)"/>` +
+    `${silhouette}` +
+    `<text x="640" y="320" font-family="system-ui, sans-serif" font-size="54" fill="#ffffff22" text-anchor="middle">${ambientIcon}</text>` +
+    `<text x="640" y="380" font-family="system-ui, sans-serif" font-weight="700" font-size="24" fill="#ffffffbb" text-anchor="middle">${place.toUpperCase()}</text>` +
+    `</svg>`
+  );
+}
+
+function generateGenericNpcSprite(actorId: string, actor?: ActorDossier, emotion = "neutral"): string {
+  const name = (actor?.name || actorId).toLowerCase();
+  const desc = JSON.stringify(actor || {}).toLowerCase();
+  const isFemale = name.includes("girl") || name.includes("woman") || name.includes("lady") || name.includes("she") || name.includes("her") || desc.includes("female") || desc.includes("woman") || desc.includes("dress") || desc.includes("skirt");
+  const isKnight = name.includes("guard") || name.includes("knight") || name.includes("soldier") || name.includes("warrior") || desc.includes("armor") || desc.includes("sword");
+  const isMage = name.includes("mage") || name.includes("wizard") || name.includes("witch") || name.includes("priest") || desc.includes("magic") || desc.includes("spell");
+
+  const themePrimary = isFemale ? "#a855f7" : isKnight ? "#ef4444" : isMage ? "#3b82f6" : "#6366f1";
+  const themeSecondary = isFemale ? "#ec4899" : isKnight ? "#991b1b" : isMage ? "#1d4ed8" : "#4338ca";
+  const roleIcon = isFemale ? "♀" : isKnight ? "⚔" : isMage ? "🔮" : "👤";
+  const displayName = (actor?.name || actorId).toUpperCase().slice(0, 16);
+
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="800" viewBox="0 0 400 800">` +
+    `<defs>` +
+    `<linearGradient id="npc-grad-${displayName.replace(/[^a-zA-Z0-9]/g, '')}" x1="0%" y1="0%" x2="100%" y2="100%">` +
+    `<stop offset="0%" stop-color="${themePrimary}" stop-opacity="0.9"/>` +
+    `<stop offset="100%" stop-color="${themeSecondary}" stop-opacity="0.95"/>` +
+    `</linearGradient>` +
+    `</defs>` +
+    `<rect width="400" height="800" fill="transparent"/>` +
+    `<circle cx="200" cy="200" r="85" fill="url(#npc-grad-${displayName.replace(/[^a-zA-Z0-9]/g, '')})"/>` +
+    `<path d="M 90 760 C 90 440, 140 330, 200 330 C 260 330, 310 440, 310 760 Z" fill="url(#npc-grad-${displayName.replace(/[^a-zA-Z0-9]/g, '')})"/>` +
+    `<circle cx="200" cy="200" r="70" fill="#ffffff" opacity="0.15"/>` +
+    `<text x="200" y="215" font-family="system-ui, sans-serif" font-size="44" fill="#ffffff" text-anchor="middle" font-weight="bold">${roleIcon}</text>` +
+    `<text x="200" y="380" font-family="system-ui, sans-serif" font-size="20" fill="#ffffff" text-anchor="middle" font-weight="800" letter-spacing="1">${displayName}</text>` +
+    `<text x="200" y="415" font-family="system-ui, sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle">(${emotion})</text>` +
+    `</svg>`
+  );
 }

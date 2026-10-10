@@ -302,10 +302,12 @@ export interface CharacterSpriteLayers {
   accessories?: string;
 }
 
+export type StageSlot = "far-left" | "left" | "center" | "right" | "far-right";
+
 export interface StageCharacter {
   actorId: string;
   name: string;
-  slot: "left" | "center" | "right";
+  slot: StageSlot;
   isSpeaker: boolean;
   layers: CharacterSpriteLayers;
   spriteUrl?: string; // Fallback or composite URL
@@ -339,6 +341,8 @@ export interface VnPresentationState {
   ledger: LedgerData;
   hasBPlotNotification?: boolean;
   directorNote?: DirectorNoteData;
+  bgmTrack?: string;
+  bgmUrl?: string;
 }
 
 export interface AssetRecord {
@@ -409,6 +413,7 @@ export interface StatRulesSettings {
   ledgerPrompt: string;
   enabled: boolean;
   mode: "mvu_quiet" | "inline_interceptor" | "passive";
+  rpgPrompt?: string;
 }
 
 export interface StatRulesSettingsPayload {

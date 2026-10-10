@@ -128,20 +128,113 @@ export class VnAudioEngine {
     } catch {}
   }
 
-  public playBgm(url: string): void {
+  private currentBgmTrack: string | null = null;
+  private customBgmMap: Record<string, string> = {};
+
+  public static readonly DEFAULT_MOOD_BGM_MAP: Record<string, string> = {
+    happy: "daily_happy",
+    joyful: "daily_happy",
+    cheerful: "daily_happy",
+    romantic: "romantic_piano",
+    love: "romantic_piano",
+    tender: "romantic_piano",
+    warm: "warm_acoustic",
+    tense: "suspense_tension",
+    danger: "combat_intense",
+    combat: "combat_intense",
+    action: "combat_intense",
+    sad: "melancholy_strings",
+    melancholy: "melancholy_strings",
+    grief: "melancholy_strings",
+    mysterious: "mystery_ambient",
+    mystery: "mystery_ambient",
+    eerie: "mystery_ambient",
+    peaceful: "calm_ambient",
+    calm: "calm_ambient",
+    daily: "daily_ambient",
+    ambient: "daily_ambient",
+  };
+
+  public extractBgmTag(text: string): string | null {
+    if (!text) return null;
+    const match = text.match(/(?:🎵\s*Music|BGM|\[Music|【Music|Play music)[：:]\s*([^\n\r\]】]+)/i);
+    return match ? match[1]!.trim() : null;
+  }
+
+  public setCustomBgmMap(map: Record<string, string>): void {
+    this.customBgmMap = { ...map };
+  }
+
+  public getCustomBgmMap(): Record<string, string> {
+    return { ...this.customBgmMap };
+  }
+
+  public getCurrentBgm(): string | null {
+    return this.currentBgmTrack;
+  }
+
+  public setBgmVolume(volume: number): void {
+    this.bgmVolume = Math.max(0, Math.min(1, volume));
+    if (this.bgmAudio) {
+      this.bgmAudio.volume = this.bgmVolume;
+    }
+  }
+
+  public getBgmVolume(): number {
+    return this.bgmVolume;
+  }
+
+  public handleDynamicBgm(
+    text: string,
+    mood?: string,
+    place?: string,
+    manifestBgm?: Record<string, string>
+  ): string | null {
+    // 1. Explicit tag in prose
+    const tagged = this.extractBgmTag(text);
+    if (tagged) {
+      const url = manifestBgm?.[tagged] || this.customBgmMap[tagged] || tagged;
+      this.playBgm(url, tagged);
+      return tagged;
+    }
+
+    // 2. Explicit place BGM
+    if (place) {
+      const cleanPlace = place.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      if (manifestBgm?.[cleanPlace] || this.customBgmMap[cleanPlace]) {
+        const url = manifestBgm?.[cleanPlace] || this.customBgmMap[cleanPlace]!;
+        this.playBgm(url, cleanPlace);
+        return cleanPlace;
+      }
+    }
+
+    // 3. Dominant mood BGM
+    if (mood) {
+      const normMood = mood.toLowerCase().trim();
+      const mappedTrack = VnAudioEngine.DEFAULT_MOOD_BGM_MAP[normMood];
+      if (mappedTrack) {
+        const url = manifestBgm?.[mappedTrack] || this.customBgmMap[mappedTrack] || mappedTrack;
+        this.playBgm(url, mappedTrack);
+        return mappedTrack;
+      }
+    }
+
+    return null;
+  }
+
+  public playBgm(url: string, trackName?: string): void {
     if (!url) {
       this.stopBgm();
       return;
     }
 
-    if (this.bgmAudio && this.bgmAudio.src.includes(url)) {
-      if (this.bgmAudio.paused && !this.isMuted) {
-        this.bgmAudio.play().catch(() => {});
-      }
+    const trackId = trackName || url;
+    if (this.currentBgmTrack === trackId && this.bgmAudio && !this.bgmAudio.paused) {
       return;
     }
 
     this.stopBgm();
+    this.currentBgmTrack = trackId;
 
     try {
       this.bgmAudio = new Audio(url);
@@ -160,6 +253,7 @@ export class VnAudioEngine {
       } catch {}
       this.bgmAudio = null;
     }
+    this.currentBgmTrack = null;
   }
 
   public destroy(): void {
@@ -172,3 +266,4 @@ export class VnAudioEngine {
     }
   }
 }
+

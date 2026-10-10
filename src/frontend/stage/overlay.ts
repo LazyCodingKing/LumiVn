@@ -241,6 +241,9 @@ export class StageOverlay {
     if (!this.active) return;
     this.active = false;
 
+    this.audioEngine.stopBgm();
+    this.ttsEngine.stop();
+
     const targetChatId = this.resolveChatId();
     this.ctx.sendToBackend({
       type: "vn_stage_closed",
@@ -278,6 +281,20 @@ export class StageOverlay {
     // Weather / particle ambience from ledger place
     const place = state.ledger?.scene?.place || "";
     this.stageRenderer.setWeather(place);
+
+    // Dynamic BGM handling (explicit track URL, inline [Music: ...]/🎵 tags, or mood/place mapping)
+    if (state.bgmUrl) {
+      this.audioEngine.playBgm(state.bgmUrl);
+    } else {
+      const fullText = (state.paragraphs || []).join(" ");
+      const primaryEmotion = state.characters?.[0]?.emotion;
+      this.audioEngine.handleDynamicBgm(
+        fullText,
+        primaryEmotion,
+        place,
+        this.manifest?.places
+      );
+    }
 
     // Extract known actors for robust dialogue speaker resolution
     const actorNames = state.characters.map((c) => c.name);
@@ -553,9 +570,20 @@ export class StageOverlay {
         padding-bottom: 90px;
         pointer-events: none;
       }
+      @keyframes vn-char-slide-in {
+        from {
+          opacity: 0;
+          transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) + 20px)) scale(calc(var(--char-scale, 1) * 0.96));
+        }
+        to {
+          opacity: 1;
+          transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1));
+        }
+      }
+
       .vn-char-slot {
         height: 85%;
-        max-width: 32%;
+        max-width: 25%;
         position: relative;
         display: flex;
         justify-content: center;
@@ -563,6 +591,38 @@ export class StageOverlay {
         transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1));
         transform-origin: bottom center;
         transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), filter 0.35s ease, opacity 0.35s ease;
+        animation: vn-char-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+        animation-delay: var(--enter-delay, 0s);
+        pointer-events: auto;
+        cursor: pointer;
+      }
+      .vn-char-slot:hover {
+        transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 6px)) scale(calc(var(--char-scale, 1) * 1.02));
+        z-index: 6;
+      }
+      .vn-char-slot:hover .vn-char-tag {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+      .vn-char-tag {
+        position: absolute;
+        bottom: 12px;
+        left: 50%;
+        transform: translateX(-50%) translateY(6px);
+        background: rgba(15, 23, 42, 0.88);
+        border: 1px solid rgba(129, 140, 248, 0.4);
+        color: #f8fafc;
+        padding: 3px 10px;
+        border-radius: 9999px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        backdrop-filter: blur(8px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
       }
       .vn-char-speaker {
         transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 6px)) scale(calc(var(--char-scale, 1) * 1.04));
@@ -576,9 +636,11 @@ export class StageOverlay {
         filter: drop-shadow(0 8px 16px rgba(0,0,0,0.7)) brightness(0.88) saturate(0.92);
         opacity: 1;
       }
-      .vn-char-left { order: 1; }
-      .vn-char-center { order: 2; }
-      .vn-char-right { order: 3; }
+      .vn-char-far-left { order: 1; }
+      .vn-char-left { order: 2; }
+      .vn-char-center { order: 3; }
+      .vn-char-right { order: 4; }
+      .vn-char-far-right { order: 5; }
 
       .vn-char-sprite {
         height: 100%;
@@ -810,34 +872,47 @@ export class StageOverlay {
         white-space: nowrap;
       }
 
-      /* HUD Menu Bar */
+      /* HUD Menu Bar - Vertical Navigation Rail on Left */
       .vn-hud-menubar {
         position: fixed;
-        top: 16px;
-        right: 16px;
+        top: 68px;
+        left: 16px;
         z-index: 9999;
         display: flex;
-        gap: 8px;
+        flex-direction: column;
+        gap: 6px;
+        max-height: calc(100vh - 90px);
+        overflow-y: auto;
+        scrollbar-width: none;
       }
+      .vn-hud-menubar::-webkit-scrollbar { display: none; }
       .vn-hud-btn {
         background: rgba(15, 23, 42, 0.85);
         border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 8px;
-        padding: 8px 14px;
+        padding: 7px 12px;
         color: #f8fafc;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 600;
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 7px;
         cursor: pointer;
         backdrop-filter: blur(8px);
         position: relative;
         transition: all 0.2s ease;
+        white-space: nowrap;
       }
       .vn-hud-btn:hover {
         background: rgba(30, 41, 59, 0.95);
         border-color: #818cf8;
+        color: #fff;
+      }
+      .vn-hud-btn.active {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.35), rgba(139, 92, 246, 0.25));
+        border-color: #a5b4fc;
+        color: #fff;
+        box-shadow: 0 0 10px rgba(99, 102, 241, 0.35);
       }
       .vn-hud-badge {
         position: absolute;
@@ -879,14 +954,30 @@ export class StageOverlay {
         background: rgba(15, 23, 42, 0.9);
         border: 1px solid rgba(255, 255, 255, 0.16);
         border-radius: 20px;
-        width: min(780px, 94%);
-        max-height: 84vh;
+        width: min(840px, calc(94vw - 110px));
+        margin-left: 110px;
+        max-height: 86vh;
         display: flex;
         flex-direction: column;
         overflow: hidden;
         position: relative;
         backdrop-filter: blur(24px);
         box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85), 0 0 1px rgba(255, 255, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+      }
+      @media (max-width: 768px) {
+        .vn-hud-menubar {
+          top: auto;
+          bottom: 16px;
+          left: 16px;
+          right: 16px;
+          flex-direction: row;
+          max-height: none;
+          overflow-x: auto;
+        }
+        .vn-hud-modal {
+          margin-left: 0;
+          width: 96%;
+        }
       }
       .vn-hud-close-btn {
         position: absolute;

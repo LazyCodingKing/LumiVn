@@ -23,9 +23,11 @@ export class DiagnosticsTab {
     const modeSelect = this.root.querySelector("#vn-mvu-mode-select") as HTMLSelectElement | null;
     const rulesInput = this.root.querySelector("#vn-stat-rules-input") as HTMLTextAreaElement | null;
     const ledgerInput = this.root.querySelector("#vn-ledger-prompt-input") as HTMLTextAreaElement | null;
+    const rpgInput = this.root.querySelector("#vn-rpg-rules-input") as HTMLTextAreaElement | null;
     if (modeSelect) modeSelect.value = settings.mode;
     if (rulesInput) rulesInput.value = settings.statRules;
     if (ledgerInput) ledgerInput.value = settings.ledgerPrompt;
+    if (rpgInput) rpgInput.value = settings.rpgPrompt || "";
   }
 
   public render(ledger: LedgerData, manifest?: AssetManifest): void {
@@ -220,9 +222,11 @@ export class DiagnosticsTab {
         </select>
       </div>
       <label style="font-size: 10px; color: #94a3b8;">Stat Rules Formulation:</label>
-      <textarea id="vn-stat-rules-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      <textarea id="vn-stat-rules-input" style="width: 100%; height: 95px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema:</label>
-      <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 95px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      <label style="font-size: 10px; color: #94a3b8;">RPG & Combat Rules Prompt (Tactical Directives):</label>
+      <textarea id="vn-rpg-rules-input" style="width: 100%; height: 85px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       <div style="display:flex; justify-content:flex-end;">
         <button id="vn-save-rules-btn" style="background: #0284c7; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; font-size: 11px; font-weight: 700; cursor: pointer;">💾 Save & Update Rules</button>
       </div>
@@ -232,12 +236,14 @@ export class DiagnosticsTab {
     const modeSelect = rulesCard.querySelector("#vn-mvu-mode-select") as HTMLSelectElement | null;
     const rulesInput = rulesCard.querySelector("#vn-stat-rules-input") as HTMLTextAreaElement | null;
     const ledgerInput = rulesCard.querySelector("#vn-ledger-prompt-input") as HTMLTextAreaElement | null;
+    const rpgInput = rulesCard.querySelector("#vn-rpg-rules-input") as HTMLTextAreaElement | null;
     const saveRulesBtn = rulesCard.querySelector("#vn-save-rules-btn") as HTMLButtonElement | null;
 
     if (this.statRulesSettings) {
       if (modeSelect) modeSelect.value = this.statRulesSettings.mode;
       if (rulesInput) rulesInput.value = this.statRulesSettings.statRules;
       if (ledgerInput) ledgerInput.value = this.statRulesSettings.ledgerPrompt;
+      if (rpgInput) rpgInput.value = this.statRulesSettings.rpgPrompt || "";
     } else {
       this.ctx?.sendToBackend?.({ type: "vn_get_stat_rules_settings" });
     }
@@ -247,6 +253,7 @@ export class DiagnosticsTab {
         mode: (modeSelect?.value as any) || "mvu_quiet",
         statRules: rulesInput?.value || "",
         ledgerPrompt: ledgerInput?.value || "",
+        rpgPrompt: rpgInput?.value || "",
         enabled: true,
       };
       this.statRulesSettings = updated;

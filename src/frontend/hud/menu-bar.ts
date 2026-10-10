@@ -10,6 +10,7 @@ import { PhoneTab } from "./tab-phone.js";
 import { JournalTab } from "./tab-journal.js";
 import { SceneTab } from "./tab-scene.js";
 import { DiagnosticsTab } from "./tab-diagnostics.js";
+import { RpgTab } from "./tab-rpg.js";
 import type { SpriteTransform } from "../stage/sprite-transform.js";
 import type { VnTtsEngine } from "../stage/tts-engine.js";
 
@@ -23,6 +24,7 @@ export type HudTabId =
   | "phone"
   | "journal"
   | "scene"
+  | "rpg"
   | "diagnostics";
 
 export interface MenuBarOptions {
@@ -48,13 +50,17 @@ export class MenuBar {
   private phoneTab: PhoneTab;
   private journalTab: JournalTab;
   private sceneTab: SceneTab;
+  private rpgTab: RpgTab;
   private diagnosticsTab: DiagnosticsTab;
 
   private activeTabId: HudTabId | null = null;
   private currentLedger: LedgerData = {};
   private currentManifest?: AssetManifest;
 
-  constructor(options: MenuBarOptions) {
+  constructor(options: MenuBarOptions | ((actionText: string) => void)) {
+    const opts: MenuBarOptions =
+      typeof options === "function" ? { ctx: {} as any, onAction: options } : options;
+
     this.root = document.createElement("div");
     this.root.className = "vn-hud-menubar";
 
@@ -82,28 +88,30 @@ export class MenuBar {
     });
 
     // Instantiate tab views
-    this.charactersTab = new CharactersTab(options.ttsEngine, options.ctx);
+    this.charactersTab = new CharactersTab(opts.ttsEngine, opts.ctx);
     this.bplotsTab = new BPlotsTab();
-    this.wardrobeTab = new WardrobeTab(options.onAction);
+    this.wardrobeTab = new WardrobeTab(opts.onAction);
     this.statsTab = new StatsTab();
-    this.inventoryTab = new InventoryTab(options.onAction);
-    this.mapTab = new MapTab(options.onAction);
-    this.phoneTab = new PhoneTab(options.ctx, options.onAction, options.isOverlayActive);
+    this.inventoryTab = new InventoryTab(opts.onAction);
+    this.mapTab = new MapTab(opts.onAction);
+    this.phoneTab = new PhoneTab(opts.ctx, opts.onAction, opts.isOverlayActive);
     this.journalTab = new JournalTab();
-    this.sceneTab = new SceneTab(options.ctx, options.onTransformChange);
-    this.diagnosticsTab = new DiagnosticsTab(options.ctx);
+    this.sceneTab = new SceneTab(opts.ctx, opts.onTransformChange);
+    this.rpgTab = new RpgTab(opts.ctx, opts.onAction);
+    this.diagnosticsTab = new DiagnosticsTab(opts.ctx);
 
     // Render bar buttons
     const barItems: Array<{ id: HudTabId; icon: string; label: string }> = [
       { id: "characters", icon: "👥", label: "Cast" },
-      { id: "bplots", icon: "📡", label: "B-Plots" },
-      { id: "wardrobe", icon: "👗", label: "Wardrobe" },
       { id: "stats", icon: "📊", label: "Stats" },
+      { id: "rpg", icon: "⚔️", label: "RPG / Dice" },
       { id: "inventory", icon: "🎒", label: "Inventory" },
+      { id: "wardrobe", icon: "👗", label: "Wardrobe" },
       { id: "map", icon: "🗺️", label: "Map" },
       { id: "phone", icon: "📱", label: "Phone" },
       { id: "journal", icon: "📜", label: "Journal" },
       { id: "scene", icon: "🎬", label: "Scene" },
+      { id: "bplots", icon: "📡", label: "B-Plots" },
       { id: "diagnostics", icon: "📋", label: "Copy / Diag" },
     ];
 
@@ -168,6 +176,7 @@ export class MenuBar {
 
   public setStatRulesSettings(settings: any): void {
     this.diagnosticsTab.setStatRulesSettings(settings);
+    this.rpgTab.setStatRulesSettings(settings);
   }
 
   public openTab(tabId: HudTabId): void {
@@ -178,6 +187,17 @@ export class MenuBar {
       this.diagnosticsTab.destroy();
     }
     this.activeTabId = tabId;
+
+    // Highlight active button in left vertical rail
+    this.root.querySelectorAll(".vn-hud-btn").forEach((btn) => {
+      const b = btn as HTMLElement;
+      if (b.dataset.tabId === tabId) {
+        b.classList.add("active");
+      } else {
+        b.classList.remove("active");
+      }
+    });
+
     this.renderActiveTab();
     this.panelOverlay.style.display = "flex";
   }
@@ -190,6 +210,7 @@ export class MenuBar {
       this.diagnosticsTab.destroy();
     }
     this.activeTabId = null;
+    this.root.querySelectorAll(".vn-hud-btn").forEach((b) => b.classList.remove("active"));
     this.panelOverlay.style.display = "none";
   }
 
@@ -200,6 +221,14 @@ export class MenuBar {
         this.charactersTab.render(this.currentLedger, this.currentManifest);
         this.panelBody.appendChild(this.charactersTab.root);
         break;
+      case "stats":
+        this.statsTab.render(this.currentLedger);
+        this.panelBody.appendChild(this.statsTab.root);
+        break;
+      case "rpg":
+        this.rpgTab.render(this.currentLedger, this.currentManifest);
+        this.panelBody.appendChild(this.rpgTab.root);
+        break;
       case "bplots":
         this.bplotsTab.render(this.currentLedger);
         this.panelBody.appendChild(this.bplotsTab.root);
@@ -207,10 +236,6 @@ export class MenuBar {
       case "wardrobe":
         this.wardrobeTab.render(this.currentLedger);
         this.panelBody.appendChild(this.wardrobeTab.root);
-        break;
-      case "stats":
-        this.statsTab.render(this.currentLedger);
-        this.panelBody.appendChild(this.statsTab.root);
         break;
       case "inventory":
         this.inventoryTab.render(this.currentLedger);

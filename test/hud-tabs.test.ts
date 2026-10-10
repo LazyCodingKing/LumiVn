@@ -23,6 +23,8 @@ import { SceneTab } from "../src/frontend/hud/tab-scene.js";
 import { BPlotsTab } from "../src/frontend/hud/tab-bplots.js";
 import { MenuBar } from "../src/frontend/hud/menu-bar.js";
 import { DiagnosticsTab } from "../src/frontend/hud/tab-diagnostics.js";
+import { RpgTab } from "../src/frontend/hud/tab-rpg.js";
+import { VnAudioEngine } from "../src/frontend/stage/audio-player.js";
 import { diagBus } from "../src/frontend/utils/diag-bus.js";
 import { syncManifestLibrary } from "../src/backend/storage.js";
 
@@ -642,6 +644,69 @@ describe("End-to-End YAML Parsing & HUD Tab Rendering", () => {
 
     // Restart key
     expect(parsePhoneGameKey({ key: "r" }).restart).toBe(true);
+  });
+
+  test("16. RpgTab renders vitals, skill aptitudes, interactive dice roller, and customizable RPG rules prompt editor", () => {
+    let triggeredAction = "";
+    const mockCtx: any = {
+      getActiveChat: () => ({ id: "chat-123" }),
+      sendToBackend: () => {},
+    };
+    const tab = new RpgTab(mockCtx, (act) => { triggeredAction = act; });
+    tab.render(parsedLedger, "user");
+
+    const html = tab.root.innerHTML;
+    expect(html).toContain("RPG Rules, Vitals &amp; Dice Engine");
+    expect(html).toContain("Health (HP)");
+    expect(html).toContain("Energy / Mana (MP)");
+    expect(html).toContain("Tabletop RPG Dice Roller");
+    expect(html).toContain("D20");
+    expect(html).toContain("RPG Stat Rules &amp; Combat Prompt Directive");
+    expect(html).toContain("Save RPG Rules");
+    expect(html).toContain("Reset to Default");
+
+    // Test dice roll interaction
+    const rollBtn = tab.root.querySelector("#vn-roll-dice-btn") as HTMLButtonElement | null;
+    expect(rollBtn).not.toBeNull();
+    rollBtn?.click();
+
+    const resultBox = tab.root.querySelector("#vn-dice-result-box");
+    expect(resultBox?.textContent).toContain("Rolled");
+    expect(resultBox?.textContent).toContain("on d20");
+    expect(resultBox?.textContent).toContain("Use in Action");
+  });
+
+  test("17. VnAudioEngine handles dynamic BGM tags, mood mapping, and place fallback", () => {
+    const engine = new VnAudioEngine();
+
+    // 1. Tag extraction from prose
+    const track1 = engine.handleDynamicBgm("Suddenly a clash occurs! 🎵 Music: battle_theme", "tense");
+    expect(track1).toBe("battle_theme");
+    expect(engine.getCurrentBgm()).toBe("battle_theme");
+
+    // 2. Bracketed tag extraction
+    const track2 = engine.handleDynamicBgm("A mystery unfolds. [Music: dungeon_ambience]");
+    expect(track2).toBe("dungeon_ambience");
+    expect(engine.getCurrentBgm()).toBe("dungeon_ambience");
+
+    // 3. Mood fallback mapping
+    const track3 = engine.handleDynamicBgm("A warm and joyful morning.", "happy");
+    expect(track3).toBe("daily_happy");
+    expect(engine.getCurrentBgm()).toBe("daily_happy");
+
+    // 4. Place mapping
+    const track4 = engine.handleDynamicBgm(
+      "Entering the noisy tavern.",
+      undefined,
+      "tavern",
+      { tavern: "/audio/tavern_bgm.mp3" }
+    );
+    expect(track4).toBe("tavern");
+    expect(engine.getCurrentBgm()).toBe("tavern");
+
+    // Stop BGM
+    engine.stopBgm();
+    expect(engine.getCurrentBgm()).toBeNull();
   });
 });
 

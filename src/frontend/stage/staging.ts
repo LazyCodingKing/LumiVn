@@ -102,11 +102,13 @@ export class StageRenderer {
   public setCharacters(characters: StageCharacter[]): void {
     this.charactersContainer.innerHTML = "";
 
-    for (const char of characters) {
+    for (let index = 0; index < characters.length; index++) {
+      const char = characters[index]!;
       const slotEl = document.createElement("div");
       slotEl.className = `vn-char-slot vn-char-${char.slot} ${char.isSpeaker ? "vn-char-speaker" : "vn-char-inactive"}`;
       slotEl.dataset.actorId = char.actorId;
       slotEl.dataset.actorName = char.name;
+      slotEl.style.setProperty("--enter-delay", `${index * 0.08}s`);
 
       const transform = getSpriteTransform(char.actorId);
       this.applyTransformToSlot(slotEl, transform);
@@ -148,6 +150,12 @@ export class StageRenderer {
         };
         slotEl.appendChild(img);
       }
+
+      // Visual Staging Hover Name Badge
+      const nameTag = document.createElement("span");
+      nameTag.className = "vn-char-tag";
+      nameTag.textContent = char.name;
+      slotEl.appendChild(nameTag);
 
       this.charactersContainer.appendChild(slotEl);
     }

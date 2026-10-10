@@ -77,9 +77,13 @@ export async function evaluateDirectorInterceptor(
   let activeDirective = directorActive ? formatDirectorDirective(settings) : "";
 
   if (inlineStatsActive && statSettings) {
+    let statRulesBlock = `${statSettings.statRules}\n\n${statSettings.ledgerPrompt}`;
+    if (statSettings.rpgPrompt?.trim()) {
+      statRulesBlock = `${statSettings.rpgPrompt.trim()}\n\n${statRulesBlock}`;
+    }
     activeDirective = activeDirective
-      ? `${activeDirective}\n\n${statSettings.statRules}\n\n${statSettings.ledgerPrompt}`
-      : `${statSettings.statRules}\n\n${statSettings.ledgerPrompt}`;
+      ? `${activeDirective}\n\n${statRulesBlock}`
+      : statRulesBlock;
   }
 
   if (!activeDirective.trim()) return messages;

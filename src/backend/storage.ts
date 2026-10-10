@@ -74,9 +74,16 @@ export function syncManifestLibrary(manifest: AssetManifest): AssetManifest {
   return manifest;
 }
 
+export const DEFAULT_RPG_PROMPT = `RPG & COMBAT RULES DIRECTIVE:
+1. STAT & ATTRIBUTE TESTS: When an action has uncertain success, calculate against the actor's combat tier, aptitudes, and relevant stats.
+2. COMBAT ROUNDS: Tactical resolution respects distance, positioning, weapon range, physical stamina/integrity, and environmental hazards.
+3. DICE & CHANCE: D20 checks respect Natural 20 (Critical Success) and Natural 1 (Critical Fumble). Modifiers apply from attributes and situational advantage.
+4. CONSEQUENCES: Wounds reduce physical integrity, cause fatigue, and alter passions and stance. Record status mutations in ledger journal.`;
+
 export const DEFAULT_STAT_RULES_SETTINGS: StatRulesSettings = {
   statRules: DEFAULT_STAT_RULES,
   ledgerPrompt: DEFAULT_LEDGER_PROMPT,
+  rpgPrompt: DEFAULT_RPG_PROMPT,
   enabled: true,
   mode: "mvu_quiet",
 };

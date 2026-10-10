@@ -887,11 +887,13 @@ class StageRenderer {
   }
   setCharacters(characters) {
     this.charactersContainer.innerHTML = "";
-    for (const char of characters) {
+    for (let index = 0;index < characters.length; index++) {
+      const char = characters[index];
       const slotEl = document.createElement("div");
       slotEl.className = `vn-char-slot vn-char-${char.slot} ${char.isSpeaker ? "vn-char-speaker" : "vn-char-inactive"}`;
       slotEl.dataset.actorId = char.actorId;
       slotEl.dataset.actorName = char.name;
+      slotEl.style.setProperty("--enter-delay", `${index * 0.08}s`);
       const transform = getSpriteTransform(char.actorId);
       this.applyTransformToSlot(slotEl, transform);
       const hasLayers = char.layers && (char.layers.base || char.layers.outfit || char.layers.expression);
@@ -931,6 +933,10 @@ class StageRenderer {
         };
         slotEl.appendChild(img);
       }
+      const nameTag = document.createElement("span");
+      nameTag.className = "vn-char-tag";
+      nameTag.textContent = char.name;
+      slotEl.appendChild(nameTag);
       this.charactersContainer.appendChild(slotEl);
     }
   }
@@ -9761,12 +9767,15 @@ class DiagnosticsTab {
     const modeSelect = this.root.querySelector("#vn-mvu-mode-select");
     const rulesInput = this.root.querySelector("#vn-stat-rules-input");
     const ledgerInput = this.root.querySelector("#vn-ledger-prompt-input");
+    const rpgInput = this.root.querySelector("#vn-rpg-rules-input");
     if (modeSelect)
       modeSelect.value = settings.mode;
     if (rulesInput)
       rulesInput.value = settings.statRules;
     if (ledgerInput)
       ledgerInput.value = settings.ledgerPrompt;
+    if (rpgInput)
+      rpgInput.value = settings.rpgPrompt || "";
   }
   render(ledger, manifest) {
     this.currentLedger = ledger;
@@ -9951,9 +9960,11 @@ ${note.directorNote}`;
         </select>
       </div>
       <label style="font-size: 10px; color: #94a3b8;">Stat Rules Formulation:</label>
-      <textarea id="vn-stat-rules-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      <textarea id="vn-stat-rules-input" style="width: 100%; height: 95px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       <label style="font-size: 10px; color: #94a3b8;">Ledger Output Schema:</label>
-      <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 110px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      <textarea id="vn-ledger-prompt-input" style="width: 100%; height: 95px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+      <label style="font-size: 10px; color: #94a3b8;">RPG & Combat Rules Prompt (Tactical Directives):</label>
+      <textarea id="vn-rpg-rules-input" style="width: 100%; height: 85px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 10px; padding: 6px; box-sizing: border-box; resize: vertical;"></textarea>
       <div style="display:flex; justify-content:flex-end;">
         <button id="vn-save-rules-btn" style="background: #0284c7; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; font-size: 11px; font-weight: 700; cursor: pointer;">\uD83D\uDCBE Save & Update Rules</button>
       </div>
@@ -9962,6 +9973,7 @@ ${note.directorNote}`;
     const modeSelect = rulesCard.querySelector("#vn-mvu-mode-select");
     const rulesInput = rulesCard.querySelector("#vn-stat-rules-input");
     const ledgerInput = rulesCard.querySelector("#vn-ledger-prompt-input");
+    const rpgInput = rulesCard.querySelector("#vn-rpg-rules-input");
     const saveRulesBtn = rulesCard.querySelector("#vn-save-rules-btn");
     if (this.statRulesSettings) {
       if (modeSelect)
@@ -9970,6 +9982,8 @@ ${note.directorNote}`;
         rulesInput.value = this.statRulesSettings.statRules;
       if (ledgerInput)
         ledgerInput.value = this.statRulesSettings.ledgerPrompt;
+      if (rpgInput)
+        rpgInput.value = this.statRulesSettings.rpgPrompt || "";
     } else {
       this.ctx?.sendToBackend?.({ type: "vn_get_stat_rules_settings" });
     }
@@ -9978,6 +9992,7 @@ ${note.directorNote}`;
         mode: modeSelect?.value || "mvu_quiet",
         statRules: rulesInput?.value || "",
         ledgerPrompt: ledgerInput?.value || "",
+        rpgPrompt: rpgInput?.value || "",
         enabled: true
       };
       this.statRulesSettings = updated;
@@ -10163,6 +10178,331 @@ ${note.directorNote}`;
   }
 }
 
+// src/backend/storage.ts
+var DEFAULT_RPG_PROMPT = `RPG & COMBAT RULES DIRECTIVE:
+1. STAT & ATTRIBUTE TESTS: When an action has uncertain success, calculate against the actor's combat tier, aptitudes, and relevant stats.
+2. COMBAT ROUNDS: Tactical resolution respects distance, positioning, weapon range, physical stamina/integrity, and environmental hazards.
+3. DICE & CHANCE: D20 checks respect Natural 20 (Critical Success) and Natural 1 (Critical Fumble). Modifiers apply from attributes and situational advantage.
+4. CONSEQUENCES: Wounds reduce physical integrity, cause fatigue, and alter passions and stance. Record status mutations in ledger journal.`;
+
+// src/frontend/hud/tab-rpg.ts
+class RpgTab {
+  root;
+  ctx;
+  onAction;
+  currentLedger = {};
+  currentManifest;
+  selectedActorId = "user";
+  selectedSides = 20;
+  modifier = 0;
+  lastRoll = null;
+  statRulesSettings = null;
+  constructor(ctx, onAction) {
+    this.ctx = ctx;
+    this.onAction = onAction;
+    this.root = document.createElement("div");
+    this.root.className = "vn-hud-tab vn-tab-rpg";
+  }
+  setStatRulesSettings(settings) {
+    this.statRulesSettings = settings;
+    const promptInput = this.root.querySelector("#vn-rpg-prompt-input");
+    if (promptInput) {
+      promptInput.value = settings.rpgPrompt || DEFAULT_RPG_PROMPT;
+    }
+  }
+  render(ledger, manifest) {
+    this.currentLedger = ledger;
+    this.currentManifest = manifest;
+    this.root.innerHTML = "";
+    this.root.style.cssText = "display: flex; flex-direction: column; gap: 14px; height: 100%; color: #f1f5f9; font-family: system-ui, -apple-system, sans-serif; overflow-y: auto; padding-right: 4px;";
+    const actors = ledger.actors || {};
+    const actorKeys = Object.keys(actors);
+    if (!actorKeys.includes(this.selectedActorId) && actorKeys.length > 0) {
+      this.selectedActorId = actorKeys.includes("user") ? "user" : actorKeys[0];
+    }
+    const currentActor = actors[this.selectedActorId] || {};
+    const combat = currentActor.combat || {};
+    const header = document.createElement("div");
+    header.style.cssText = "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid #334155; padding-bottom: 10px;";
+    header.innerHTML = `
+      <div>
+        <h3 style="margin: 0; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 6px;">
+          <span>⚔️</span> <span>RPG Rules, Vitals & Dice Engine</span>
+        </h3>
+        <p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8;">
+          Combat matrix, skill proficiencies, interactive TTRPG dice roller, and prompt directives.
+        </p>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 11px; color: #94a3b8;">Actor:</span>
+        <select id="vn-rpg-actor-select" style="background: #1e293b; border: 1px solid #475569; color: #38bdf8; font-weight: 600; border-radius: 6px; padding: 4px 10px; font-size: 12px; outline: none; cursor: pointer;">
+          ${actorKeys.map((id) => `<option value="${id}" ${id === this.selectedActorId ? "selected" : ""}>${actors[id]?.name || id} ${id === "user" ? "(You)" : ""}</option>`).join("")}
+        </select>
+      </div>
+    `;
+    this.root.appendChild(header);
+    header.querySelector("#vn-rpg-actor-select")?.addEventListener("change", (e) => {
+      this.selectedActorId = e.target.value;
+      this.render(this.currentLedger, this.currentManifest);
+    });
+    const vitalsCard = document.createElement("div");
+    vitalsCard.style.cssText = "background: #0f172a; border: 1px solid #3b82f6; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);";
+    const hpNum = typeof combat.hp === "number" ? combat.hp : parseInt(String(combat.hp || "100"), 10) || 100;
+    const mpNum = typeof combat.mp === "number" ? combat.mp : parseInt(String(combat.mp || "50"), 10) || 50;
+    const lv = combat.lv || combat.tier || 1;
+    const tier = combat.tier || "Standard";
+    vitalsCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <strong style="color: #60a5fa; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+          <span>\uD83D\uDEE1️</span> <span>${currentActor.name || this.selectedActorId} — Vitals & Attributes</span>
+        </strong>
+        <span style="font-size: 11px; background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; color: #93c5fd; padding: 2px 8px; border-radius: 4px; font-weight: 700;">
+          Level ${lv} • Tier ${tier}
+        </span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;">
+        <!-- Health Gauge -->
+        <div style="background: #1e293b; padding: 8px 12px; border-radius: 8px; border: 1px solid #334155;">
+          <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+            <span style="color: #f87171; font-weight: 700;">❤️ Health (HP)</span>
+            <span style="color: #fca5a5; font-weight: 700;">${hpNum} / 100</span>
+          </div>
+          <div style="background: #020617; height: 8px; border-radius: 4px; overflow: hidden;">
+            <div style="width: ${Math.min(100, Math.max(0, hpNum))}%; height: 100%; background: linear-gradient(90deg, #ef4444, #f87171); transition: width 0.3s ease;"></div>
+          </div>
+        </div>
+
+        <!-- Mana / Energy Gauge -->
+        <div style="background: #1e293b; padding: 8px 12px; border-radius: 8px; border: 1px solid #334155;">
+          <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+            <span style="color: #38bdf8; font-weight: 700;">\uD83D\uDCA7 Energy / Mana (MP)</span>
+            <span style="color: #7dd3fc; font-weight: 700;">${mpNum} / 100</span>
+          </div>
+          <div style="background: #020617; height: 8px; border-radius: 4px; overflow: hidden;">
+            <div style="width: ${Math.min(100, Math.max(0, mpNum))}%; height: 100%; background: linear-gradient(90deg, #0284c7, #38bdf8); transition: width 0.3s ease;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Skills, Techniques & Proficiencies -->
+      <div style="border-top: 1px solid #1e293b; padding-top: 8px; display: flex; flex-direction: column; gap: 4px;">
+        <span style="font-size: 10px; color: #94a3b8; font-weight: 700;">SKILLS & COMBAT APTITUDES</span>
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+          ${this.renderAptitudes(currentActor)}
+        </div>
+      </div>
+    `;
+    this.root.appendChild(vitalsCard);
+    const diceCard = document.createElement("div");
+    diceCard.style.cssText = "background: #0f172a; border: 1px solid #8b5cf6; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);";
+    diceCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <strong style="color: #c084fc; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+          <span>\uD83C\uDFB2</span> <span>Tabletop RPG Dice Roller</span>
+        </strong>
+        <span style="font-size: 10px; color: #94a3b8;">D4 to D100 with Critical Success Checks</span>
+      </div>
+
+      <!-- Dice Type Selector -->
+      <div style="display: flex; gap: 6px; flex-wrap: wrap;" id="vn-dice-buttons">
+        ${[4, 6, 8, 10, 12, 20, 100].map((s) => `
+          <button class="vn-dice-btn" data-sides="${s}" style="padding: 5px 12px; font-size: 11px; font-weight: 700; border-radius: 6px; cursor: pointer; border: 1px solid ${s === this.selectedSides ? "#a855f7" : "#475569"}; background: ${s === this.selectedSides ? "#7e22ce" : "#1e293b"}; color: #fff; transition: all 0.15s ease;">
+            D${s}
+          </button>
+        `).join("")}
+      </div>
+
+      <!-- Modifier & Roll Trigger Bar -->
+      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 11px; color: #94a3b8;">Modifier:</span>
+          <input id="vn-dice-mod" type="number" value="${this.modifier}" style="width: 55px; background: #020617; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; padding: 4px 6px; font-size: 12px; text-align: center; outline: none;" />
+        </div>
+        <button id="vn-roll-dice-btn" style="flex: 1; min-width: 120px; background: linear-gradient(135deg, #8b5cf6, #ec4899); border: none; color: #fff; font-weight: 800; font-size: 12px; padding: 8px 16px; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 10px rgba(139,92,246,0.4); transition: transform 0.15s;">
+          \uD83C\uDFB2 Roll D${this.selectedSides}${this.modifier !== 0 ? this.modifier > 0 ? `+${this.modifier}` : `${this.modifier}` : ""}
+        </button>
+      </div>
+
+      <!-- Roll Result Display Area -->
+      <div id="vn-dice-result-box" style="background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 12px; min-height: 50px; display: flex; justify-content: space-between; align-items: center;">
+        ${this.renderDiceResult()}
+      </div>
+    `;
+    this.root.appendChild(diceCard);
+    diceCard.querySelectorAll(".vn-dice-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this.selectedSides = parseInt(btn.getAttribute("data-sides") || "20", 10);
+        diceCard.querySelectorAll(".vn-dice-btn").forEach((b) => {
+          const active = b === btn;
+          b.style.background = active ? "#7e22ce" : "#1e293b";
+          b.style.borderColor = active ? "#a855f7" : "#475569";
+        });
+        const rollBtn = diceCard.querySelector("#vn-roll-dice-btn");
+        if (rollBtn) {
+          rollBtn.textContent = `\uD83C\uDFB2 Roll D${this.selectedSides}${this.modifier !== 0 ? this.modifier > 0 ? `+${this.modifier}` : `${this.modifier}` : ""}`;
+        }
+      });
+    });
+    const modInput = diceCard.querySelector("#vn-dice-mod");
+    modInput?.addEventListener("input", () => {
+      this.modifier = parseInt(modInput.value, 10) || 0;
+      const rollBtn = diceCard.querySelector("#vn-roll-dice-btn");
+      if (rollBtn) {
+        rollBtn.textContent = `\uD83C\uDFB2 Roll D${this.selectedSides}${this.modifier !== 0 ? this.modifier > 0 ? `+${this.modifier}` : `${this.modifier}` : ""}`;
+      }
+    });
+    diceCard.querySelector("#vn-roll-dice-btn")?.addEventListener("click", () => {
+      this.executeDiceRoll();
+    });
+    diceCard.querySelector("#vn-inject-dice-btn")?.addEventListener("click", () => {
+      if (this.lastRoll && this.onAction) {
+        const text = `[Dice Roll: d${this.lastRoll.sides}${this.lastRoll.modifier ? this.lastRoll.modifier > 0 ? `+${this.lastRoll.modifier}` : `${this.lastRoll.modifier}` : ""} = ${this.lastRoll.total}${this.lastRoll.isNat20 ? " (Critical Success!)" : this.lastRoll.isNat1 ? " (Critical Fumble!)" : ""}]`;
+        this.onAction(text);
+      }
+    });
+    const promptCard = document.createElement("div");
+    promptCard.style.cssText = "background: #0f172a; border: 1px solid #10b981; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);";
+    promptCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <strong style="color: #34d399; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+          <span>\uD83D\uDCDC</span> <span>RPG Stat Rules & Combat Prompt Directive</span>
+        </strong>
+        <span style="font-size: 10px; background: rgba(16,185,129,0.2); border: 1px solid #10b981; color: #6ee7b7; padding: 2px 8px; border-radius: 4px; font-weight: 700;">
+          Injected in Director & Turn Evaluator
+        </span>
+      </div>
+      <p style="margin: 0; font-size: 11px; color: #94a3b8;">
+        Define rules, skills resolution, and combat directives for the simulation engine. Updates automatically persist across chats:
+      </p>
+      <textarea id="vn-rpg-prompt-input" style="width: 100%; height: 130px; background: #020617; color: #f8fafc; border: 1px solid #334155; border-radius: 6px; font-family: monospace; font-size: 11px; padding: 8px; box-sizing: border-box; resize: vertical; line-height: 1.5; outline: none;"></textarea>
+      <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 4px;">
+        <button id="vn-reset-rpg-prompt-btn" style="background: transparent; border: 1px solid #475569; color: #94a3b8; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer;">
+          Reset to Default
+        </button>
+        <button id="vn-save-rpg-prompt-btn" style="background: linear-gradient(135deg, #059669, #10b981); color: #fff; border: none; border-radius: 6px; padding: 6px 16px; font-size: 11px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 8px rgba(16,185,129,0.4);">
+          \uD83D\uDCBE Save RPG Rules
+        </button>
+      </div>
+    `;
+    this.root.appendChild(promptCard);
+    const promptInput = promptCard.querySelector("#vn-rpg-prompt-input");
+    const saveBtn = promptCard.querySelector("#vn-save-rpg-prompt-btn");
+    const resetBtn = promptCard.querySelector("#vn-reset-rpg-prompt-btn");
+    if (promptInput) {
+      promptInput.value = this.statRulesSettings?.rpgPrompt || DEFAULT_RPG_PROMPT;
+    }
+    resetBtn?.addEventListener("click", () => {
+      if (promptInput) {
+        promptInput.value = DEFAULT_RPG_PROMPT;
+      }
+    });
+    saveBtn?.addEventListener("click", () => {
+      const newPrompt = promptInput?.value || "";
+      const updated = {
+        mode: this.statRulesSettings?.mode || "mvu_quiet",
+        statRules: this.statRulesSettings?.statRules || "",
+        ledgerPrompt: this.statRulesSettings?.ledgerPrompt || "",
+        enabled: this.statRulesSettings?.enabled !== false,
+        rpgPrompt: newPrompt
+      };
+      this.statRulesSettings = updated;
+      this.ctx?.sendToBackend?.({
+        type: "vn_save_stat_rules_settings",
+        settings: updated
+      });
+      if (saveBtn) {
+        const orig = saveBtn.textContent;
+        saveBtn.textContent = "✓ Saved & Injected!";
+        setTimeout(() => {
+          saveBtn.textContent = orig;
+        }, 1500);
+      }
+    });
+  }
+  renderAptitudes(actor) {
+    const apts = [];
+    if (actor.skills && Array.isArray(actor.skills)) {
+      apts.push(...actor.skills);
+    }
+    if (actor.combat?.skills && Array.isArray(actor.combat.skills)) {
+      apts.push(...actor.combat.skills);
+    }
+    if (actor.combat?.techniques && Array.isArray(actor.combat.techniques)) {
+      apts.push(...actor.combat.techniques);
+    }
+    if (actor.combat?.mastery) {
+      apts.push(String(actor.combat.mastery));
+    }
+    if (apts.length === 0) {
+      return `<span style="font-size: 11px; color: #64748b; font-style: italic;">No specific skills recorded for this actor.</span>`;
+    }
+    return apts.map((a) => `
+      <span style="font-size: 11px; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; padding: 2px 8px; border-radius: 4px;">
+        ⚔️ ${a}
+      </span>
+    `).join("");
+  }
+  executeDiceRoll() {
+    const sides = this.selectedSides;
+    const roll = Math.floor(Math.random() * sides) + 1;
+    const total = roll + this.modifier;
+    const isNat20 = sides === 20 && roll === 20;
+    const isNat1 = sides === 20 && roll === 1;
+    this.lastRoll = {
+      dice: `D${sides}`,
+      sides,
+      roll,
+      modifier: this.modifier,
+      total,
+      isNat20,
+      isNat1,
+      timestamp: new Date().toLocaleTimeString()
+    };
+    const resultBox = this.root.querySelector("#vn-dice-result-box");
+    if (resultBox) {
+      resultBox.innerHTML = this.renderDiceResult();
+      resultBox.querySelector("#vn-inject-dice-btn")?.addEventListener("click", () => {
+        if (this.lastRoll && this.onAction) {
+          const text = `[Dice Roll: d${this.lastRoll.sides}${this.lastRoll.modifier ? this.lastRoll.modifier > 0 ? `+${this.lastRoll.modifier}` : `${this.lastRoll.modifier}` : ""} = ${this.lastRoll.total}${this.lastRoll.isNat20 ? " (Critical Success!)" : this.lastRoll.isNat1 ? " (Critical Fumble!)" : ""}]`;
+          this.onAction(text);
+        }
+      });
+    }
+  }
+  renderDiceResult() {
+    if (!this.lastRoll) {
+      return `
+        <span style="color: #64748b; font-size: 12px; font-style: italic;">No dice rolled yet. Select dice and click Roll!</span>
+        <span></span>
+      `;
+    }
+    const { sides, roll, modifier, total, isNat20, isNat1 } = this.lastRoll;
+    let badge = "";
+    if (isNat20) {
+      badge = `<span style="background: rgba(234, 179, 8, 0.2); border: 1px solid #eab308; color: #fde047; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 800;">✨ NATURAL 20!</span>`;
+    } else if (isNat1) {
+      badge = `<span style="background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #fca5a5; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 800;">\uD83D\uDC80 NATURAL 1!</span>`;
+    }
+    return `
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span style="font-size: 24px; font-weight: 900; color: ${isNat20 ? "#ffd700" : isNat1 ? "#f87171" : "#38bdf8"};">
+          ${total}
+        </span>
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <span style="font-size: 11px; color: #cbd5e1;">
+            Rolled <strong>${roll}</strong> on d${sides} ${modifier ? `${modifier > 0 ? `+ ${modifier}` : `- ${Math.abs(modifier)}`}` : ""}
+          </span>
+          <div>${badge}</div>
+        </div>
+      </div>
+      <button id="vn-inject-dice-btn" style="background: #1e293b; border: 1px solid #8b5cf6; color: #c084fc; font-weight: 700; border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer; transition: all 0.2s;">
+        ⚡ Use in Action
+      </button>
+    `;
+  }
+}
+
 // src/frontend/hud/menu-bar.ts
 class MenuBar {
   root;
@@ -10178,11 +10518,13 @@ class MenuBar {
   phoneTab;
   journalTab;
   sceneTab;
+  rpgTab;
   diagnosticsTab;
   activeTabId = null;
   currentLedger = {};
   currentManifest;
   constructor(options) {
+    const opts = typeof options === "function" ? { ctx: {}, onAction: options } : options;
     this.root = document.createElement("div");
     this.root.className = "vn-hud-menubar";
     this.panelOverlay = document.createElement("div");
@@ -10203,26 +10545,28 @@ class MenuBar {
       if (e.target === this.panelOverlay)
         this.closeTab();
     });
-    this.charactersTab = new CharactersTab(options.ttsEngine, options.ctx);
+    this.charactersTab = new CharactersTab(opts.ttsEngine, opts.ctx);
     this.bplotsTab = new BPlotsTab;
-    this.wardrobeTab = new WardrobeTab(options.onAction);
+    this.wardrobeTab = new WardrobeTab(opts.onAction);
     this.statsTab = new StatsTab;
-    this.inventoryTab = new InventoryTab(options.onAction);
-    this.mapTab = new MapTab(options.onAction);
-    this.phoneTab = new PhoneTab(options.ctx, options.onAction, options.isOverlayActive);
+    this.inventoryTab = new InventoryTab(opts.onAction);
+    this.mapTab = new MapTab(opts.onAction);
+    this.phoneTab = new PhoneTab(opts.ctx, opts.onAction, opts.isOverlayActive);
     this.journalTab = new JournalTab;
-    this.sceneTab = new SceneTab(options.ctx, options.onTransformChange);
-    this.diagnosticsTab = new DiagnosticsTab(options.ctx);
+    this.sceneTab = new SceneTab(opts.ctx, opts.onTransformChange);
+    this.rpgTab = new RpgTab(opts.ctx, opts.onAction);
+    this.diagnosticsTab = new DiagnosticsTab(opts.ctx);
     const barItems = [
       { id: "characters", icon: "\uD83D\uDC65", label: "Cast" },
-      { id: "bplots", icon: "\uD83D\uDCE1", label: "B-Plots" },
-      { id: "wardrobe", icon: "\uD83D\uDC57", label: "Wardrobe" },
       { id: "stats", icon: "\uD83D\uDCCA", label: "Stats" },
+      { id: "rpg", icon: "⚔️", label: "RPG / Dice" },
       { id: "inventory", icon: "\uD83C\uDF92", label: "Inventory" },
+      { id: "wardrobe", icon: "\uD83D\uDC57", label: "Wardrobe" },
       { id: "map", icon: "\uD83D\uDDFA️", label: "Map" },
       { id: "phone", icon: "\uD83D\uDCF1", label: "Phone" },
       { id: "journal", icon: "\uD83D\uDCDC", label: "Journal" },
       { id: "scene", icon: "\uD83C\uDFAC", label: "Scene" },
+      { id: "bplots", icon: "\uD83D\uDCE1", label: "B-Plots" },
       { id: "diagnostics", icon: "\uD83D\uDCCB", label: "Copy / Diag" }
     ];
     for (const item of barItems) {
@@ -10277,6 +10621,7 @@ class MenuBar {
   }
   setStatRulesSettings(settings) {
     this.diagnosticsTab.setStatRulesSettings(settings);
+    this.rpgTab.setStatRulesSettings(settings);
   }
   openTab(tabId) {
     if (this.activeTabId === "phone" && tabId !== "phone") {
@@ -10286,6 +10631,14 @@ class MenuBar {
       this.diagnosticsTab.destroy();
     }
     this.activeTabId = tabId;
+    this.root.querySelectorAll(".vn-hud-btn").forEach((btn) => {
+      const b = btn;
+      if (b.dataset.tabId === tabId) {
+        b.classList.add("active");
+      } else {
+        b.classList.remove("active");
+      }
+    });
     this.renderActiveTab();
     this.panelOverlay.style.display = "flex";
   }
@@ -10297,6 +10650,7 @@ class MenuBar {
       this.diagnosticsTab.destroy();
     }
     this.activeTabId = null;
+    this.root.querySelectorAll(".vn-hud-btn").forEach((b) => b.classList.remove("active"));
     this.panelOverlay.style.display = "none";
   }
   renderActiveTab() {
@@ -10306,6 +10660,14 @@ class MenuBar {
         this.charactersTab.render(this.currentLedger, this.currentManifest);
         this.panelBody.appendChild(this.charactersTab.root);
         break;
+      case "stats":
+        this.statsTab.render(this.currentLedger);
+        this.panelBody.appendChild(this.statsTab.root);
+        break;
+      case "rpg":
+        this.rpgTab.render(this.currentLedger, this.currentManifest);
+        this.panelBody.appendChild(this.rpgTab.root);
+        break;
       case "bplots":
         this.bplotsTab.render(this.currentLedger);
         this.panelBody.appendChild(this.bplotsTab.root);
@@ -10313,10 +10675,6 @@ class MenuBar {
       case "wardrobe":
         this.wardrobeTab.render(this.currentLedger);
         this.panelBody.appendChild(this.wardrobeTab.root);
-        break;
-      case "stats":
-        this.statsTab.render(this.currentLedger);
-        this.panelBody.appendChild(this.statsTab.root);
         break;
       case "inventory":
         this.inventoryTab.render(this.currentLedger);
@@ -10535,18 +10893,92 @@ class VnAudioEngine {
       }
     } catch {}
   }
-  playBgm(url) {
+  currentBgmTrack = null;
+  customBgmMap = {};
+  static DEFAULT_MOOD_BGM_MAP = {
+    happy: "daily_happy",
+    joyful: "daily_happy",
+    cheerful: "daily_happy",
+    romantic: "romantic_piano",
+    love: "romantic_piano",
+    tender: "romantic_piano",
+    warm: "warm_acoustic",
+    tense: "suspense_tension",
+    danger: "combat_intense",
+    combat: "combat_intense",
+    action: "combat_intense",
+    sad: "melancholy_strings",
+    melancholy: "melancholy_strings",
+    grief: "melancholy_strings",
+    mysterious: "mystery_ambient",
+    mystery: "mystery_ambient",
+    eerie: "mystery_ambient",
+    peaceful: "calm_ambient",
+    calm: "calm_ambient",
+    daily: "daily_ambient",
+    ambient: "daily_ambient"
+  };
+  extractBgmTag(text) {
+    if (!text)
+      return null;
+    const match = text.match(/(?:🎵\s*Music|BGM|\[Music|【Music|Play music)[：:]\s*([^\n\r\]】]+)/i);
+    return match ? match[1].trim() : null;
+  }
+  setCustomBgmMap(map) {
+    this.customBgmMap = { ...map };
+  }
+  getCustomBgmMap() {
+    return { ...this.customBgmMap };
+  }
+  getCurrentBgm() {
+    return this.currentBgmTrack;
+  }
+  setBgmVolume(volume) {
+    this.bgmVolume = Math.max(0, Math.min(1, volume));
+    if (this.bgmAudio) {
+      this.bgmAudio.volume = this.bgmVolume;
+    }
+  }
+  getBgmVolume() {
+    return this.bgmVolume;
+  }
+  handleDynamicBgm(text, mood, place, manifestBgm) {
+    const tagged = this.extractBgmTag(text);
+    if (tagged) {
+      const url = manifestBgm?.[tagged] || this.customBgmMap[tagged] || tagged;
+      this.playBgm(url, tagged);
+      return tagged;
+    }
+    if (place) {
+      const cleanPlace = place.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      if (manifestBgm?.[cleanPlace] || this.customBgmMap[cleanPlace]) {
+        const url = manifestBgm?.[cleanPlace] || this.customBgmMap[cleanPlace];
+        this.playBgm(url, cleanPlace);
+        return cleanPlace;
+      }
+    }
+    if (mood) {
+      const normMood = mood.toLowerCase().trim();
+      const mappedTrack = VnAudioEngine.DEFAULT_MOOD_BGM_MAP[normMood];
+      if (mappedTrack) {
+        const url = manifestBgm?.[mappedTrack] || this.customBgmMap[mappedTrack] || mappedTrack;
+        this.playBgm(url, mappedTrack);
+        return mappedTrack;
+      }
+    }
+    return null;
+  }
+  playBgm(url, trackName) {
     if (!url) {
       this.stopBgm();
       return;
     }
-    if (this.bgmAudio && this.bgmAudio.src.includes(url)) {
-      if (this.bgmAudio.paused && !this.isMuted) {
-        this.bgmAudio.play().catch(() => {});
-      }
+    const trackId = trackName || url;
+    if (this.currentBgmTrack === trackId && this.bgmAudio && !this.bgmAudio.paused) {
       return;
     }
     this.stopBgm();
+    this.currentBgmTrack = trackId;
     try {
       this.bgmAudio = new Audio(url);
       this.bgmAudio.loop = true;
@@ -10563,6 +10995,7 @@ class VnAudioEngine {
       } catch {}
       this.bgmAudio = null;
     }
+    this.currentBgmTrack = null;
   }
   destroy() {
     this.stopBgm();
@@ -11186,6 +11619,8 @@ class StageOverlay {
     if (!this.active)
       return;
     this.active = false;
+    this.audioEngine.stopBgm();
+    this.ttsEngine.stop();
     const targetChatId = this.resolveChatId();
     this.ctx.sendToBackend({
       type: "vn_stage_closed",
@@ -11213,6 +11648,13 @@ class StageOverlay {
     this.stageRenderer.setCharacters(state.characters);
     const place = state.ledger?.scene?.place || "";
     this.stageRenderer.setWeather(place);
+    if (state.bgmUrl) {
+      this.audioEngine.playBgm(state.bgmUrl);
+    } else {
+      const fullText = (state.paragraphs || []).join(" ");
+      const primaryEmotion = state.characters?.[0]?.emotion;
+      this.audioEngine.handleDynamicBgm(fullText, primaryEmotion, place, this.manifest?.places);
+    }
     const actorNames = state.characters.map((c) => c.name);
     if (state.ledger?.actors) {
       for (const [id, dossier] of Object.entries(state.ledger.actors)) {
@@ -11457,9 +11899,20 @@ class StageOverlay {
         padding-bottom: 90px;
         pointer-events: none;
       }
+      @keyframes vn-char-slide-in {
+        from {
+          opacity: 0;
+          transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) + 20px)) scale(calc(var(--char-scale, 1) * 0.96));
+        }
+        to {
+          opacity: 1;
+          transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1));
+        }
+      }
+
       .vn-char-slot {
         height: 85%;
-        max-width: 32%;
+        max-width: 25%;
         position: relative;
         display: flex;
         justify-content: center;
@@ -11467,6 +11920,38 @@ class StageOverlay {
         transform: translate(var(--char-offset-x, 0px), var(--char-offset-y, 0px)) scale(var(--char-scale, 1));
         transform-origin: bottom center;
         transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), filter 0.35s ease, opacity 0.35s ease;
+        animation: vn-char-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+        animation-delay: var(--enter-delay, 0s);
+        pointer-events: auto;
+        cursor: pointer;
+      }
+      .vn-char-slot:hover {
+        transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 6px)) scale(calc(var(--char-scale, 1) * 1.02));
+        z-index: 6;
+      }
+      .vn-char-slot:hover .vn-char-tag {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+      .vn-char-tag {
+        position: absolute;
+        bottom: 12px;
+        left: 50%;
+        transform: translateX(-50%) translateY(6px);
+        background: rgba(15, 23, 42, 0.88);
+        border: 1px solid rgba(129, 140, 248, 0.4);
+        color: #f8fafc;
+        padding: 3px 10px;
+        border-radius: 9999px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        backdrop-filter: blur(8px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
       }
       .vn-char-speaker {
         transform: translate(var(--char-offset-x, 0px), calc(var(--char-offset-y, 0px) - 6px)) scale(calc(var(--char-scale, 1) * 1.04));
@@ -11480,9 +11965,11 @@ class StageOverlay {
         filter: drop-shadow(0 8px 16px rgba(0,0,0,0.7)) brightness(0.88) saturate(0.92);
         opacity: 1;
       }
-      .vn-char-left { order: 1; }
-      .vn-char-center { order: 2; }
-      .vn-char-right { order: 3; }
+      .vn-char-far-left { order: 1; }
+      .vn-char-left { order: 2; }
+      .vn-char-center { order: 3; }
+      .vn-char-right { order: 4; }
+      .vn-char-far-right { order: 5; }
 
       .vn-char-sprite {
         height: 100%;
@@ -11714,34 +12201,47 @@ class StageOverlay {
         white-space: nowrap;
       }
 
-      /* HUD Menu Bar */
+      /* HUD Menu Bar - Vertical Navigation Rail on Left */
       .vn-hud-menubar {
         position: fixed;
-        top: 16px;
-        right: 16px;
+        top: 68px;
+        left: 16px;
         z-index: 9999;
         display: flex;
-        gap: 8px;
+        flex-direction: column;
+        gap: 6px;
+        max-height: calc(100vh - 90px);
+        overflow-y: auto;
+        scrollbar-width: none;
       }
+      .vn-hud-menubar::-webkit-scrollbar { display: none; }
       .vn-hud-btn {
         background: rgba(15, 23, 42, 0.85);
         border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 8px;
-        padding: 8px 14px;
+        padding: 7px 12px;
         color: #f8fafc;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 600;
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 7px;
         cursor: pointer;
         backdrop-filter: blur(8px);
         position: relative;
         transition: all 0.2s ease;
+        white-space: nowrap;
       }
       .vn-hud-btn:hover {
         background: rgba(30, 41, 59, 0.95);
         border-color: #818cf8;
+        color: #fff;
+      }
+      .vn-hud-btn.active {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.35), rgba(139, 92, 246, 0.25));
+        border-color: #a5b4fc;
+        color: #fff;
+        box-shadow: 0 0 10px rgba(99, 102, 241, 0.35);
       }
       .vn-hud-badge {
         position: absolute;
@@ -11783,14 +12283,30 @@ class StageOverlay {
         background: rgba(15, 23, 42, 0.9);
         border: 1px solid rgba(255, 255, 255, 0.16);
         border-radius: 20px;
-        width: min(780px, 94%);
-        max-height: 84vh;
+        width: min(840px, calc(94vw - 110px));
+        margin-left: 110px;
+        max-height: 86vh;
         display: flex;
         flex-direction: column;
         overflow: hidden;
         position: relative;
         backdrop-filter: blur(24px);
         box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85), 0 0 1px rgba(255, 255, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+      }
+      @media (max-width: 768px) {
+        .vn-hud-menubar {
+          top: auto;
+          bottom: 16px;
+          left: 16px;
+          right: 16px;
+          flex-direction: row;
+          max-height: none;
+          overflow-x: auto;
+        }
+        .vn-hud-modal {
+          margin-left: 0;
+          width: 96%;
+        }
       }
       .vn-hud-close-btn {
         position: absolute;
