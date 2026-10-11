@@ -2351,6 +2351,18 @@ class CharactersTab {
         }
       }
     }
+    if (manifest?.characters && typeof manifest.characters === "object") {
+      for (const charKey of Object.keys(manifest.characters)) {
+        if (charKey && !actors[charKey]) {
+          actors[charKey] = {
+            id: charKey,
+            name: charKey,
+            life_model: { occupation: "Cast Member" },
+            agency: { want_now: "Asset registered" }
+          };
+        }
+      }
+    }
     const allKeys = Object.keys(actors);
     if (allKeys.length === 0) {
       this.root.innerHTML = `<div class="vn-muted" style="text-align:center; padding: 32px;">No characters recorded in the ledger yet.</div>`;
@@ -14365,6 +14377,10 @@ class StageOverlay {
         type: "vn_get_state",
         chatId: resolved
       });
+      this.ctx.sendToBackend({
+        type: "vn_get_manifest",
+        chatId: resolved
+      });
     }
   }
   activate() {
@@ -14398,6 +14414,10 @@ class StageOverlay {
     });
     this.ctx.sendToBackend({
       type: "vn_get_state",
+      chatId: targetChatId || ""
+    });
+    this.ctx.sendToBackend({
+      type: "vn_get_manifest",
       chatId: targetChatId || ""
     });
   }

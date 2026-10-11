@@ -195,6 +195,10 @@ export class StageOverlay {
         type: "vn_get_state",
         chatId: resolved,
       });
+      this.ctx.sendToBackend({
+        type: "vn_get_manifest",
+        chatId: resolved,
+      });
     }
   }
 
@@ -242,6 +246,11 @@ export class StageOverlay {
 
     this.ctx.sendToBackend({
       type: "vn_get_state",
+      chatId: targetChatId || "",
+    });
+
+    this.ctx.sendToBackend({
+      type: "vn_get_manifest",
       chatId: targetChatId || "",
     });
   }
