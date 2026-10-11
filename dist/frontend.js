@@ -1401,6 +1401,7 @@ class DialogueBox {
   knownActors = [];
   isUserTurn = false;
   lastUserText = "";
+  lastRawText = "";
   constructor(options) {
     this.onAction = options.onAction;
     this.onParagraphChange = options.onParagraphChange;
@@ -1699,6 +1700,12 @@ class DialogueBox {
     });
   }
   setContent(speakerName, paragraphs, messageId = "") {
+    const rawText = paragraphs.join(`
+`);
+    if (messageId && messageId === this.currentMessageId && this.lastRawText === rawText && this.beats.length > 0) {
+      return;
+    }
+    this.lastRawText = rawText;
     if (this.typeTimer)
       clearTimeout(this.typeTimer);
     if (this.autoTimer)
@@ -2362,6 +2369,14 @@ class CharactersTab {
           };
         }
       }
+    }
+    if (!actors["narrator"]) {
+      actors["narrator"] = {
+        id: "narrator",
+        name: "Narrator",
+        life_model: { occupation: "Storyteller & World Voice" },
+        agency: { want_now: "Narrate scene events" }
+      };
     }
     const allKeys = Object.keys(actors);
     if (allKeys.length === 0) {
@@ -13808,6 +13823,7 @@ function characterVoiceKey(chatId, name) {
 class VnTtsEngine {
   currentAudio = null;
   currentUtterance = null;
+  playSessionId = 0;
   settings = { ...DEFAULT_VOICE_SETTINGS };
   activeChatId = "";
   cachedDefaultConnection = null;
@@ -13890,6 +13906,7 @@ class VnTtsEngine {
     return this.settings.enabled;
   }
   stop() {
+    this.playSessionId++;
     if (this.currentAudio) {
       try {
         this.currentAudio.pause();
@@ -14043,6 +14060,7 @@ class VnTtsEngine {
       return;
     }
     this.stop();
+    const sessionId = this.playSessionId;
     const cb = typeof callbacks === "function" ? { onEnd: callbacks } : callbacks || {};
     const cleanText = this.cleanDialogueText(text);
     if (!cleanText) {
@@ -14054,6 +14072,8 @@ class VnTtsEngine {
     if (!cached && this.pendingFetches.has(cacheKey)) {
       cached = await this.pendingFetches.get(cacheKey) || undefined;
     }
+    if (sessionId !== this.playSessionId)
+      return;
     if (cached && typeof Audio !== "undefined") {
       const audio = new Audio(cached.url);
       this.currentAudio = audio;
@@ -14074,6 +14094,8 @@ class VnTtsEngine {
         return;
       } catch {}
     }
+    if (sessionId !== this.playSessionId)
+      return;
     let voiceRef = this.resolveVoice(speakerName);
     if (!voiceRef?.connectionId) {
       const defaultConn = await this.resolveDefaultConnection();
@@ -14085,6 +14107,8 @@ class VnTtsEngine {
         };
       }
     }
+    if (sessionId !== this.playSessionId)
+      return;
     if (voiceRef?.connectionId) {
       try {
         const payload = {
@@ -14102,8 +14126,12 @@ class VnTtsEngine {
           credentials: "include",
           body: JSON.stringify(payload)
         });
+        if (sessionId !== this.playSessionId)
+          return;
         if (resp.ok) {
           const blob = await resp.blob();
+          if (sessionId !== this.playSessionId)
+            return;
           if (typeof Audio !== "undefined" && typeof URL !== "undefined") {
             const url = URL.createObjectURL(blob);
             this.audioCache.set(cacheKey, { blob, url });

@@ -54,6 +54,7 @@ export function characterVoiceKey(chatId: string, name: string): string {
 export class VnTtsEngine {
   private currentAudio: HTMLAudioElement | null = null;
   private currentUtterance: SpeechSynthesisUtterance | null = null;
+  private playSessionId = 0;
   private settings: VnVoiceSettings = { ...DEFAULT_VOICE_SETTINGS };
   private activeChatId = "";
   private cachedDefaultConnection: SafeTtsProfile | null = null;
@@ -146,6 +147,7 @@ export class VnTtsEngine {
   }
 
   public stop(): void {
+    this.playSessionId++;
     if (this.currentAudio) {
       try {
         this.currentAudio.pause();
@@ -335,6 +337,7 @@ export class VnTtsEngine {
       return;
     }
     this.stop();
+    const sessionId = this.playSessionId;
 
     const cb: SpeakCallbacks =
       typeof callbacks === "function" ? { onEnd: callbacks } : callbacks || {};
@@ -350,6 +353,7 @@ export class VnTtsEngine {
     if (!cached && this.pendingFetches.has(cacheKey)) {
       cached = (await this.pendingFetches.get(cacheKey)) || undefined;
     }
+    if (sessionId !== this.playSessionId) return;
 
     // Fast-path: audio is already cached in memory!
     if (cached && typeof Audio !== "undefined") {
@@ -378,6 +382,7 @@ export class VnTtsEngine {
         // Autoplay policy or error, fall through
       }
     }
+    if (sessionId !== this.playSessionId) return;
 
     let voiceRef = this.resolveVoice(speakerName);
 
@@ -392,6 +397,7 @@ export class VnTtsEngine {
         };
       }
     }
+    if (sessionId !== this.playSessionId) return;
 
     // 1. Try Lumiverse Server Synthesize Path
     if (voiceRef?.connectionId) {
@@ -411,8 +417,11 @@ export class VnTtsEngine {
           body: JSON.stringify(payload),
         });
 
+        if (sessionId !== this.playSessionId) return;
+
         if (resp.ok) {
           const blob = await resp.blob();
+          if (sessionId !== this.playSessionId) return;
           if (typeof Audio !== "undefined" && typeof URL !== "undefined") {
             const url = URL.createObjectURL(blob);
             this.audioCache.set(cacheKey, { blob, url });

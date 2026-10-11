@@ -54,6 +54,7 @@ export class DialogueBox {
   private knownActors: string[] = [];
   private isUserTurn = false;
   private lastUserText = "";
+  private lastRawText = "";
 
   constructor(options: DialogueBoxOptions) {
     this.onAction = options.onAction;
@@ -407,6 +408,12 @@ export class DialogueBox {
   }
 
   public setContent(speakerName: string, paragraphs: string[], messageId = ""): void {
+    const rawText = paragraphs.join("\n");
+    if (messageId && messageId === this.currentMessageId && this.lastRawText === rawText && this.beats.length > 0) {
+      return;
+    }
+    this.lastRawText = rawText;
+
     if (this.typeTimer) clearTimeout(this.typeTimer);
     if (this.autoTimer) clearTimeout(this.autoTimer);
     if (this.skipTimer) clearTimeout(this.skipTimer);

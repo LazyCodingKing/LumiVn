@@ -243,6 +243,16 @@ export class CharactersTab {
       }
     }
 
+    // Supplement Narrator entry for stage/narration TTS configuration
+    if (!actors["narrator"]) {
+      actors["narrator"] = {
+        id: "narrator",
+        name: "Narrator",
+        life_model: { occupation: "Storyteller & World Voice" },
+        agency: { want_now: "Narrate scene events" },
+      };
+    }
+
     const allKeys = Object.keys(actors);
     if (allKeys.length === 0) {
       this.root.innerHTML = `<div class="vn-muted" style="text-align:center; padding: 32px;">No characters recorded in the ledger yet.</div>`;
